@@ -1,6 +1,6 @@
 id,text,expected_place_types,expected_behavior,group
 T01,약 사기,약국,places,정상
-T02,엄마 생신 선물,꽃집|케이크 전문점,places,정상
-T03,과제 출력,복사·인쇄,places,정상
-T04,그거 사야 됨,,clarify,모호
-T05,주식 사기,,empty,장소 불필요
+T02,엄마 생신 선물,꽃집|케이크집,places,정상
+T03,과제 출력,프린트,places,정상
+T04,그거 사야 됨,,confirm,모호
+T05,엄마한테 전화하기,,empty,장소 불필요
