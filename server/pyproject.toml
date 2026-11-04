@@ -1,0 +1,24 @@
+[project]
+name = "teumgil-server"
+version = "0.1.0"
+description = "틈길 FastAPI 서버"
+requires-python = "==3.12.*"
+dependencies = [
+    "fastapi==0.118.3",
+    "uvicorn[standard]",
+    "httpx",
+    "openai",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
