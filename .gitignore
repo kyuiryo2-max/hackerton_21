@@ -1,0 +1,39 @@
+# 비밀 키 — 절대 커밋하지 않기
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# SQLite DB 파일 (시연 데이터는 서버 시작 시 자동으로 다시 넣음)
+*.db
+*.sqlite
+*.sqlite3
+
+# Flutter / Dart
+app/.dart_tool/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/**/Generated*
+app/android/.gradle/
+app/android/local.properties
+app/ios/Pods/
+app/ios/Flutter/Generated.xcconfig
+
+# 에디터·OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# 개인정보가 담긴 원본 자료
+docs/research/raw/
