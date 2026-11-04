@@ -1,0 +1,21 @@
+name: server-tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/server-tests.yml"]
+  pull_request:
+    paths: ["server/**", ".github/workflows/server-tests.yml"]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv python install
+      - run: uv sync --locked
+      - run: uv run pytest tests/unit -q
