@@ -6,7 +6,7 @@
 실행:
   cd server
   uv run python ../scripts/api_smoke.py
-  uv run python ../scripts/api_smoke.py --start 127.0293,37.5863 --end 127.0469,37.5803 --station 안암
+  uv run python ../scripts/api_smoke.py --start 127.0293,37.5863 --end 127.0469,37.5803 --station "안암(고대병원앞)"
   (--start, --end 는 "경도,위도")
 """
 import argparse
@@ -217,6 +217,8 @@ def seoul_subway_test(client: httpx.Client, station: str) -> None:
             report("seoul_subway", "성공", f"도착 정보 {len(items)}건")
         elif str(data.get("code", "")).startswith("INFO-1"):
             report("seoul_subway", "실패", str(data.get("message", "인증 오류")))
+        elif data.get("code") == "INFO-200":
+            report("seoul_subway", "확인 필요", f"역명 '{station}' 데이터 없음")
         else:
             report("seoul_subway", "확인 필요", "도착 정보 0건")
 
@@ -225,7 +227,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="외부 API 첫 호출 확인")
     parser.add_argument("--start", default="127.0293,37.5863", help="출발 경도,위도 (기본: 안암역 부근)")
     parser.add_argument("--end", default="127.0469,37.5803", help="도착 경도,위도 (기본: 청량리역 부근)")
-    parser.add_argument("--station", default="안암", help="지하철 실시간 조회 역명")
+    parser.add_argument("--station", default="안암(고대병원앞)", help="지하철 실시간 조회 역명")
     args = parser.parse_args()
 
     # Windows 콘솔에서 표시할 수 없는 문자가 있어도 멈추지 않게 해요
