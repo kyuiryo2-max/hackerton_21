@@ -55,6 +55,9 @@ def save(name: str, res: httpx.Response) -> None:
 
 
 def report(name: str, status: str, note: str = "") -> None:
+    # call()에서 이미 기록한 항목을 또 쓰지 않아요
+    if any(done == name for done, _, _ in results):
+        return
     results.append((name, status, scrub(note)))
 
 
@@ -67,7 +70,7 @@ def call(name: str, client: httpx.Client, url: str, **kwargs) -> dict | None:
         return None
     save(name, res)
     if res.status_code != 200:
-        report(name, "실패", f"HTTP {res.status_code}")
+        report(name, "실패", f"HTTP {res.status_code} {' '.join(res.text.split())[:120]}")
         return None
     try:
         return res.json()
@@ -210,7 +213,12 @@ def seoul_subway_test(client: httpx.Client, station: str) -> None:
     data = call("seoul_subway", client, url)
     if data:
         items = data.get("realtimeArrivalList") or []
-        report("seoul_subway", "성공" if items else "확인 필요", f"도착 정보 {len(items)}건")
+        if items:
+            report("seoul_subway", "성공", f"도착 정보 {len(items)}건")
+        elif str(data.get("code", "")).startswith("INFO-1"):
+            report("seoul_subway", "실패", str(data.get("message", "인증 오류")))
+        else:
+            report("seoul_subway", "확인 필요", "도착 정보 0건")
 
 
 def main() -> int:
