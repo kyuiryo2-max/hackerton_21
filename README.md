@@ -81,6 +81,7 @@ server/                 FastAPI 서버
     services/
       timecalc.py       출발·준비 시각, 최대로 쓸 수 있는 시간 (외부 호출 없는 계산)
       llm.py            OpenRouter 호출, 장소 목록 검사, 답변 숫자 대조
+      kakao.py          주소, 장소, 대중교통·도보 경로 (같은 구간은 메모리에 잠시 저장)
     prompts/v1/         프롬프트 버전 (v1, v2 …)
     db/database.py      SQLite 테이블, 시연용 데이터 자동 입력
   tests/                계산·검사 테스트 (LLM 호출 없음, CI에서 실행)
