@@ -8,6 +8,7 @@ from app.services.timecalc import (
     pick_vehicle,
     plan_by_vehicle,
     plan_departure,
+    route_total_seconds,
     travel_minutes_from_seconds,
     wait_minutes_from_seconds,
 )
@@ -130,3 +131,12 @@ def test_이동_시간만_빼면_버스가_없는_시각이_나오는_경우():
 def test_음수_도보_시간은_오류():
     with pytest.raises(ValueError):
         plan_by_vehicle(at(9, 0), [at(8, 10)], 40, -1, 30)
+
+
+def test_경로_총_시간():
+    assert route_total_seconds(797, 118, 119, 300) == 1334
+
+
+def test_경로_시간이_음수면_오류():
+    with pytest.raises(ValueError):
+        route_total_seconds(797, -1, 119, 300)
