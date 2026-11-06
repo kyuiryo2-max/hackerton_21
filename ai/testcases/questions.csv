@@ -4,8 +4,23 @@ Q02,아 우유 사야 돼,stopover_check,place_types=편의점|마트,들르기
 Q03,10분 늦을 것 같아,running_late,delay_minutes=10,늦어짐
 Q04,다음 버스 언제야?,next_vehicle,,다음 교통편
 Q05,몇 분까지 나가면 돼?,time_left,,남은 시간
-Q06,약은 안 사도 돼,change_todo,action=delete,할 일 변경
+Q06,약은 안 사도 돼,change_todo,action=delete;todo_text=약,할 일 변경
 Q07,근처 약국 어디야?,place_info,place_types=약국,장소 정보
 Q08,환승 적은 걸로,change_route,preference=transfer,경로 변경
 Q09,점심 뭐 먹지?,unsupported,,범위 밖
 Q10,늦을 것 같은데 약국은 들를 수 있어?,running_late|stopover_check,place_types=약국,복합
+Q11,정류장 옆 다이소 잠깐 가도 될까,stopover_check,place_types=다이소,들르기
+Q12,15분 정도 밀릴 듯,running_late,delay_minutes=15,늦어짐
+Q13,버스 하나 놓쳤어,running_late,,늦어짐
+Q14,지하철 몇 분 남았어?,next_vehicle,,다음 교통편
+Q15,273번 아직 멀었어?,next_vehicle,,다음 교통편
+Q16,나 지금 바로 나가야 돼?,time_left,,남은 시간
+Q17,준비 얼마나 더 해도 돼?,time_left,,남은 시간
+Q18,선물이 더 급해,change_todo,action=raise;todo_text=선물,할 일 변경
+Q19,출력은 학교 가서 할게,change_todo,action=delete;todo_text=과제 출력,할 일 변경
+Q20,여기서 제일 가까운 ATM,place_info,place_types=은행·ATM,장소 정보
+Q21,돈 덜 드는 쪽으로 가자,change_route,preference=fare,경로 변경
+Q22,오늘 비 와?,unsupported,,범위 밖
+Q23,그 약국 몇 시에 닫아?,unsupported,,범위 밖
+Q24,5분 늦게 나가는데 다음 버스 언제야?,running_late|next_vehicle,delay_minutes=5,복합
+Q25,약 안 사도 되니까 편의점만 들를게,change_todo|stopover_check,action=delete;todo_text=약;place_types=편의점,복합
