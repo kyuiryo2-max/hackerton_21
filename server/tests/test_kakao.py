@@ -1,8 +1,12 @@
+import json
+from pathlib import Path
+
 import httpx
 import pytest
 
 from app import config
 from app.services import kakao
+from app.services.timecalc import route_total_seconds
 
 START = (127.02934, 37.58631)
 END = (127.04691, 37.58029)
@@ -106,10 +110,22 @@ def test_장소_검색은_키워드나_카테고리_중_하나만():
 
 def test_대중교통_응답_정리():
     routes = kakao.parse_transit(TRANSIT)
-    assert routes[0]["total_seconds"] == 1035
+    assert routes[0]["moving_seconds"] == 797
+    assert routes[0]["kakao_total_seconds"] == 1035
     assert routes[0]["legs"][0]["stops"][0] == "안암역3번출구"
     assert routes[0]["legs"][0]["vehicles"] == ["2115"]
     assert routes[0]["legs"][0]["start"] == (127.03045087, 37.58624821)
+    assert routes[0]["legs"][0]["end"] == (127.03045087, 37.58624821)
+
+
+def test_실제_응답의_총_시간은_구간_합과_앞뒤_도보로_계산():
+    sample = Path(__file__).resolve().parents[2] / "data" / "samples" / "kakao_transit.json"
+    route = kakao.parse_transit(json.loads(sample.read_text(encoding="utf-8")))[0]
+    # 2115번 버스 구간 797초, 처음 도보 118초, 마지막 도보 119초 (실제 도보 API 값)
+    assert route["moving_seconds"] == 797
+    assert route_total_seconds(route["moving_seconds"], 118, 119, 0) == 1034
+    # 실시간 대기 5분을 더하면 카카오 totalTime보다 길어요
+    assert route_total_seconds(route["moving_seconds"], 118, 119, 300) > route["kakao_total_seconds"]
 
 
 def test_요금은_두_가지_형식을_처리():
@@ -175,6 +191,36 @@ def test_도보_경로가_없으면_None(api):
     _, responses = api
     responses["/v2/routing/walk"] = reply({"status": "TOO_FAR_AWAY"})
     assert kakao.walk_seconds(START, END) is None
+
+
+def test_출발과_도착이_같으면_호출_없이_0(api):
+    calls, _ = api
+    assert kakao.walk_seconds(START, START) == 0
+    assert calls == []
+
+
+def test_왕복_도보는_성공하면_재시도하지_않음(api):
+    calls, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    assert kakao.walk_seconds(START, START, via=[END]) == 2208
+    assert len(calls) == 1
+
+
+def test_왕복_도보가_실패하면_도착을_옮겨_재시도(api):
+    calls, responses = api
+    answers = [{"status": "SAME_POINT"}, WALK]
+    responses["/v2/routing/walk"] = lambda _: httpx.Response(200, json=answers.pop(0))
+    assert kakao.walk_seconds(START, START, via=[END]) == 2208
+    assert len(calls) == 2
+    assert calls[0].url.params["end_x"] != calls[1].url.params["end_x"]
+    assert calls[0].url.params["end_y"] == calls[1].url.params["end_y"]
+
+
+def test_왕복_재시도도_실패하면_None(api):
+    calls, responses = api
+    responses["/v2/routing/walk"] = reply({"status": "ROUTE_RESULT_NOT_FOUND"})
+    assert kakao.walk_seconds(START, START, via=[END]) is None
+    assert len(calls) == 2
 
 
 def test_경유지는_쉼표로_전달(api):

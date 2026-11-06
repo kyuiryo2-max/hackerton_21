@@ -33,6 +33,19 @@ def wait_minutes_from_seconds(seconds: int) -> int:
     return seconds // 60
 
 
+def route_total_seconds(
+    moving_seconds: int,
+    first_walk_seconds: int,
+    last_walk_seconds: int,
+    wait_seconds: int,
+) -> int:
+    """경로 총 시간(초) = 구간 시간 합 + 처음·마지막 도보 + 실시간 대기"""
+    parts = (moving_seconds, first_walk_seconds, last_walk_seconds, wait_seconds)
+    if min(parts) < 0:
+        raise ValueError("시간은 음수일 수 없어요")
+    return sum(parts)
+
+
 def estimate_vehicle_times(
     first_at: datetime,
     last_at: datetime,

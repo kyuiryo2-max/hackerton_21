@@ -16,6 +16,7 @@ TRANSIT_TTL_SECONDS = 60 * 60       # 대중교통 경로: 1시간
 WALK_TTL_SECONDS = 24 * 60 * 60     # 도보 경로: 하루
 MAX_CACHE_SIZE = 1000
 COORD_DIGITS = 4                    # 약 10m 단위로 같은 구간 판단
+SAME_POINT_SHIFT = 0.0001           # 왕복 도보 재시도 때 도착 지점을 옮기는 값 (약 10m)
 
 Coord = tuple[float, float]         # (경도 x, 위도 y)
 
@@ -129,7 +130,8 @@ def _parse_leg(step: dict) -> dict:
         "guidance": prop.get("guidance", ""),
         "stops": [s.get("name", "") for s in prop.get("stops", [])],
         "vehicles": [v.get("name", "") for v in prop.get("vehicles", [])],
-        "start": tuple(points[0]) if points else None,  # 탑승 구간 시작 좌표
+        "start": tuple(points[0]) if points else None,  # 구간 시작 좌표
+        "end": tuple(points[-1]) if points else None,   # 구간 끝 좌표
     }
 
 
@@ -138,18 +140,23 @@ def parse_transit(data: dict) -> list[dict]:
 
     legs에는 환승 도보만 있고 처음·마지막 도보가 없어요.
     집에서 정류장까지는 walk_seconds로 따로 구해야 해요.
+
+    총 시간은 카카오 totalTime을 쓰지 않고 timecalc.route_total_seconds로 계산해요.
+    totalTime은 실시간 대기를 반영하지 않아서 비교용으로만 남겨요.
     """
     routes = []
     for route in data.get("routes", []):
         prop = route.get("properties", {})
         fare_min, fare_max = _parse_fare(prop.get("fare") or {})
+        legs = [_parse_leg(step) for step in route.get("steps", [])]
         routes.append({
             "type": prop.get("type"),
-            "total_seconds": prop.get("totalTime"),
+            "moving_seconds": sum(leg["seconds"] for leg in legs),  # 구간 시간 합
+            "kakao_total_seconds": prop.get("totalTime"),
             "transfers": prop.get("transfers"),
             "fare_min": fare_min,
             "fare_max": fare_max,
-            "legs": [_parse_leg(step) for step in route.get("steps", [])],
+            "legs": legs,
         })
     return routes
 
@@ -174,11 +181,17 @@ def transit_routes(start: Coord, end: Coord) -> list[dict]:
 
 
 def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None) -> int | None:
-    """도보 시간(초). via는 경유지 최대 5개. 경로를 찾지 못하면 None."""
+    """도보 시간(초). via는 경유지 최대 5개. 경로를 찾지 못하면 None.
+
+    출발과 도착이 같고 경유지가 없으면 호출 없이 0이에요.
+    경유지 왕복이 실패하면 도착 지점을 약 10m 옮겨 한 번 더 시도해요.
+    """
     via = [_rounded(c) for c in via or []]
     if len(via) > 5:
         raise ValueError("경유지는 최대 5개예요")
     start, end = _rounded(start), _rounded(end)
+    if start == end and not via:
+        return 0
     key = ("walk", start, end, tuple(via))
     cached = _cache_get(key)
     if cached is not None:
@@ -191,6 +204,9 @@ def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None) -> in
         params["via_x"] = ",".join(str(c[0]) for c in via)
         params["via_y"] = ",".join(str(c[1]) for c in via)
     data = _get("/v2/routing/walk", params)
+    if data.get("status") != "OK" and start == end:
+        params["end_x"] = round(end[0] + SAME_POINT_SHIFT, COORD_DIGITS)
+        data = _get("/v2/routing/walk", params)
     if data.get("status") != "OK":
         return None
     seconds = data["route"]["properties"]["totalTime"]
