@@ -1,22 +1,39 @@
+enum RouteSegmentType { walking, bus, subway, waiting }
 
-enum RouteSegmentType {
-  walking,
-  bus,
-  subway,
-  waiting,
+// 지도에 표시할 좌표
+class RoutePoint {
+  final double latitude;
+  final double longitude;
+
+  const RoutePoint({required this.latitude, required this.longitude});
+
+  factory RoutePoint.fromJson(Map<String, dynamic> json) {
+    return RoutePoint(
+      latitude: (json['latitude'] as num).toDouble(),
+      longitude: (json['longitude'] as num).toDouble(),
+    );
+  }
 }
 
+// 이동 구간
 class RouteSegment {
   final RouteSegmentType type;
   final String description;
   final int durationMinutes;
 
+  // 실제 지도 경로 좌표 (선택적)
+  final List<RoutePoint> geometry;
+
   const RouteSegment({
     required this.type,
     required this.description,
     required this.durationMinutes,
+    this.geometry = const [],
   });
 }
+
+// 전체 경로 후보
+
 
 class RouteCandidate {
   final String id;
@@ -25,30 +42,44 @@ class RouteCandidate {
   final int transferCount;
   final bool isRecommended;
 
+  // 추가: 실제 API에서 제공하는 총 이동시간
+  final int? totalDurationMinutes;
+
+  // 생성자
   const RouteCandidate({
     required this.id,
     required this.title,
     required this.segments,
     required this.transferCount,
     this.isRecommended = false,
+
+    // 추가
+    this.totalDurationMinutes,
   });
 
-  int get totalMinutes => segments.fold(
+  // 총 이동시간
+  int get totalMinutes =>
+      totalDurationMinutes ??
+      segments.fold(
         0,
         (sum, segment) => sum + segment.durationMinutes,
       );
 
+  // 도보 이동시간
   int get walkingMinutes => segments
-      .where((segment) =>
-          segment.type == RouteSegmentType.walking)
+      .where(
+        (segment) => segment.type == RouteSegmentType.walking,
+      )
       .fold(
         0,
         (sum, segment) => sum + segment.durationMinutes,
       );
 
+  // 대기시간
   int get waitingMinutes => segments
-      .where((segment) =>
-          segment.type == RouteSegmentType.waiting)
+      .where(
+        (segment) => segment.type == RouteSegmentType.waiting,
+      )
       .fold(
         0,
         (sum, segment) => sum + segment.durationMinutes,

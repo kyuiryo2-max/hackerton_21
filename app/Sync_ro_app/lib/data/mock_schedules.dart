@@ -1,4 +1,3 @@
-
 import '../models/schedule.dart';
 
 final List<Schedule> mockSchedules = [

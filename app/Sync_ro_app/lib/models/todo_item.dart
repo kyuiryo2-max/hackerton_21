@@ -1,5 +1,3 @@
-
-
 class TodoItem {
   final int id;
   final String title;
@@ -24,27 +22,25 @@ class TodoItem {
     return TodoItem(
       id: id,
       title: title ?? this.title,
-      estimatedMinutes:
-          estimatedMinutes ?? this.estimatedMinutes,
+      estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       requiresTravel: requiresTravel ?? this.requiresTravel,
       isCompleted: isCompleted ?? this.isCompleted,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'estimated_minutes': estimatedMinutes,
-        'requires_travel': requiresTravel,
-        'is_completed': isCompleted,
-      };
+    'id': id,
+    'title': title,
+    'estimated_minutes': estimatedMinutes,
+    'requires_travel': requiresTravel,
+    'is_completed': isCompleted,
+  };
 
   factory TodoItem.fromJson(Map<String, dynamic> json) {
     return TodoItem(
       id: (json['id'] as num).toInt(),
       title: json['title'] as String,
-      estimatedMinutes:
-          (json['estimated_minutes'] as num).toInt(),
+      estimatedMinutes: (json['estimated_minutes'] as num).toInt(),
       requiresTravel: json['requires_travel'] as bool? ?? false,
       isCompleted: json['is_completed'] as bool? ?? false,
     );

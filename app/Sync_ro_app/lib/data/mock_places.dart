@@ -1,4 +1,3 @@
-
 import '../models/place.dart';
 
 const List<Place> mockPlaces = [
@@ -36,5 +35,19 @@ const List<Place> mockPlaces = [
     address: '서울특별시 중구 세종대로 지하 101',
     latitude: 37.5657,
     longitude: 126.9771,
+  ),
+  Place(
+  id: '6',
+  name: '안암역',
+  address: '서울특별시 성북구 고려대로',
+  latitude: 37.5863,
+  longitude: 127.0290,
+  ),
+  Place(
+    id: '7',
+    name: '광화문역',
+    address: '서울특별시 종로구 세종대로',
+    latitude: 37.5716,
+    longitude: 126.9768,
   ),
 ];

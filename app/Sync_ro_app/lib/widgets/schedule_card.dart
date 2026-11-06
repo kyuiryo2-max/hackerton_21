@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import '../models/schedule.dart';
 
@@ -6,11 +5,7 @@ class ScheduleCard extends StatelessWidget {
   final Schedule schedule;
   final VoidCallback onTap;
 
-  const ScheduleCard({
-    super.key,
-    required this.schedule,
-    required this.onTap,
-  });
+  const ScheduleCard({super.key, required this.schedule, required this.onTap});
 
   String formatTime(DateTime time) {
     final hour = time.hour.toString().padLeft(2, '0');
@@ -21,10 +16,7 @@ class ScheduleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 8,
-      ),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: ListTile(
         leading: const Icon(Icons.event),
         title: Text(schedule.title),

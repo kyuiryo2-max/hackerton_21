@@ -1,6 +1,6 @@
-
 import 'package:flutter/material.dart';
 
+import 'config/app_theme.dart';
 import 'providers/todo_controller.dart';
 import 'providers/schedule_controller.dart';
 import 'screens/main_screen.dart';
@@ -48,12 +48,7 @@ class _SyncRoAppState extends State<SyncRoApp> {
         child: MaterialApp(
           title: 'Sync_ro',
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFF4936D8),
-            ),
-            useMaterial3: true,
-          ),
+          theme: AppTheme.lightTheme,
           home: const MainScreen(),
         ),
       ),

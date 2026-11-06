@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,18 +16,16 @@ class ScheduleStorageService {
     final list = jsonDecode(raw) as List;
 
     return list
-        .map((item) => Schedule.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ))
+        .map(
+          (item) => Schedule.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
         .toList();
   }
 
   Future<void> save(List<Schedule> schedules) async {
     final prefs = await SharedPreferences.getInstance();
 
-    final raw = jsonEncode(
-      schedules.map((e) => e.toJson()).toList(),
-    );
+    final raw = jsonEncode(schedules.map((e) => e.toJson()).toList());
 
     if (!await prefs.setString(_key, raw)) {
       throw Exception('일정 저장에 실패했습니다.');

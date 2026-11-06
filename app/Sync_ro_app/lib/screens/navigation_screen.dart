@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../models/place.dart';
@@ -20,8 +19,7 @@ class NavigationScreen extends StatefulWidget {
   });
 
   @override
-  State<NavigationScreen> createState() =>
-      _NavigationScreenState();
+  State<NavigationScreen> createState() => _NavigationScreenState();
 }
 
 class _NavigationScreenState extends State<NavigationScreen>
@@ -44,15 +42,13 @@ class _NavigationScreenState extends State<NavigationScreen>
   bool get wantKeepAlive => true;
 
   bool get _hasExplicitSchedule =>
-      widget.initialDestination != null ||
-      widget.initialArrivalTime != null;
+      widget.initialDestination != null || widget.initialArrivalTime != null;
 
   @override
   void initState() {
     super.initState();
 
-    _destinationController.text =
-        widget.initialDestination ?? '';
+    _destinationController.text = widget.initialDestination ?? '';
 
     _arrivalTime = widget.initialArrivalTime;
   }
@@ -60,16 +56,14 @@ class _NavigationScreenState extends State<NavigationScreen>
   Schedule? _findNextSchedule(List<Schedule> schedules) {
     final now = DateTime.now();
 
-    final upcoming = schedules
-        .where(
-          (schedule) =>
-              !schedule.isCompleted &&
-              schedule.startTime.isAfter(now),
-        )
-        .toList()
-      ..sort(
-        (a, b) => a.startTime.compareTo(b.startTime),
-      );
+    final upcoming =
+        schedules
+            .where(
+              (schedule) =>
+                  !schedule.isCompleted && schedule.startTime.isAfter(now),
+            )
+            .toList()
+          ..sort((a, b) => a.startTime.compareTo(b.startTime));
 
     return upcoming.isEmpty ? null : upcoming.first;
   }
@@ -84,8 +78,7 @@ class _NavigationScreenState extends State<NavigationScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    if (_hasExplicitSchedule ||
-        _hasAppliedDefaultSchedule) {
+    if (_hasExplicitSchedule || _hasAppliedDefaultSchedule) {
       return;
     }
 
@@ -95,8 +88,7 @@ class _NavigationScreenState extends State<NavigationScreen>
 
     _hasAppliedDefaultSchedule = true;
 
-    final nextSchedule =
-        _findNextSchedule(controller.schedules);
+    final nextSchedule = _findNextSchedule(controller.schedules);
 
     if (nextSchedule != null) {
       _applySchedule(nextSchedule);
@@ -106,30 +98,24 @@ class _NavigationScreenState extends State<NavigationScreen>
   void _refreshFromNextSchedule() {
     final controller = ScheduleScope.of(context);
 
-    final nextSchedule =
-        _findNextSchedule(controller.schedules);
+    final nextSchedule = _findNextSchedule(controller.schedules);
 
     if (nextSchedule == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('예정된 일정이 없습니다.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('예정된 일정이 없습니다.')));
       return;
     }
 
     setState(() => _applySchedule(nextSchedule));
   }
 
-  Future<void> _searchPlace({
-    required bool isOrigin,
-  }) async {
+  Future<void> _searchPlace({required bool isOrigin}) async {
     final selected = await Navigator.push<Place>(
       context,
       MaterialPageRoute(
-        builder: (_) => PlaceSearchScreen(
-          title: isOrigin ? '출발지 검색' : '목적지 검색',
-        ),
+        builder: (_) =>
+            PlaceSearchScreen(title: isOrigin ? '출발지 검색' : '목적지 검색'),
       ),
     );
 
@@ -149,8 +135,7 @@ class _NavigationScreenState extends State<NavigationScreen>
   Future<void> _selectArrivalTime() async {
     final now = DateTime.now();
 
-    final initial = _arrivalTime != null &&
-            _arrivalTime!.isAfter(now)
+    final initial = _arrivalTime != null && _arrivalTime!.isAfter(now)
         ? _arrivalTime!
         : now.add(const Duration(hours: 1));
 
@@ -194,14 +179,24 @@ class _NavigationScreenState extends State<NavigationScreen>
   Future<void> _searchRoute() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_arrivalTime == null ||
-        !_arrivalTime!.isAfter(DateTime.now())) {
+    if (_arrivalTime == null || !_arrivalTime!.isAfter(DateTime.now())) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('미래의 도착 희망 시간을 선택해 주세요.')));
+      return;
+    }
+    if (_destinationPlace == null &&
+        _destinationController.text.trim().isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('미래의 도착 희망 시간을 선택해 주세요.'),
+          content: Text(
+            '목적지 좌표가 선택되지 않았습니다. '
+            '현재는 테스트 경로로 검색합니다. '
+            '실제 API 연결 시 장소 검색에서 선택해야 합니다.',
+          ),
+          duration: Duration(seconds: 4),
         ),
       );
-      return;
     }
 
     setState(() => _isLoading = true);
@@ -215,8 +210,7 @@ class _NavigationScreenState extends State<NavigationScreen>
         destinationPlace: _destinationPlace,
       );
 
-      final recommendation =
-          await _routeService.recommendRoute(request);
+      final recommendation = await _routeService.recommendRoute(request);
 
       if (!mounted) return;
 
@@ -232,11 +226,9 @@ class _NavigationScreenState extends State<NavigationScreen>
     } catch (error) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('이동 추천 실패: $error'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('이동 추천 실패: $error')));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -270,16 +262,37 @@ class _NavigationScreenState extends State<NavigationScreen>
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(
-            '이동 계획 설정',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text('이동 계획 설정', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 8),
           const Text(
             '도보와 대중교통을 함께 고려해 '
             '도착 희망 시간에 맞는 경로를 추천합니다.',
           ),
           const SizedBox(height: 24),
+
+          if (_hasExplicitSchedule) ...[
+            Card(
+              color: const Color(0xFFEDE9FF),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.event_available, color: Color(0xFF4936D8)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '선택한 일정의 목적지와 시작 시간을 '
+                        '자동으로 불러왔습니다.',
+                        style: const TextStyle(color: Color(0xFF4936D8)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           Form(
             key: _formKey,
             child: Column(
@@ -292,15 +305,13 @@ class _NavigationScreenState extends State<NavigationScreen>
                     prefixIcon: const Icon(Icons.my_location),
                     suffixIcon: IconButton(
                       icon: const Icon(Icons.search),
-                      onPressed: () =>
-                          _searchPlace(isOrigin: true),
+                      onPressed: () => _searchPlace(isOrigin: true),
                     ),
                   ),
                   onChanged: (_) => _originPlace = null,
-                  validator: (value) =>
-                      value == null || value.trim().isEmpty
-                          ? '출발지를 입력해 주세요.'
-                          : null,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? '출발지를 입력해 주세요.'
+                      : null,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -311,24 +322,19 @@ class _NavigationScreenState extends State<NavigationScreen>
                     prefixIcon: const Icon(Icons.location_on),
                     suffixIcon: IconButton(
                       icon: const Icon(Icons.search),
-                      onPressed: () =>
-                          _searchPlace(isOrigin: false),
+                      onPressed: () => _searchPlace(isOrigin: false),
                     ),
                   ),
                   onChanged: (_) => _destinationPlace = null,
-                  validator: (value) =>
-                      value == null || value.trim().isEmpty
-                          ? '목적지를 입력해 주세요.'
-                          : null,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? '목적지를 입력해 주세요.'
+                      : null,
                 ),
               ],
             ),
           ),
           const SizedBox(height: 24),
-          Text(
-            '도착 희망 시간',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('도착 희망 시간', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: _selectArrivalTime,
@@ -343,9 +349,7 @@ class _NavigationScreenState extends State<NavigationScreen>
           FilledButton.icon(
             onPressed: _isLoading ? null : _searchRoute,
             icon: const Icon(Icons.route),
-            label: Text(
-              _isLoading ? '계산 중...' : '이동 추천 받기',
-            ),
+            label: Text(_isLoading ? '계산 중...' : '이동 추천 받기'),
           ),
           const SizedBox(height: 16),
           const Text(

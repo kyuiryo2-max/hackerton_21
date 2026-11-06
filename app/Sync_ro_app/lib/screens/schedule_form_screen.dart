@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../models/schedule.dart';
@@ -7,14 +6,10 @@ import '../providers/schedule_controller.dart';
 class ScheduleFormScreen extends StatefulWidget {
   final Schedule? existing;
 
-  const ScheduleFormScreen({
-    super.key,
-    this.existing,
-  });
+  const ScheduleFormScreen({super.key, this.existing});
 
   @override
-  State<ScheduleFormScreen> createState() =>
-      _ScheduleFormScreenState();
+  State<ScheduleFormScreen> createState() => _ScheduleFormScreenState();
 }
 
 class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
@@ -42,11 +37,11 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       text: widget.existing?.location ?? '',
     );
 
-    _startTime = widget.existing?.startTime ??
-        now.add(const Duration(hours: 1));
+    _startTime =
+        widget.existing?.startTime ?? now.add(const Duration(hours: 1));
 
-    _endTime = widget.existing?.endTime ??
-        _startTime.add(const Duration(hours: 1));
+    _endTime =
+        widget.existing?.endTime ?? _startTime.add(const Duration(hours: 1));
   }
 
   Future<DateTime?> _pickDateTime(DateTime initial) async {
@@ -66,24 +61,16 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
     if (time == null) return null;
 
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      time.hour,
-      time.minute,
-    );
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (!_endTime.isAfter(_startTime)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('종료 시간은 시작 시간보다 늦어야 합니다.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('종료 시간은 시작 시간보다 늦어야 합니다.')));
       return;
     }
 
@@ -112,9 +99,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     if (!mounted) return;
 
     if (controller.error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(controller.error!)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(controller.error!)));
     }
 
     setState(() => _saving = false);
@@ -141,11 +128,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.existing == null ? '일정 추가' : '일정 수정',
-        ),
-      ),
+      appBar: AppBar(title: Text(widget.existing == null ? '일정 추가' : '일정 수정')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -159,10 +142,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                     labelText: '일정 이름',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) =>
-                      value == null || value.trim().isEmpty
-                          ? '일정 이름을 입력해 주세요.'
-                          : null,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? '일정 이름을 입력해 주세요.'
+                      : null,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -171,10 +153,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                     labelText: '장소',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) =>
-                      value == null || value.trim().isEmpty
-                          ? '장소를 입력해 주세요.'
-                          : null,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? '장소를 입력해 주세요.'
+                      : null,
                 ),
               ],
             ),

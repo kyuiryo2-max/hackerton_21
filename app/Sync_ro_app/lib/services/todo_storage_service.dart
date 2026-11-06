@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,9 +16,7 @@ class TodoStorageService {
 
     return decoded
         .map(
-          (item) => TodoItem.fromJson(
-            Map<String, dynamic>.from(item as Map),
-          ),
+          (item) => TodoItem.fromJson(Map<String, dynamic>.from(item as Map)),
         )
         .toList();
   }
@@ -27,9 +24,7 @@ class TodoStorageService {
   Future<void> saveTodos(List<TodoItem> todos) async {
     final prefs = await SharedPreferences.getInstance();
 
-    final raw = jsonEncode(
-      todos.map((item) => item.toJson()).toList(),
-    );
+    final raw = jsonEncode(todos.map((item) => item.toJson()).toList());
 
     final success = await prefs.setString(_key, raw);
 
@@ -38,4 +33,5 @@ class TodoStorageService {
     }
   }
 }
+
 //앱이 다시실행되면 로컬저장소에서 할 일 읽어옴

@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../data/mock_todos.dart';
@@ -12,8 +11,7 @@ class TodoController extends ChangeNotifier {
   bool _isLoading = true;
   String? _error;
 
-  List<TodoItem> get todos =>
-      List.unmodifiable(_todos);
+  List<TodoItem> get todos => List.unmodifiable(_todos);
 
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -52,9 +50,7 @@ class TodoController extends ChangeNotifier {
   }) async {
     final nextId = _todos.isEmpty
         ? 1
-        : _todos.map((e) => e.id).reduce(
-              (a, b) => a > b ? a : b,
-            ) + 1;
+        : _todos.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
 
     _todos.add(
       TodoItem(
@@ -69,9 +65,7 @@ class TodoController extends ChangeNotifier {
   }
 
   Future<void> updateTodo(TodoItem updated) async {
-    final index = _todos.indexWhere(
-      (item) => item.id == updated.id,
-    );
+    final index = _todos.indexWhere((item) => item.id == updated.id);
 
     if (index == -1) return;
 
@@ -80,9 +74,7 @@ class TodoController extends ChangeNotifier {
   }
 
   Future<void> toggleCompleted(TodoItem todo) async {
-    await updateTodo(
-      todo.copyWith(isCompleted: !todo.isCompleted),
-    );
+    await updateTodo(todo.copyWith(isCompleted: !todo.isCompleted));
   }
 
   Future<void> deleteTodo(int id) async {
@@ -99,11 +91,11 @@ class TodoScope extends InheritedNotifier<TodoController> {
   }) : super(notifier: controller);
 
   static TodoController of(BuildContext context) {
-    final scope =
-        context.dependOnInheritedWidgetOfExactType<TodoScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<TodoScope>();
 
     assert(scope != null, 'TodoScope를 찾을 수 없습니다.');
     return scope!.notifier!;
   }
 }
+
 //할 일 목록 관ㄹ리 및 화면에 변경사항제공,홈 화면,할 일 화면, 결과화면이 같은 데이터 공유
