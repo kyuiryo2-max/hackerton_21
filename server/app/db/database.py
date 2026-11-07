@@ -1,20 +1,25 @@
 """SQLite 연결과 테이블 생성.
 
 무료 배포 서버는 재시작하면 DB 파일이 초기화될 수 있어서,
-서버가 켜질 때 시연용 데이터를 자동으로 다시 넣어요 (seed_demo_data).
-위치 정보는 저장하지 않아요.
+서버가 켜질 때 시연용 데이터를 지우고 처음 상태로 다시 넣어요 (seed_demo_data).
+목적지 좌표는 저장하지만, 사용자의 현재 위치는 저장하지 않아요.
+시각은 모두 한국 시간 ISO 8601 (예: 2026-11-21T09:00:00+09:00) 이에요.
 """
 import sqlite3
 from contextlib import contextmanager
 
 from app import config
 
+DEMO_USER_ID = "demo"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedules (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         TEXT NOT NULL,
     destination     TEXT NOT NULL,
-    arrive_by       TEXT NOT NULL,          -- ISO 8601, 예: 2026-11-10T09:00
+    destination_lat REAL NOT NULL,          -- 목적지 좌표 (현재 위치 아님)
+    destination_lng REAL NOT NULL,
+    arrive_by       TEXT NOT NULL,          -- 예: 2026-11-21T09:00:00+09:00
     prep_minutes    INTEGER NOT NULL DEFAULT 30
 );
 
@@ -39,7 +44,7 @@ CREATE TABLE IF NOT EXISTS route_choices (
     user_id         TEXT NOT NULL,
     chosen_route    TEXT NOT NULL,          -- 고른 경로 특징(JSON 문자열)
     other_routes    TEXT NOT NULL,          -- 안 고른 후보들(JSON 문자열)
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S+09:00', 'now', '+9 hours'))
 );
 """
 
@@ -61,22 +66,20 @@ def init_db(path: str | None = None) -> None:
 
 
 def seed_demo_data(path: str | None = None) -> None:
-    """시연용 사용자 데이터. 이미 있으면 다시 넣지 않아요."""
+    """시연용 사용자 데이터. 켜질 때마다 demo 데이터를 지우고 처음 상태로 다시 넣어요."""
     with connect(path) as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM schedules WHERE user_id = 'demo' LIMIT 1"
-        ).fetchone()
-        if exists:
-            return
+        for table in ("schedules", "todos", "settings", "route_choices"):
+            conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (DEMO_USER_ID,))
         conn.execute(
-            "INSERT INTO schedules (user_id, destination, arrive_by, prep_minutes) "
-            "VALUES ('demo', '공학관', '2026-11-21T09:00', 30)"
+            "INSERT INTO schedules (user_id, destination, destination_lat, destination_lng, arrive_by, prep_minutes) "
+            "VALUES (?, '공학관', 37.5833, 127.0263, '2026-11-21T09:00:00+09:00', 30)",
+            (DEMO_USER_ID,),
         )
         conn.executemany(
             "INSERT INTO todos (user_id, text, place_types, importance) VALUES (?, ?, ?, ?)",
             [
-                ("demo", "약 사기", '["약국"]', "필수"),
-                ("demo", "엄마 생신 선물", '["꽃집","케이크집"]', "선택"),
+                (DEMO_USER_ID, "약 사기", '["약국"]', "필수"),
+                (DEMO_USER_ID, "엄마 생신 선물", '["꽃집","케이크집"]', "선택"),
             ],
         )
-        conn.execute("INSERT OR IGNORE INTO settings (user_id) VALUES ('demo')")
+        conn.execute("INSERT INTO settings (user_id) VALUES (?)", (DEMO_USER_ID,))
