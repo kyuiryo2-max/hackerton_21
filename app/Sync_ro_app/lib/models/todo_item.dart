@@ -4,6 +4,7 @@ class TodoItem {
   final int estimatedMinutes;
   final bool requiresTravel;
   final bool isCompleted;
+  final String? placeName;
 
   const TodoItem({
     required this.id,
@@ -11,6 +12,7 @@ class TodoItem {
     required this.estimatedMinutes,
     this.requiresTravel = false,
     this.isCompleted = false,
+    this.placeName,
   });
 
   TodoItem copyWith({
@@ -18,6 +20,7 @@ class TodoItem {
     int? estimatedMinutes,
     bool? requiresTravel,
     bool? isCompleted,
+    String? placeName,
   }) {
     return TodoItem(
       id: id,
@@ -25,6 +28,7 @@ class TodoItem {
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       requiresTravel: requiresTravel ?? this.requiresTravel,
       isCompleted: isCompleted ?? this.isCompleted,
+      placeName: placeName ?? this.placeName,
     );
   }
 
@@ -34,6 +38,7 @@ class TodoItem {
     'estimated_minutes': estimatedMinutes,
     'requires_travel': requiresTravel,
     'is_completed': isCompleted,
+    'place_name': placeName,
   };
 
   factory TodoItem.fromJson(Map<String, dynamic> json) {
@@ -43,6 +48,7 @@ class TodoItem {
       estimatedMinutes: (json['estimated_minutes'] as num).toInt(),
       requiresTravel: json['requires_travel'] as bool? ?? false,
       isCompleted: json['is_completed'] as bool? ?? false,
+      placeName: json['place_name'] as String?,
     );
   }
 }

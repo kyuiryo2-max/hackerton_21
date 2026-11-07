@@ -46,8 +46,13 @@ class ScheduleController extends ChangeNotifier {
   Future<void> addSchedule({
     required String title,
     required String location,
+    String? destinationPlaceId,
+    String? destinationAddress,
+    double? destinationLatitude,
+    double? destinationLongitude,
     required DateTime startTime,
     required DateTime endTime,
+    int preparationMinutes = 30,
   }) async {
     final nextId = _schedules.isEmpty
         ? 1
@@ -58,8 +63,13 @@ class ScheduleController extends ChangeNotifier {
         id: nextId,
         title: title,
         location: location,
+        destinationPlaceId: destinationPlaceId,
+        destinationAddress: destinationAddress,
+        destinationLatitude: destinationLatitude,
+        destinationLongitude: destinationLongitude,
         startTime: startTime,
         endTime: endTime,
+        preparationMinutes: preparationMinutes,
       ),
     );
 
