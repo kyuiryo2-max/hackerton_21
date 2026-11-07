@@ -32,7 +32,6 @@ ARRIVALS_TTL_SECONDS = 20
 MAX_ROWS = 30
 SECONDS_PER_STATION = 120      # 몇 번째 전역만 알 때 역 하나당 추정 시간
 GONE_AFTER_SECONDS = 30        # 도착 예정 시각이 이만큼 지났으면 이미 떠난 차로 봐요
-MARGIN_SECONDS = 60            # 도착 시간이 1분 단위라 계산할 때 더하는 여유
 
 KST = timezone(timedelta(hours=9))
 
