@@ -100,12 +100,12 @@ def test_같은_열차는_한_번만():
     assert len(trains) == 1
 
 
-def test_실시간_값이_있는_열차가_추정보다_앞():
+def test_추정값이어도_빨리_오는_열차가_앞():
     trains = parse(
-        item(btrainNo="1", barvlDt="0", arvlCd="5", arvlMsg2="전역 도착"),
+        item(btrainNo="1", barvlDt="0", arvlCd="5", arvlMsg2="전역 도착"),  # 약 120초
         item(btrainNo="2", barvlDt="240"),
     )
-    assert [t["train_no"] for t in trains] == ["2", "1"]
+    assert [t["train_no"] for t in trains] == ["1", "2"]
 
 
 def test_급행과_막차_표시():
