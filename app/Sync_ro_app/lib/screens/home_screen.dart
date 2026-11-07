@@ -5,16 +5,17 @@ import 'package:flutter/material.dart';
 
 import '../models/schedule.dart';
 import '../models/todo_item.dart';
-import '../models/travel_recommendation.dart';
 import '../providers/schedule_controller.dart';
 import '../providers/todo_controller.dart';
 import '../services/departure_alert_service.dart';
-import '../services/recommendation_service.dart';
-import '../widgets/recommendation_card.dart';
+import '../services/todo_recommendation_service.dart';
 import 'detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, required this.onOpenRoutes, required this.onSelectWaypoint});
+
+  final VoidCallback onOpenRoutes;
+  final ValueChanged<TodoItem> onSelectWaypoint;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -27,14 +28,10 @@ class _HomeScreenState extends State<HomeScreen>
 
   static const int _mockTravelMinutes = 35;
 
-  final RecommendationService _recommendationService =
-      RecommendationService();
+  final TodoRecommendationService _todoRecommendationService = TodoRecommendationService();
 
   final DepartureAlertService _departureAlertService =
       DepartureAlertService();
-
-  late Future<List<TravelRecommendation>>
-      _recommendationsFuture;
 
   Timer? _clockTimer;
 
@@ -43,8 +40,6 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
-
-    _loadRecommendations();
 
     _clockTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -58,34 +53,15 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  void _loadRecommendations() {
-    _recommendationsFuture =
-        _recommendationService.getRecommendations();
-  }
-
-  void _retryRecommendations() {
-    setState(() {
-      _loadRecommendations();
-    });
-  }
-
   Future<void> _refresh() async {
     setState(() {
       _now = DateTime.now();
-      _loadRecommendations();
     });
-
-    try {
-      await _recommendationsFuture;
-    } catch (_) {
-      // 오류는 FutureBuilder에서 표시한다.
-    }
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
-    _recommendationService.dispose();
     super.dispose();
   }
 
@@ -145,50 +121,129 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
-  void openRecommendation(
-    TravelRecommendation item,
-  ) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          appBar: AppBar(
-            title: const Text('이동 추천 상세'),
+  Widget _buildPreparationCard(Schedule? schedule, List<TodoItem> todos) {
+    if (schedule == null) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Text('다가오는 일정이 없습니다. 일정을 추가해 주세요.'),
+        ),
+      );
+    }
+
+    final departure = _departureAlertService.calculateDepartureTime(
+      schedule.startTime,
+    );
+    final preparation = departure.subtract(
+      Duration(minutes: schedule.preparationMinutes),
+    );
+    final theme = Theme.of(context);
+    // 준비 시작 전까지 남은 시간에 처리 가능한, 별도 이동이 없는 할 일만 추천한다.
+    final availableMinutes = preparation.difference(_now).inMinutes;
+    final suggested = _todoRecommendationService.recommendTodos(
+      todos: todos,
+      availableMinutes: availableMinutes,
+    );
+
+    Widget timeColumn(String label, DateTime time) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: theme.textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            formatTime(time),
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF4936D8),
+            ),
           ),
-          body: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              Text(
-                item.destination,
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineMedium,
+          Text(formatDateTime(time), style: theme.textTheme.bodySmall),
+        ],
+      ),
+    );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('오늘의 준비 · 출발', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Text(schedule.title, style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                timeColumn('준비 시작', preparation),
+                const SizedBox(width: 12),
+                timeColumn('출발 시각', departure),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            Text(
+              '목표 도착 ${formatDateTime(schedule.startTime)} · 예상 이동 35분 · 여유 10분 · 준비 ${schedule.preparationMinutes}분 (임시 기준)',
+              style: theme.textTheme.bodySmall,
+            ),
+            const Divider(height: 28),
+            Text('준비 전 추천 할 일', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            if (suggested.isEmpty)
+              const Text('현재 남는 시간에 맞는 할 일이 없습니다.'),
+            for (final todo in suggested.take(2))
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.check_circle_outline),
+                title: Text(todo.title),
+                subtitle: Text('예상 ${todo.estimatedMinutes}분 · 별도 이동 없음'),
               ),
-              const SizedBox(height: 24),
-              Text(
-                '추천 출발 시간: '
-                '${formatTime(item.departureTime)}',
-              ),
-              Text(
-                '예상 도착 시간: '
-                '${formatTime(item.arrivalTime)}',
-              ),
-              Text(
-                '예상 이동 시간: '
-                '${item.travelMinutes}분',
-              ),
-              Text(
-                '활용 가능 시간: '
-                '${item.freeMinutes}분',
-              ),
-              const SizedBox(height: 24),
-              Text(item.suggestion),
-              const SizedBox(height: 24),
-              const Text(
-                '현재는 테스트용 추천 정보입니다.',
-              ),
+            // 장소 이름이 있는 이동 필요 할 일을 경유 후보로 제안한다.
+            if (todos.any((todo) => !todo.isCompleted && todo.requiresTravel &&
+                (todo.placeName?.trim().isNotEmpty ?? false))) ...[
+              const Divider(height: 28),
+              Text('경유 후보 할 일', style: theme.textTheme.titleMedium),
+              const Text('선택하면 이동 화면으로 넘어갑니다. 경유 경로 계산은 아직 지원하지 않습니다.'),
+              for (final todo in todos.where((todo) => !todo.isCompleted &&
+                  todo.requiresTravel && (todo.placeName?.trim().isNotEmpty ?? false)).take(2))
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.add_location_alt_outlined),
+                  title: Text(todo.title),
+                  subtitle: Text('${todo.placeName ?? '장소 미지정'} · 체류 ${todo.estimatedMinutes}분'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('경유지 선택'),
+                        content: Text('${todo.placeName ?? todo.title}을(를) 경유 후보로 선택할까요?\n현재는 경로를 자동 재계산하지 않습니다.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('취소')),
+                          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('선택')),
+                        ],
+                      ),
+                    );
+                    if (confirmed == true && mounted) widget.onSelectWaypoint(todo);
+                  },
+                ),
             ],
-          ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: widget.onOpenRoutes,
+                icon: const Icon(Icons.route),
+                label: const Text('추천 경로 확인하기'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '이동 탭에서 출발지를 선택하면 경로를 검색할 수 있습니다.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
         ),
       ),
     );
@@ -424,69 +479,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildTodos(
-    List<TodoItem> todos,
-    TodoController controller,
-  ) {
-    if (todos.isEmpty) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('남은 할 일이 없습니다.'),
-        ),
-      );
-    }
-
-    final visibleTodos =
-        todos.take(3).toList();
-
-    return Card(
-      child: Column(
-        children: [
-          for (final todo in visibleTodos)
-            CheckboxListTile(
-              value: todo.isCompleted,
-              onChanged: (checked) async {
-                if (checked == null) return;
-
-                await controller.toggleCompleted(
-                  todo,
-                );
-              },
-              title: Text(todo.title),
-              subtitle: Text(
-                '예상 ${todo.estimatedMinutes}분'
-                '${todo.requiresTravel ? ' · 이동 필요' : ''}',
-              ),
-              controlAffinity:
-                  ListTileControlAffinity.leading,
-              activeColor:
-                  const Color(0xFF4936D8),
-            ),
-
-          if (todos.length > 3)
-            Padding(
-              padding: const EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: 12,
-              ),
-              child: Align(
-                alignment:
-                    Alignment.centerRight,
-                child: Text(
-                  '외 ${todos.length - 3}개 남음',
-                  style: const TextStyle(
-                    color: Colors.grey,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -588,7 +580,9 @@ class _HomeScreenState extends State<HomeScreen>
               '일정과 이동 상황을 함께 확인하세요.',
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            _buildPreparationCard(nextSchedule, incompleteTodos),
+            const SizedBox(height: 16),
 
             _buildNextScheduleCard(
               nextSchedule,
@@ -613,115 +607,6 @@ class _HomeScreenState extends State<HomeScreen>
 
             _buildTodaySchedules(
               todaySchedules,
-            ),
-
-            const SizedBox(height: 24),
-
-            Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '남은 할 일',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge,
-                ),
-                Text(
-                  '${incompleteTodos.length}개',
-                  style: const TextStyle(
-                    color: Color(0xFF4936D8),
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            _buildTodos(
-              incompleteTodos,
-              todoController,
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              '추천 이동 정보',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge,
-            ),
-            const SizedBox(height: 8),
-
-            FutureBuilder<
-                List<TravelRecommendation>>(
-              future: _recommendationsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState ==
-                    ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(
-                      child:
-                          CircularProgressIndicator(),
-                    ),
-                  );
-                }
-
-                if (snapshot.hasError) {
-                  return Card(
-                    child: Padding(
-                      padding:
-                          const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          const Text(
-                            '추천 정보를 불러오지 못했습니다.',
-                          ),
-                          const SizedBox(height: 12),
-                          ElevatedButton(
-                            onPressed:
-                                _retryRecommendations,
-                            child:
-                                const Text('다시 시도'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-
-                final recommendations =
-                    snapshot.data ?? [];
-
-                if (recommendations.isEmpty) {
-                  return const Card(
-                    child: Padding(
-                      padding:
-                          EdgeInsets.all(16),
-                      child: Text(
-                        '현재 추천할 이동 정보가 없습니다.',
-                      ),
-                    ),
-                  );
-                }
-
-                return Column(
-                  children: [
-                    for (final item
-                        in recommendations)
-                      RecommendationCard(
-                        recommendation: item,
-                        onTap: () {
-                          openRecommendation(
-                            item,
-                          );
-                        },
-                      ),
-                  ],
-                );
-              },
             ),
 
             const SizedBox(height: 24),
