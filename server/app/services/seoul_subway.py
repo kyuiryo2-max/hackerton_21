@@ -145,7 +145,7 @@ def parse_arrivals(data: dict, now: datetime | None = None) -> list[dict]:
         key = train["train_no"] or str(id(item))
         if key not in trains or trains[key]["estimated"]:
             trains[key] = train
-    return sorted(trains.values(), key=lambda t: (t["estimated"], t["seconds"]))
+    return sorted(trains.values(), key=lambda t: (t["seconds"], t["estimated"]))
 
 
 def choose_trains(trains: list[dict], lines: list[str], next_stops: list[str]) -> list[dict]:
