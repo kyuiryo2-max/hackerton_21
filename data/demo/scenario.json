@@ -1,0 +1,47 @@
+{
+  "_설명": "시연 모드 고정 데이터 (할 일 30번). 정류장·경로·장소·도보 시간은 2026-11-07 실제 API 호출 값이고, now와 arrivals는 대본에 맞춘 시연용 값이에요.",
+  "now": "2026-11-21T08:32:00+09:00",
+  "location": { "name": "안암역3번출구 정류장", "lng": 127.03045087, "lat": 37.58624821 },
+  "schedule": {
+    "destination": { "name": "청량리역", "lng": 127.04691, "lat": 37.58029 },
+    "arrive_by": "2026-11-21T09:00:00+09:00",
+    "prep_minutes": 30
+  },
+  "stop": { "ars_id": "08301", "station_id": "107000205", "name": "안암역3번출구" },
+  "route": {
+    "type": "BUS",
+    "name": "2115",
+    "guidance": "지선 2115 (안암역3번출구 > 청량리역환승센터)",
+    "moving_seconds": 797,
+    "last_walk_seconds": 120,
+    "transfers": 0,
+    "fare_min": 1500,
+    "fare_max": 1500,
+    "stops": ["안암역3번출구", "제기시장", "홍파초등학교.정화여중고", "제기동주민센터.서울약령시앞", "청량리수산시장", "청량리역환승센터"]
+  },
+  "arrivals": [
+    {
+      "route": "2115",
+      "route_id": "100100598",
+      "direction": "중랑공영차고지",
+      "next_stop": "제기시장",
+      "interval_minutes": 8,
+      "first_seconds": 720,
+      "second_seconds": 1200
+    },
+    {
+      "route": "273",
+      "route_id": "",
+      "direction": "중랑공영차고지",
+      "next_stop": "고려대학교앞",
+      "interval_minutes": 7,
+      "first_seconds": 180,
+      "second_seconds": 600
+    }
+  ],
+  "places": [
+    { "todo_id": 1, "todo": "약 사기", "importance": "필수", "place_type": "약국", "name": "소원약국", "address": "서울 성북구 개운사길 2", "round_trip_walk_seconds": 306, "stay_seconds": 240 },
+    { "todo_id": 2, "todo": "과제 출력", "importance": "선택", "place_type": "프린트", "name": "디지카피", "address": "서울 성북구 고려대로 98", "round_trip_walk_seconds": 81, "stay_seconds": 240 },
+    { "todo_id": 3, "todo": "편의점 들르기", "importance": "필수", "place_type": "편의점", "name": "CU 안암센트럴점", "address": "서울 성북구 고려대로28길 16", "round_trip_walk_seconds": 226, "stay_seconds": 180 }
+  ]
+}
