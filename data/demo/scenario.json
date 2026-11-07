@@ -1,5 +1,5 @@
 {
-  "_설명": "시연 모드 고정 데이터 (할 일 30번). 정류장·경로·장소·도보 시간은 2026-11-07 실제 API 호출 값이고, now와 arrivals는 대본에 맞춘 시연용 값이에요.",
+  "_설명": "시연 모드 고정 데이터 (할 일 30번). 정류장·경로·장소·도보 시간은 2026-11-07 실제 API 호출 값이고, now, arrivals, stay_seconds는 대본에 맞춘 시연용 값이에요. 장소는 설문 순위(편의점 75%, 카페 34%, 생활용품점 22%)를 따랐어요.",
   "now": "2026-11-21T08:32:00+09:00",
   "location": { "name": "안암역3번출구 정류장", "lng": 127.03045087, "lat": 37.58624821 },
   "schedule": {
@@ -40,8 +40,8 @@
     }
   ],
   "places": [
-    { "todo_id": 1, "todo": "약 사기", "importance": "필수", "place_type": "약국", "name": "소원약국", "address": "서울 성북구 개운사길 2", "round_trip_walk_seconds": 306, "stay_seconds": 240 },
-    { "todo_id": 2, "todo": "과제 출력", "importance": "선택", "place_type": "프린트", "name": "디지카피", "address": "서울 성북구 고려대로 98", "round_trip_walk_seconds": 81, "stay_seconds": 240 },
-    { "todo_id": 3, "todo": "편의점 들르기", "importance": "필수", "place_type": "편의점", "name": "CU 안암센트럴점", "address": "서울 성북구 고려대로28길 16", "round_trip_walk_seconds": 226, "stay_seconds": 180 }
+    { "todo_id": 1, "todo": "이어폰 사기", "importance": "필수", "place_type": "편의점", "name": "CU 안암센트럴점", "address": "서울 성북구 고려대로28길 16", "round_trip_walk_seconds": 226, "stay_seconds": 240 },
+    { "todo_id": 2, "todo": "커피 사기", "importance": "선택", "place_type": "카페", "name": "스타벅스 안암역점", "address": "서울 성북구 고려대로 102-2", "round_trip_walk_seconds": 92, "stay_seconds": 300 },
+    { "todo_id": 3, "todo": "다이소 들르기", "importance": "필수", "place_type": "다이소", "name": "다이소 안암점", "address": "서울 성북구 고려대로24길 51", "round_trip_walk_seconds": 690, "stay_seconds": 300 }
   ]
 }

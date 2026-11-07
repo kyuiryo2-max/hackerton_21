@@ -4,8 +4,8 @@ data/demo/scenario.json 만 바꾸면 노선과 대본을 바꿀 수 있어요. 
 
     demo.current_time()                    # 2026-11-21 08:32
     demo.arrivals("08301")                 # 2115번 720초 뒤
-    demo.decide([1])                       # 약 사기: 최대 체류 294초
-    demo.decide([1, 3])                    # 편의점까지: 시간이 부족해요
+    demo.decide([1])                       # 이어폰 사기(편의점): 최대 체류 374초
+    demo.decide([1, 3])                    # 다이소까지: 시간이 부족해요
 """
 import json
 from datetime import datetime, timedelta

@@ -44,30 +44,30 @@ def test_시연은_외부_API를_부르지_않음(monkeypatch):
 
 
 # ---------- 시연 대본 ----------
-def test_대본_버스까지_12분_약국_최대_4분():
+def test_대본_버스까지_12분_편의점_최대_6분():
     result = demo.decide([1])
     assert statuses(result) == {1: "included"}
     assert wait_minutes_from_seconds(result.board_seconds) == 12
-    assert wait_minutes_from_seconds(result.max_stay_seconds) == 4
+    assert wait_minutes_from_seconds(result.max_stay_seconds) == 6
 
 
-def test_대본_약국에_들러도_9시_전_도착():
+def test_대본_편의점에_들러도_9시_전_도착():
     result = demo.decide([1])
     arrive_at = demo.current_time(result.total_seconds)
     assert arrive_at < datetime.fromisoformat(demo.scenario()["schedule"]["arrive_by"])
 
 
-def test_대본_과제_출력은_선택이라_제외():
+def test_대본_카페는_선택이라_제외():
     assert statuses(demo.decide([1, 2])) == {1: "included", 2: "excluded"}
 
 
-def test_대본_편의점은_필수라_물어봄():
+def test_대본_다이소는_필수라_물어봄():
     result = demo.decide([1, 3])
     assert statuses(result) == {1: "included", 3: "ask"}
     assert result.decisions[1].reason == "시간이 부족해요"
 
 
-def test_대본_약국_없이_다음_버스는_지각():
+def test_대본_경유_없이도_다음_버스는_지각():
     vehicles = demo.route_timing().vehicle_seconds
     after_board = demo.route_timing().moving_seconds + demo.route_timing().last_walk_seconds
     assert vehicles[0] + after_board <= demo.deadline_seconds()
@@ -91,6 +91,17 @@ def test_다른_정류소는_빈_목록():
 
 def test_장소_도보_시간은_양수():
     assert all(p["round_trip_walk_seconds"] > 0 for p in demo.scenario()["places"])
+
+
+def test_장소는_허용_목록_안의_종류():
+    from app.services.llm import place_types
+
+    assert {p["place_type"] for p in demo.scenario()["places"]} <= set(place_types())
+
+
+def test_설문_1위_편의점이_대표_장면():
+    first = demo.scenario()["places"][0]
+    assert (first["place_type"], first["importance"]) == ("편의점", "필수")
 
 
 # ---------- API ----------
