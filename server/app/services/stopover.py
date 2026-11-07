@@ -23,6 +23,7 @@ class RouteTiming:
     last_walk_seconds: int         # 하차 정류장 → 목적지
     vehicle_seconds: list[int]     # 지금부터 차가 오기까지, 모르면 빈 목록
     is_subway: bool = False
+    interval_seconds: int | None = None  # 배차 간격, 모르면 None (서울시 버스 interval_minutes × 60)
 
 
 @dataclass
@@ -64,15 +65,25 @@ def max_stay_seconds(board_seconds: int, walk_seconds: int, buffer: int) -> int:
     return max(board_seconds - walk_seconds - buffer, 0)
 
 
+def next_by_interval(vehicle_seconds: list[int], need_seconds: int, interval: int) -> int:
+    """목록의 마지막 차 뒤로 배차 간격만큼 이어서, need_seconds 이후 가장 빠른 차."""
+    last = max(vehicle_seconds)
+    count = -(-(need_seconds - last) // interval)  # 올림
+    return last + count * interval
+
+
 def total_seconds(route: RouteTiming, ready_seconds: int, buffer: int) -> tuple[int, int | None] | None:
     """(총 시간, 탈 차 시각). 실시간 정보가 없으면 대기 0으로 계산해요.
 
-    실시간 정보는 있는데 탈 수 있는 차가 없으면 None이에요.
+    목록의 차를 모두 놓치면 배차 간격으로 다음 차를 추정해요.
+    배차 간격도 모르면 None이에요.
     """
     after_board = route.moving_seconds + route.last_walk_seconds
     if not route.vehicle_seconds:
         return ready_seconds + after_board, None
     board = pick_board_seconds(route.vehicle_seconds, ready_seconds, buffer)
+    if board is None and route.interval_seconds:
+        board = next_by_interval(route.vehicle_seconds, ready_seconds + buffer, route.interval_seconds)
     if board is None:
         return None
     return board + after_board, board
@@ -86,6 +97,8 @@ def _validate(route: RouteTiming, stops: list[StopCandidate], deadline_seconds: 
     ]
     if times and min(times) < 0:
         raise ValueError("시간은 음수일 수 없어요")
+    if route.interval_seconds is not None and route.interval_seconds <= 0:
+        raise ValueError("배차 간격은 0보다 커야 해요")
 
 
 def decide_stops(

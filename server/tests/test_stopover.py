@@ -8,6 +8,7 @@ from app.services.stopover import (
     StopCandidate,
     decide_stops,
     max_stay_seconds,
+    next_by_interval,
     pick_board_seconds,
     total_seconds,
 )
@@ -163,3 +164,24 @@ def test_탈_차가_없으면_경유_미포함_시간으로_표시():
 def test_음수는_오류():
     with pytest.raises(ValueError):
         decide_stops(route(), [stop(stay=-1)], deadline_seconds=3600)
+
+
+# ---------- 배차 간격으로 다음 차 추정 ----------
+def test_목록의_차를_다_놓치면_배차_간격으로_다음_차():
+    # 목록 720·1200초, 배차 480초 → 1680, 2160 …
+    assert next_by_interval([720, 1200], 1500, 480) == 1680
+    assert next_by_interval([720, 1200], 1680, 480) == 1680  # 딱 맞으면 그 차
+
+
+def test_배차_간격을_알면_목록_밖_차로_경유():
+    """버스 4분·12분(서울시 API는 두 대만 줌), 배차 8분, 마감 60분, 편의점 10분."""
+    r = route(vehicles=[240, 720], interval_seconds=480)
+    result = decide_stops(r, [stop(importance="선택", detour=120, stay=600)], deadline_seconds=3600)
+    assert statuses(result) == {1: "included"}
+    assert result.board_seconds == 1200  # 120 + 120 + 600 + 120(여유) = 960 이후 첫 차
+    assert result.total_seconds == 1200 + 800 + 120
+
+
+def test_배차_간격이_0이하면_오류():
+    with pytest.raises(ValueError):
+        decide_stops(route(interval_seconds=0), [], deadline_seconds=3600)
