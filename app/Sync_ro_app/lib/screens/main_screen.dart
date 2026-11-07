@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'home_screen.dart';
+import '../models/todo_item.dart';
 import 'schedule_screen.dart';
 import 'todo_screen.dart';
 import 'navigation_screen.dart';
 import 'settings_screen.dart';
+import 'assistant_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -15,16 +16,31 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+  Offset? _aiButtonPosition;
 
   final PageController _pageController = PageController();
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    ScheduleScreen(),
-    TodoScreen(),
-    NavigationScreen(),
-    SettingsScreen(),
-  ];
+  late final List<Widget> _screens;
+  final ValueNotifier<TodoItem?> _waypoint = ValueNotifier<TodoItem?>(null);
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+    HomeScreen(onOpenRoutes: _openRoutes, onSelectWaypoint: _selectWaypoint),
+    const ScheduleScreen(),
+    const TodoScreen(),
+    NavigationScreen(selectedWaypoint: _waypoint),
+    const SettingsScreen(),
+    ];
+  }
+
+  void _openRoutes() => _onDestinationSelected(3);
+
+  void _selectWaypoint(TodoItem todo) {
+    _waypoint.value = todo;
+    _onDestinationSelected(3);
+  }
 
   // 하단 네비게이션 버튼 클릭 시
   void _onDestinationSelected(int index) {
@@ -49,16 +65,79 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void dispose() {
     _pageController.dispose();
+    _waypoint.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: _onPageChanged,
-        children: _screens,
+      body: Stack(
+        children: [
+          PageView(
+            controller: _pageController,
+            onPageChanged: _onPageChanged,
+            children: _screens,
+          ),
+          // AI button is draggable within the visible content area.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const buttonWidth = 112.0;
+              const buttonHeight = 44.0;
+              const margin = 8.0;
+              final maxX = (constraints.maxWidth - buttonWidth - margin)
+                  .clamp(0.0, double.infinity).toDouble();
+              final maxY = (constraints.maxHeight - buttonHeight - margin)
+                  .clamp(0.0, double.infinity).toDouble();
+              final position = _aiButtonPosition ?? Offset(maxX, margin);
+              final left = position.dx.clamp(0.0, maxX).toDouble();
+              final top = position.dy.clamp(0.0, maxY).toDouble();
+              return Stack(
+                children: [
+                  Positioned(
+                    left: left,
+                    top: top,
+                    child: SafeArea(
+                      top: false,
+                      bottom: false,
+                      child: Material(
+                        elevation: 3,
+                        borderRadius: BorderRadius.circular(24),
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanUpdate: (details) {
+                            setState(() {
+                              _aiButtonPosition = Offset(
+                                (left + details.delta.dx).clamp(0.0, maxX).toDouble(),
+                                (top + details.delta.dy).clamp(0.0, maxY).toDouble(),
+                              );
+                            });
+                          },
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const AssistantScreen()),
+                          ),
+                          child: const SizedBox(
+                            width: buttonWidth,
+                            height: buttonHeight,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.auto_awesome, size: 18),
+                                SizedBox(width: 6),
+                                Text('AI 질문'),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,

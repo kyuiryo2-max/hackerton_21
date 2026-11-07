@@ -47,6 +47,7 @@ class TodoController extends ChangeNotifier {
     required String title,
     required int minutes,
     required bool requiresTravel,
+    String? placeName,
   }) async {
     final nextId = _todos.isEmpty
         ? 1
@@ -58,6 +59,7 @@ class TodoController extends ChangeNotifier {
         title: title,
         estimatedMinutes: minutes,
         requiresTravel: requiresTravel,
+        placeName: placeName,
       ),
     );
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/schedule.dart';
+import '../models/place.dart';
+import 'place_search_screen.dart';
 import '../providers/schedule_controller.dart';
 
 class ScheduleFormScreen extends StatefulWidget {
@@ -17,11 +19,13 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
   late final TextEditingController _titleController;
   late final TextEditingController _locationController;
+  late final TextEditingController _preparationController;
 
   late DateTime _startTime;
   late DateTime _endTime;
 
   bool _saving = false;
+  Place? _selectedDestination;
 
   @override
   void initState() {
@@ -35,6 +39,20 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
     _locationController = TextEditingController(
       text: widget.existing?.location ?? '',
+    );
+
+    if (widget.existing?.destinationLatitude != null &&
+        widget.existing?.destinationLongitude != null) {
+      _selectedDestination = Place(
+        id: widget.existing!.destinationPlaceId ?? '',
+        name: widget.existing!.location,
+        address: widget.existing!.destinationAddress ?? '',
+        latitude: widget.existing!.destinationLatitude!,
+        longitude: widget.existing!.destinationLongitude!,
+      );
+    }
+    _preparationController = TextEditingController(
+      text: (widget.existing?.preparationMinutes ?? 30).toString(),
     );
 
     _startTime =
@@ -64,6 +82,21 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
 
+  Future<void> _selectDestination() async {
+    final place = await Navigator.push<Place>(
+      context,
+      MaterialPageRoute(builder: (_) => PlaceSearchScreen(
+        title: '일정 목적지 선택',
+        initialQuery: _locationController.text.trim(),
+      )),
+    );
+    if (!mounted || place == null) return;
+    setState(() {
+      _selectedDestination = place;
+      _locationController.text = place.name;
+    });
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -74,6 +107,12 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       return;
     }
 
+    if (_selectedDestination == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('목적지를 검색한 뒤 결과 목록에서 선택해 주세요.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
 
     final controller = ScheduleScope.of(context);
@@ -81,17 +120,27 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     if (widget.existing == null) {
       await controller.addSchedule(
         title: _titleController.text.trim(),
-        location: _locationController.text.trim(),
+        location: _selectedDestination!.name,
+        destinationPlaceId: _selectedDestination!.id,
+        destinationAddress: _selectedDestination!.address,
+        destinationLatitude: _selectedDestination!.latitude,
+        destinationLongitude: _selectedDestination!.longitude,
         startTime: _startTime,
         endTime: _endTime,
+        preparationMinutes: int.parse(_preparationController.text.trim()),
       );
     } else {
       await controller.updateSchedule(
         widget.existing!.copyWith(
           title: _titleController.text.trim(),
-          location: _locationController.text.trim(),
+          location: _selectedDestination!.name,
+          destinationPlaceId: _selectedDestination!.id,
+          destinationAddress: _selectedDestination!.address,
+          destinationLatitude: _selectedDestination!.latitude,
+          destinationLongitude: _selectedDestination!.longitude,
           startTime: _startTime,
           endTime: _endTime,
+          preparationMinutes: int.parse(_preparationController.text.trim()),
         ),
       );
     }
@@ -112,6 +161,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   void dispose() {
     _titleController.dispose();
     _locationController.dispose();
+    _preparationController.dispose();
     super.dispose();
   }
 
@@ -149,13 +199,45 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _locationController,
+                  readOnly: true,
+                  onTap: _selectDestination,
+                  decoration: InputDecoration(
+                    labelText: '목적지',
+                    hintText: '눌러서 장소 검색',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.search),
+                      onPressed: _selectDestination,
+                    ),
+                  ),
+                  validator: (_) => _selectedDestination == null
+                      ? '검색 결과에서 목적지를 선택해 주세요.' : null,
+                ),
+                if (_selectedDestination != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(_selectedDestination!.address,
+                        style: Theme.of(context).textTheme.bodySmall),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _preparationController,
+                  keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: '장소',
+                    labelText: '준비 소요시간 (분)',
+                    helperText: '추천 출발 시각 이전에 필요한 준비시간',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? '장소를 입력해 주세요.'
-                      : null,
+                  validator: (value) {
+                    final minutes = int.tryParse(value?.trim() ?? '');
+                    if (minutes == null || minutes < 0 || minutes > 1440) {
+                      return '0~1440 사이의 정수를 입력해 주세요.';
+                    }
+                    return null;
+                  },
                 ),
               ],
             ),

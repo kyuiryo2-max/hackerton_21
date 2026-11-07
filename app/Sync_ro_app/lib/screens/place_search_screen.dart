@@ -5,8 +5,9 @@ import '../services/place_search_service.dart';
 
 class PlaceSearchScreen extends StatefulWidget {
   final String title;
+  final String initialQuery;
 
-  const PlaceSearchScreen({super.key, this.title = '장소 검색'});
+  const PlaceSearchScreen({super.key, this.title = '장소 검색', this.initialQuery = ''});
 
   @override
   State<PlaceSearchScreen> createState() => _PlaceSearchScreenState();
@@ -22,6 +23,17 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
   bool _isLoading = false;
   String? _errorMessage;
   int _requestId = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.text = widget.initialQuery;
+    if (widget.initialQuery.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _search();
+      });
+    }
+  }
 
   Future<void> _search() async {
     final keyword = _controller.text.trim();

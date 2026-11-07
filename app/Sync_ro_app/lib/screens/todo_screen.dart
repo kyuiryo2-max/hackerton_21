@@ -6,118 +6,27 @@ import '../providers/todo_controller.dart';
 class TodoScreen extends StatelessWidget {
   const TodoScreen({super.key});
 
-  Future<void> _showTodoDialog(
-    BuildContext context, {
-    TodoItem? existing,
-  }) async {
-    final titleController = TextEditingController(text: existing?.title ?? '');
-
-    final minutesController = TextEditingController(
-      text: '${existing?.estimatedMinutes ?? 15}',
+  Future<void> _showTodoDialog(BuildContext context, {TodoItem? existing}) async {
+    // Obtain the notifier before opening the dialog. Do not depend on a
+    // dialog's BuildContext after it has been removed from the tree.
+    final todoController = TodoScope.of(context);
+    final result = await showDialog<_TodoFormResult>(
+      context: context,
+      builder: (_) => _TodoFormDialog(existing: existing),
     );
+    if (result == null) return;
 
-    bool requiresTravel = existing?.requiresTravel ?? false;
-
-    final formKey = GlobalKey<FormState>();
-
-    try {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) {
-          return StatefulBuilder(
-            builder: (context, setDialogState) {
-              return AlertDialog(
-                title: Text(existing == null ? '할 일 추가' : '할 일 수정'),
-                content: Form(
-                  key: formKey,
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextFormField(
-                          controller: titleController,
-                          decoration: const InputDecoration(
-                            labelText: '할 일 이름',
-                          ),
-                          validator: (value) =>
-                              value == null || value.trim().isEmpty
-                              ? '이름을 입력해 주세요.'
-                              : null,
-                        ),
-                        TextFormField(
-                          controller: minutesController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: '예상 소요 시간(분)',
-                          ),
-                          validator: (value) {
-                            final minutes = int.tryParse(value ?? '');
-
-                            if (minutes == null || minutes <= 0) {
-                              return '1분 이상 입력해 주세요.';
-                            }
-                            return null;
-                          },
-                        ),
-                        SwitchListTile(
-                          title: const Text('장소 이동 필요'),
-                          value: requiresTravel,
-                          onChanged: (value) {
-                            setDialogState(() {
-                              requiresTravel = value;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogContext),
-                    child: const Text('취소'),
-                  ),
-                  FilledButton(
-                    onPressed: () {
-                      if (!formKey.currentState!.validate()) {
-                        return;
-                      }
-
-                      final controller = TodoScope.of(context);
-
-                      final title = titleController.text.trim();
-
-                      final minutes = int.parse(minutesController.text);
-
-                      if (existing == null) {
-                        controller.addTodo(
-                          title: title,
-                          minutes: minutes,
-                          requiresTravel: requiresTravel,
-                        );
-                      } else {
-                        controller.updateTodo(
-                          existing.copyWith(
-                            title: title,
-                            estimatedMinutes: minutes,
-                            requiresTravel: requiresTravel,
-                          ),
-                        );
-                      }
-
-                      Navigator.pop(dialogContext);
-                    },
-                    child: const Text('저장'),
-                  ),
-                ],
-              );
-            },
-          );
-        },
+    if (existing == null) {
+      await todoController.addTodo(
+        title: result.title,
+        minutes: result.minutes,
+        requiresTravel: false, // Future NLP pipeline will infer travel needs.
       );
-    } finally {
-      titleController.dispose();
-      minutesController.dispose();
+    } else {
+      await todoController.updateTodo(existing.copyWith(
+        title: result.title,
+        estimatedMinutes: result.minutes,
+      ));
     }
   }
 
@@ -140,10 +49,8 @@ class TodoScreen extends StatelessWidget {
                 if (controller.error != null)
                   Padding(
                     padding: const EdgeInsets.all(12),
-                    child: Text(
-                      controller.error!,
-                      style: const TextStyle(color: Colors.red),
-                    ),
+                    child: Text(controller.error!,
+                        style: const TextStyle(color: Colors.red)),
                   ),
                 Expanded(
                   child: todos.isEmpty
@@ -153,31 +60,21 @@ class TodoScreen extends StatelessWidget {
                           itemCount: todos.length,
                           itemBuilder: (context, index) {
                             final todo = todos[index];
-
                             return Card(
                               margin: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 5,
-                              ),
+                                  horizontal: 12, vertical: 5),
                               child: ListTile(
                                 leading: Checkbox(
                                   value: todo.isCompleted,
-                                  onChanged: (_) {
-                                    controller.toggleCompleted(todo);
-                                  },
+                                  onChanged: (_) => controller.toggleCompleted(todo),
                                 ),
-                                title: Text(
-                                  todo.title,
-                                  style: TextStyle(
-                                    decoration: todo.isCompleted
-                                        ? TextDecoration.lineThrough
-                                        : null,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  '${todo.estimatedMinutes}분 · '
-                                  '${todo.requiresTravel ? "장소 이동 필요" : "현재 위치에서 가능"}',
-                                ),
+                                title: Text(todo.title,
+                                    style: TextStyle(
+                                      decoration: todo.isCompleted
+                                          ? TextDecoration.lineThrough
+                                          : null,
+                                    )),
+                                subtitle: Text('예상 ${todo.estimatedMinutes}분'),
                                 trailing: PopupMenuButton<String>(
                                   onSelected: (value) {
                                     if (value == 'edit') {
@@ -187,14 +84,8 @@ class TodoScreen extends StatelessWidget {
                                     }
                                   },
                                   itemBuilder: (_) => const [
-                                    PopupMenuItem(
-                                      value: 'edit',
-                                      child: Text('수정'),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text('삭제'),
-                                    ),
+                                    PopupMenuItem(value: 'edit', child: Text('수정')),
+                                    PopupMenuItem(value: 'delete', child: Text('삭제')),
                                   ],
                                 ),
                               ),
@@ -204,6 +95,95 @@ class TodoScreen extends StatelessWidget {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _TodoFormResult {
+  final String title;
+  final int minutes;
+
+  const _TodoFormResult(this.title, this.minutes);
+}
+
+// Controllers belong to the dialog's State and are disposed only when Flutter
+// unmounts this dialog, not immediately after Navigator.pop is requested.
+class _TodoFormDialog extends StatefulWidget {
+  final TodoItem? existing;
+  const _TodoFormDialog({this.existing});
+
+  @override
+  State<_TodoFormDialog> createState() => _TodoFormDialogState();
+}
+
+class _TodoFormDialogState extends State<_TodoFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _titleController;
+  late final TextEditingController _minutesController;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.existing?.title ?? '');
+    _minutesController = TextEditingController(
+        text: '${widget.existing?.estimatedMinutes ?? 15}');
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _minutesController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.existing == null ? '할 일 추가' : '할 일 수정'),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(labelText: '할 일 내용'),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? '할 일을 입력해 주세요.'
+                    : null,
+              ),
+              TextFormField(
+                controller: _minutesController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: '예상 소요 시간(분)'),
+                validator: (value) {
+                  final minutes = int.tryParse(value?.trim() ?? '');
+                  return minutes == null || minutes <= 0
+                      ? '1분 이상 입력해 주세요.'
+                      : null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            Navigator.of(context).pop(_TodoFormResult(
+              _titleController.text.trim(),
+              int.parse(_minutesController.text.trim()),
+            ));
+          },
+          child: const Text('저장'),
+        ),
+      ],
     );
   }
 }
