@@ -14,8 +14,11 @@
 - 같은 이름 정류소가 길 양쪽에 있으면, 그 노선의 다음 정류장(nxtStn)이
   카카오 경로의 이후 정류장 중 하나와 같은 쪽을 골라요. 그래도 못 고르면 가까운 쪽이에요.
   (노션 메모는 adirection 이었지만, 종점 이름은 카카오 경로에 없어서 비교할 수 없어요)
+- 고른 정류소에 탈 수 있는 노선이 여럿이면 가장 빨리 오는 차를 골라요.
+- 이름을 비교할 때 괄호 안은 빼요: 광화문역(중) = 광화문역, N26(심야) = N26
 - 개발계정 하루 1,000건이라 같은 요청은 잠시 저장해 다시 써요.
 """
+import re
 import time
 from typing import Any
 
@@ -92,11 +95,14 @@ def _items(data: dict) -> list[dict]:
 
 
 _IGNORED = set(" \t.·ㆍ‧,()-")
+_PARENS = re.compile(r"\([^)]*\)")
 
 
 def _norm(name: str) -> str:
-    """정류장 이름 비교용. 띄어쓰기와 '.', '·' 같은 구분 기호를 무시해요."""
-    return "".join(ch for ch in (name or "") if ch not in _IGNORED)
+    """정류장·노선 이름 비교용. 괄호 안 내용, 띄어쓰기, '.', '·' 같은 구분 기호를 무시해요.
+    예: 광화문역(중) → 광화문역, N26(심야) → N26"""
+    name = _PARENS.sub("", name or "")
+    return "".join(ch for ch in name if ch not in _IGNORED)
 
 
 def _int_or_none(value) -> int | None:
@@ -166,7 +172,9 @@ def choose_stop(
     2. 둘 이상이면 서울시 API의 다음 정류장(nxtStn)이 카카오 경로의 이후 정류장 중 하나와
        같은 쪽을 골라요 (길 건너편 같은 이름 정류소 구분).
        종점 이름(adirection)은 카카오 경로에 없어서 비교에 못 쓰고, 화면 표시용으로만 담아요.
-    3. 그래도 여럿이면 가장 가까운 쪽
+    3. 그래도 여럿이면 가장 가까운 정류소
+    4. 그 정류소에 맞는 노선이 여럿이면 가장 빨리 오는 차 (올 차가 없는 None은 뒤로)
+       방향이 정해진 정류소 안에서만 고르므로, 길 건너편 차가 더 빨라도 고르지 않아요.
     """
     if isinstance(next_stops, str):
         next_stops = [next_stops]
@@ -184,7 +192,11 @@ def choose_stop(
         same_way = [m for m in matches if _norm(m[1]["next_stop"]) in ahead]
         if same_way:
             matches = same_way
-    stop, arrival = matches[0]  # candidates가 가까운 순이라 첫 번째가 가장 가까움
+    # candidates가 가까운 순이라 첫 번째가 가장 가까운 정류소
+    nearest = matches[0][0]
+    at_stop = [m for m in matches if m[0]["ars_id"] == nearest["ars_id"]]
+    at_stop.sort(key=lambda m: (m[1]["first_seconds"] is None, m[1]["first_seconds"] or 0))
+    stop, arrival = at_stop[0]
     return {"stop": stop, "arrival": arrival}
 
 

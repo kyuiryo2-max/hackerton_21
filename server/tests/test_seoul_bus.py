@@ -128,6 +128,63 @@ def test_방향을_모르면_가까운_정류소():
     assert found["stop"]["ars_id"] == "08157"
 
 
+def test_괄호_표기가_달라도_같은_정류장과_노선():
+    """서울시 '광화문역(중)' ↔ 카카오 '광화문역', 'N26(심야)' ↔ 'N26'."""
+    stop = {**seoul_bus.parse_near_stops(NEAR)[0], "name": "광화문역(중)"}
+    data = copy.deepcopy(ARRIVALS)
+    data["msgBody"]["itemList"][0].update(rtNm="N26(심야)", nxtStn="세종문화회관(중)")
+    found = seoul_bus.choose_stop([(stop, seoul_bus.parse_arrivals(data))], ["N26"], ["세종문화회관"])
+    assert found["arrival"]["route"] == "N26(심야)"
+    assert seoul_bus._norm("광화문역(중)") == seoul_bus._norm("광화문역")
+
+
+def test_노선이_여럿이면_가장_빨리_오는_차():
+    """샘플 정류소에 273(387초), 1111(127초), 1112(254초)가 모두 고려대학교앞 방향."""
+    stop = seoul_bus.parse_near_stops(NEAR)[0]
+    arrivals = seoul_bus.parse_arrivals(ARRIVALS)
+    found = seoul_bus.choose_stop([(stop, arrivals)], ["273", "1112", "1111"], "고려대학교앞")
+    assert found["arrival"]["route"] == "1111"
+    assert found["arrival"]["first_seconds"] == 127
+
+
+def test_올_차가_없는_노선은_뒤로():
+    stop = seoul_bus.parse_near_stops(NEAR)[0]
+    data = copy.deepcopy(ARRIVALS)
+    for item in data["msgBody"]["itemList"]:
+        if item["rtNm"] == "1111":
+            item.update(traTime1="0", arrmsg1="운행종료")
+    found = seoul_bus.choose_stop([(stop, seoul_bus.parse_arrivals(data))], ["1111", "1112"], "고려대학교앞")
+    assert found["arrival"]["route"] == "1112"
+
+
+def test_길_건너편_차가_더_빨라도_방향이_맞는_쪽():
+    """가까운 쪽(08157)의 2115는 39초, 맞는 방향(06176)의 2115는 600초여도 06176을 골라요."""
+    stops = [s for s in seoul_bus.parse_near_stops(NEAR) if s["name"] == "우신향병원"]
+    wrong = seoul_bus.parse_arrivals(arrivals_for("08157", "우신향병원", "고려대학교앞"))
+    right_data = arrivals_for("06176", "우신향병원", "제기시장")
+    for item in right_data["msgBody"]["itemList"]:
+        item["traTime1"] = "600"
+    right = seoul_bus.parse_arrivals(right_data)
+    found = seoul_bus.choose_stop([(stops[0], wrong), (stops[1], right)], ["2115"], "제기시장")
+    assert found["stop"]["ars_id"] == "06176"
+    assert found["arrival"]["first_seconds"] == 600
+
+
+def test_방향을_몰라도_가까운_정류소_안에서만_빠른_차():
+    """방향 확인이 안 되면 가까운 정류소를 먼저 정하고, 그 안에서 빠른 차를 골라요."""
+    stops = [s for s in seoul_bus.parse_near_stops(NEAR) if s["name"] == "우신향병원"]
+    near_data = arrivals_for("08157", "우신향병원", "고려대학교앞")
+    far_data = arrivals_for("06176", "우신향병원", "고려대학교앞")
+    for item in far_data["msgBody"]["itemList"]:
+        item["traTime1"] = "10"
+    found = seoul_bus.choose_stop(
+        [(stops[0], seoul_bus.parse_arrivals(near_data)), (stops[1], seoul_bus.parse_arrivals(far_data))],
+        ["273", "1111"], None,
+    )
+    assert found["stop"]["ars_id"] == "08157"
+    assert found["arrival"]["route"] == "1111"
+
+
 def test_노선이_없으면_None():
     stop = seoul_bus.parse_near_stops(NEAR)[0]
     assert seoul_bus.choose_stop([(stop, seoul_bus.parse_arrivals(ARRIVALS))], ["101"]) is None
