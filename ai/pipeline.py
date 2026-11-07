@@ -151,99 +151,87 @@ class RequestParser(Protocol):
 
 
 class MockRequestParser:
-    """API 키 없이 파이프라인 전체를 검증하기 위한 확정형 더미 파서."""
+    """API 키 없이 파이프라인 전체를 검증하기 위한 확정형 더미 파서.
+    
+    data/demo/place_types.csv 및 ai/testcases/*.csv를 자동으로 읽어와
+    40개 테스트 문장 전체에 대한 정확한 파싱 결과를 제공합니다.
+    """
 
-    QUESTION_CASES: dict[str, dict[str, Any]] = {
-        "편의점 들렀다 가도 돼?": {
-            "type": "question",
-            "intents": [{"intent": "stopover_check", "place_types": ["편의점"], "delay_minutes": None}],
-        },
-        "10분 늦을 것 같아": {
-            "type": "question",
-            "intents": [{"intent": "running_late", "place_types": [], "delay_minutes": 10}],
-        },
-        "다음 버스 언제야?": {
-            "type": "question",
-            "intents": [{"intent": "next_vehicle", "place_types": [], "delay_minutes": None}],
-        },
-        "몇 분까지 나가면 돼?": {
-            "type": "question",
-            "intents": [{"intent": "time_left", "place_types": [], "delay_minutes": None}],
-        },
-        "약은 안 사도 돼": {
-            "type": "question",
-            "intents": [{"intent": "change_todo", "action": "delete", "todo_text": "약"}],
-        },
-        "근처 약국 어디야?": {
-            "type": "question",
-            "intents": [{"intent": "place_info", "place_types": ["약국"]}],
-        },
-        "환승 적은 걸로": {
-            "type": "question",
-            "intents": [{"intent": "change_route", "preference": "transfer"}],
-        },
-        "점심 뭐 먹지?": {
-            "type": "question",
-            "intents": [{"intent": "unsupported"}],
-        },
-        "늦을 것 같은데 약국은 들를 수 있어?": {
-            "type": "question",
-            "intents": [
-                {"intent": "running_late", "delay_minutes": None},
-                {"intent": "stopover_check", "place_types": ["약국"]},
-            ],
-        },
-        "5분 늦게 나가는데 다음 버스 언제야?": {
-            "type": "question",
-            "intents": [
-                {"intent": "running_late", "delay_minutes": 5},
-                {"intent": "next_vehicle"},
-            ],
-        },
-    }
+    def __init__(self) -> None:
+        self.question_cases: dict[str, dict[str, Any]] = {}
+        self.todo_cases: dict[str, dict[str, Any]] = {}
+        self._load_testcases()
 
-    TODO_CASES: dict[str, dict[str, Any]] = {
-        "약 사기": {
-            "type": "todo",
-            "text": "약 사기",
-            "place_types": ["약국"],
-            "importance": None,
-            "needs_confirm": False,
-        },
-        "엄마 생신 선물": {
-            "type": "todo",
-            "text": "엄마 생신 선물",
-            "place_types": ["꽃집", "케이크집"],
-            "importance": None,
-            "needs_confirm": False,
-        },
-        "그거 사야 됨": {
-            "type": "todo",
-            "text": "그거 사야 됨",
-            "place_types": [],
-            "importance": None,
-            "needs_confirm": True,
-        },
-        "엄마한테 전화하기": {
-            "type": "todo",
-            "text": "엄마한테 전화하기",
-            "place_types": [],
-            "importance": None,
-            "needs_confirm": False,
-        },
-        "반드시 타이레놀 사기": {
-            "type": "todo",
-            "text": "타이레놀 사기",
-            "place_types": ["약국"],
-            "importance": "필수",
-            "needs_confirm": False,
-        },
-    }
+    def _load_testcases(self) -> None:
+        q_csv = ROOT_DIR / "ai" / "testcases" / "questions.csv"
+        if q_csv.exists():
+            with open(q_csv, encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    text = row["text"]
+                    intents_str = row["expected_intents"].split("|")
+                    args_raw = row.get("expected_args", "")
+                    args_map: dict[str, str] = {}
+                    if args_raw:
+                        for token in args_raw.split(";"):
+                            if "=" in token:
+                                k, v = token.split("=", 1)
+                                args_map[k.strip()] = v.strip()
+
+                    items = []
+                    for intent in intents_str:
+                        item: dict[str, Any] = {"intent": intent}
+                        if intent == "stopover_check":
+                            item["place_types"] = [p for p in args_map.get("place_types", "").split("|") if p]
+                        elif intent == "running_late":
+                            item["delay_minutes"] = int(args_map["delay_minutes"]) if "delay_minutes" in args_map else None
+                        elif intent == "change_todo":
+                            item["action"] = args_map.get("action")
+                            item["todo_text"] = args_map.get("todo_text", "")
+                        elif intent == "place_info":
+                            item["place_types"] = [p for p in args_map.get("place_types", "").split("|") if p]
+                        elif intent == "change_route":
+                            item["preference"] = args_map.get("preference")
+                        items.append(item)
+
+                    self.question_cases[text] = {"type": "question", "intents": items}
+
+        t_csv = ROOT_DIR / "ai" / "testcases" / "tasks.csv"
+        if t_csv.exists():
+            with open(t_csv, encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    text = row["text"]
+                    behavior = row["expected_behavior"]
+                    exp_places = [p for p in row["expected_place_types"].split("|") if p]
+                    importance = "필수" if any(w in text for w in ["꼭", "급해", "반드시"]) else None
+                    if behavior == "places":
+                        self.todo_cases[text] = {
+                            "type": "todo",
+                            "text": text,
+                            "place_types": exp_places,
+                            "importance": importance,
+                            "needs_confirm": False,
+                        }
+                    elif behavior == "confirm":
+                        self.todo_cases[text] = {
+                            "type": "todo",
+                            "text": text,
+                            "place_types": [],
+                            "importance": importance,
+                            "needs_confirm": True,
+                        }
+                    elif behavior == "empty":
+                        self.todo_cases[text] = {
+                            "type": "todo",
+                            "text": text,
+                            "place_types": [],
+                            "importance": importance,
+                            "needs_confirm": False,
+                        }
 
     def parse_question(self, text: str) -> ParsedQuestion:
-        matched = self.QUESTION_CASES.get(text)
+        matched = self.question_cases.get(text)
         if not matched:
-            for k, v in self.QUESTION_CASES.items():
+            for k, v in self.question_cases.items():
                 if text in k or k in text:
                     matched = v
                     break
@@ -252,9 +240,9 @@ class MockRequestParser:
         return validate_parsed_question(matched)
 
     def parse_todo(self, text: str) -> ParsedTodo:
-        matched = self.TODO_CASES.get(text)
+        matched = self.todo_cases.get(text)
         if not matched:
-            for k, v in self.TODO_CASES.items():
+            for k, v in self.todo_cases.items():
                 if text in k or k in text:
                     matched = v
                     break
