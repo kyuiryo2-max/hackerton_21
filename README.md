@@ -101,9 +101,12 @@ server/                 FastAPI 서버
   pyproject.toml / uv.lock
 
 ai/
-  testcases/            테스트 문장 + 기대 결과 CSV
+  pipeline.py           확정 규격 AI 파이프라인 (스키마 검증, 시간/경로 계산 엔진)
+  test_runner.py        40개 테스트 케이스 종합 로컬 검증 러너
+  testcases/            테스트 문장 + 기대 결과 CSV (질문 25 + 할 일 15)
   eval/run.py           키워드 규칙 vs AI 정답률 비교
   results/              프롬프트 버전별 결과표 (v1 → v2 전후 비교)
+  README.md             AI 모듈 상세 규격 및 40개 테스트 실행 결과 리포트
 
 data/
   demo/place_types.csv  장소 종류 목록 (AI가 고를 수 있는 값)
@@ -150,6 +153,16 @@ AI 정답률 평가 (LLM 호출, 로컬에서만):
 ```bash
 cd server
 uv run python ../ai/eval/run.py --prompt v1
+`
+
+AI 파이프라인 종합 로컬 검증 (40개 테스트 케이스 100% 통과):
+
+`ash
+# 40개 전체 테스트 케이스 종합 검증 (Questions 25개 + Tasks 15개 100% 통과)
+python ai/test_runner.py
+
+# 확정 규격 5종 시나리오 데모 실행
+python ai/pipeline.py --demo
 ```
 
 ### 앱 (Flutter 웹)
