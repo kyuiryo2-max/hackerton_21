@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import config
 from app.db.database import init_db, seed_demo_data
-from app.routers import storage
+from app.routers import storage, transit
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(storage.router)
+app.include_router(transit.router)
 
 
 # 오류 응답을 기준 문서 형식 {"error": {"code", "message"}} 하나로 맞춰요.
