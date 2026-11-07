@@ -1,4 +1,3 @@
-
 import '../config/api_config.dart';
 import '../data/mock_recommendations.dart';
 import '../models/travel_recommendation.dart';
@@ -8,28 +7,19 @@ class RecommendationService {
   final ApiService _apiService;
 
   RecommendationService({ApiService? apiService})
-      : _apiService = apiService ?? ApiService();
+    : _apiService = apiService ?? ApiService();
 
-  Future<List<TravelRecommendation>>
-      getRecommendations() async {
+  Future<List<TravelRecommendation>> getRecommendations() async {
     if (ApiConfig.useMockData) {
-      await Future.delayed(
-        const Duration(milliseconds: 500),
-      );
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      return List<TravelRecommendation>.from(
-        mockRecommendations,
-      );
+      return List<TravelRecommendation>.from(mockRecommendations);
     }
 
-    final data = await _apiService.get(
-      ApiConfig.recommendationsEndpoint,
-    );
+    final data = await _apiService.get(ApiConfig.recommendationsEndpoint);
 
     if (data is! List) {
-      throw const FormatException(
-        '추천 API 응답은 JSON 배열이어야 합니다.',
-      );
+      throw const FormatException('추천 API 응답은 JSON 배열이어야 합니다.');
     }
 
     return data.map((item) {

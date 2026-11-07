@@ -1,4 +1,3 @@
-
 import 'place.dart';
 
 class RouteRequest {
@@ -21,8 +20,7 @@ class RouteRequest {
     return {
       'origin': origin,
       'destination': destination,
-      'desired_arrival_time':
-          desiredArrivalTime.toIso8601String(),
+      'desired_arrival_time': desiredArrivalTime.toIso8601String(),
       'origin_place_id': originPlace?.id,
       'destination_place_id': destinationPlace?.id,
       'origin_latitude': originPlace?.latitude,

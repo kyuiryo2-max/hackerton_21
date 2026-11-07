@@ -1,4 +1,3 @@
-
 class Schedule {
   final int id;
   final String title;

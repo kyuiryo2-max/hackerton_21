@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../models/route_candidate.dart';
@@ -6,10 +5,7 @@ import '../models/route_candidate.dart';
 class RouteCandidateCard extends StatelessWidget {
   final RouteCandidate candidate;
 
-  const RouteCandidateCard({
-    super.key,
-    required this.candidate,
-  });
+  const RouteCandidateCard({super.key, required this.candidate});
 
   IconData _iconFor(RouteSegmentType type) {
     switch (type) {
@@ -51,15 +47,10 @@ class RouteCandidateCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     candidate.title,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium,
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
-                if (candidate.isRecommended)
-                  const Chip(
-                    label: Text('추천 경로'),
-                  ),
+                if (candidate.isRecommended) const Chip(label: Text('추천 경로')),
               ],
             ),
 
@@ -67,9 +58,7 @@ class RouteCandidateCard extends StatelessWidget {
 
             Text(
               '총 ${candidate.totalMinutes}분',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall,
+              style: Theme.of(context).textTheme.headlineSmall,
             ),
 
             const SizedBox(height: 12),
@@ -79,28 +68,14 @@ class RouteCandidateCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Chip(
-                  avatar: const Icon(
-                    Icons.directions_walk,
-                    size: 18,
-                  ),
-                  label: Text(
-                    '도보 ${candidate.walkingMinutes}분',
-                  ),
+                  avatar: const Icon(Icons.directions_walk, size: 18),
+                  label: Text('도보 ${candidate.walkingMinutes}분'),
                 ),
                 Chip(
-                  avatar: const Icon(
-                    Icons.schedule,
-                    size: 18,
-                  ),
-                  label: Text(
-                    '대기 ${candidate.waitingMinutes}분',
-                  ),
+                  avatar: const Icon(Icons.schedule, size: 18),
+                  label: Text('대기 ${candidate.waitingMinutes}분'),
                 ),
-                Chip(
-                  label: Text(
-                    '환승 ${candidate.transferCount}회',
-                  ),
-                ),
+                Chip(label: Text('환승 ${candidate.transferCount}회')),
               ],
             ),
 
@@ -110,16 +85,10 @@ class RouteCandidateCard extends StatelessWidget {
               (segment) => ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  _iconFor(segment.type),
-                ),
+                leading: Icon(_iconFor(segment.type)),
                 title: Text(segment.description),
-                subtitle: Text(
-                  _labelFor(segment.type),
-                ),
-                trailing: Text(
-                  '${segment.durationMinutes}분',
-                ),
+                subtitle: Text(_labelFor(segment.type)),
+                trailing: Text('${segment.durationMinutes}분'),
               ),
             ),
           ],

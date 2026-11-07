@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../models/schedule.dart';
@@ -11,8 +10,7 @@ class ScheduleController extends ChangeNotifier {
   bool _isLoading = true;
   String? _error;
 
-  List<Schedule> get schedules =>
-      List.unmodifiable(_schedules);
+  List<Schedule> get schedules => List.unmodifiable(_schedules);
 
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -31,9 +29,7 @@ class ScheduleController extends ChangeNotifier {
   }
 
   void _sort() {
-    _schedules.sort(
-      (a, b) => a.startTime.compareTo(b.startTime),
-    );
+    _schedules.sort((a, b) => a.startTime.compareTo(b.startTime));
   }
 
   Future<void> _save() async {
@@ -55,10 +51,7 @@ class ScheduleController extends ChangeNotifier {
   }) async {
     final nextId = _schedules.isEmpty
         ? 1
-        : _schedules
-                .map((e) => e.id)
-                .reduce((a, b) => a > b ? a : b) +
-            1;
+        : _schedules.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
 
     _schedules.add(
       Schedule(
@@ -75,9 +68,7 @@ class ScheduleController extends ChangeNotifier {
   }
 
   Future<void> updateSchedule(Schedule updated) async {
-    final index = _schedules.indexWhere(
-      (e) => e.id == updated.id,
-    );
+    final index = _schedules.indexWhere((e) => e.id == updated.id);
 
     if (index < 0) return;
 
@@ -92,8 +83,7 @@ class ScheduleController extends ChangeNotifier {
   }
 }
 
-class ScheduleScope
-    extends InheritedNotifier<ScheduleController> {
+class ScheduleScope extends InheritedNotifier<ScheduleController> {
   const ScheduleScope({
     super.key,
     required ScheduleController controller,
@@ -101,11 +91,11 @@ class ScheduleScope
   }) : super(notifier: controller);
 
   static ScheduleController of(BuildContext context) {
-    final scope = context
-        .dependOnInheritedWidgetOfExactType<ScheduleScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<ScheduleScope>();
 
     assert(scope != null, 'ScheduleScope를 찾을 수 없습니다.');
     return scope!.notifier!;
   }
 }
+
 //일정 추가 및 삭제시 연결된 화면에 변경사항 전달

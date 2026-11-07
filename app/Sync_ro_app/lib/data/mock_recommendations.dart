@@ -1,4 +1,3 @@
-
 import '../models/travel_recommendation.dart';
 
 final List<TravelRecommendation> mockRecommendations = [
