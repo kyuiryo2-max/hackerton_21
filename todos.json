@@ -1,0 +1,157 @@
+{
+  "_설명": "할 일 저장·조회·수정·삭제. status 대기/포함/제외/완료, source 입력/질문 (#12 회의 3번). source가 질문이면 importance는 항상 필수",
+  "examples": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/todos",
+        "body": {
+          "user_id": "u1",
+          "text": "이어폰 사기",
+          "place_types": [
+            "편의점"
+          ],
+          "importance": "필수"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": 3,
+          "user_id": "u1",
+          "text": "이어폰 사기",
+          "place_types": [
+            "편의점"
+          ],
+          "importance": "필수",
+          "status": "대기",
+          "source": "입력",
+          "done": false
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/todos",
+        "body": {
+          "user_id": "u1",
+          "text": "우유 사기",
+          "place_types": [
+            "편의점"
+          ],
+          "source": "질문"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": 4,
+          "user_id": "u1",
+          "text": "우유 사기",
+          "place_types": [
+            "편의점"
+          ],
+          "importance": "필수",
+          "status": "대기",
+          "source": "질문",
+          "done": false
+        }
+      },
+      "note": "질문(stopover_check)으로 들어온 할 일. importance를 안 보내도 필수"
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/todos/3",
+        "query": {
+          "user_id": "u1"
+        },
+        "body": {
+          "status": "포함"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": 3,
+          "user_id": "u1",
+          "text": "이어폰 사기",
+          "place_types": [
+            "편의점"
+          ],
+          "importance": "필수",
+          "status": "포함",
+          "source": "입력",
+          "done": false
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/todos",
+        "query": {
+          "user_id": "u1",
+          "status": "포함"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 3,
+            "user_id": "u1",
+            "text": "이어폰 사기",
+            "place_types": [
+              "편의점"
+            ],
+            "importance": "필수",
+            "status": "포함",
+            "source": "입력",
+            "done": false
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/todos",
+        "query": {
+          "user_id": "u1",
+          "done": "false"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 3,
+            "user_id": "u1",
+            "text": "이어폰 사기",
+            "place_types": [
+              "편의점"
+            ],
+            "importance": "필수",
+            "status": "포함",
+            "source": "입력",
+            "done": false
+          },
+          {
+            "id": 4,
+            "user_id": "u1",
+            "text": "우유 사기",
+            "place_types": [
+              "편의점"
+            ],
+            "importance": "필수",
+            "status": "대기",
+            "source": "질문",
+            "done": false
+          }
+        ]
+      }
+    }
+  ]
+}

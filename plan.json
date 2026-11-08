@@ -1,0 +1,108 @@
+{
+  "_설명": "만들 예정 (#33, #35). 값은 시연 모드 계산 결과 (demo.decide([1, 2, 3])) 그대로예요. 경로가 여러 개면 routes에 2~3개",
+  "examples": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/plan",
+        "body": {
+          "user_id": "demo",
+          "schedule_id": 1,
+          "todo_ids": [
+            1,
+            2,
+            3
+          ],
+          "demo": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "now": "2026-11-21T08:32:00+09:00",
+          "schedule": {
+            "destination": {
+              "name": "청량리역",
+              "lng": 127.04691,
+              "lat": 37.58029
+            },
+            "arrive_by": "2026-11-21T09:00:00+09:00",
+            "prep_minutes": 30
+          },
+          "board_at": "2026-11-21T08:44:00+09:00",
+          "arrive_at": "2026-11-21T08:59:17+09:00",
+          "routes": [
+            {
+              "rank": 1,
+              "type": "BUS",
+              "name": "2115",
+              "guidance": "지선 2115 (안암역3번출구 > 청량리역환승센터)",
+              "total_min": 28,
+              "wait_min": 12,
+              "moving_min": 14,
+              "last_walk_min": 2,
+              "transfers": 0,
+              "fare": 1500,
+              "stops": [
+                "안암역3번출구",
+                "제기시장",
+                "홍파초등학교.정화여중고",
+                "제기동주민센터.서울약령시앞",
+                "청량리수산시장",
+                "청량리역환승센터"
+              ],
+              "max_stay_min": 6,
+              "has_realtime": true
+            }
+          ],
+          "todos": [
+            {
+              "todo_id": 1,
+              "text": "이어폰 사기",
+              "importance": "필수",
+              "status": "포함",
+              "place": {
+                "place_type": "편의점",
+                "name": "CU 안암센트럴점",
+                "address": "서울 성북구 고려대로28길 16"
+              },
+              "detour_min": 4,
+              "reason": ""
+            },
+            {
+              "todo_id": 3,
+              "text": "다이소 들르기",
+              "importance": "필수",
+              "status": "대기",
+              "place": {
+                "place_type": "다이소",
+                "name": "다이소 안암점",
+                "address": "서울 성북구 고려대로24길 51"
+              },
+              "detour_min": 12,
+              "reason": "시간이 부족해요",
+              "options": [
+                "이번엔 빼기",
+                "늦더라도 들르기"
+              ]
+            },
+            {
+              "todo_id": 2,
+              "text": "커피 사기",
+              "importance": "선택",
+              "status": "제외",
+              "place": {
+                "place_type": "카페",
+                "name": "스타벅스 안암역점",
+                "address": "서울 성북구 고려대로 102-2"
+              },
+              "detour_min": 2,
+              "reason": "시간이 부족해요"
+            }
+          ],
+          "explanation": "2115번을 타면 이어폰을 사고도 9시 전에 도착해요."
+        }
+      }
+    }
+  ]
+}

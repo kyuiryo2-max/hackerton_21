@@ -1,0 +1,97 @@
+{
+  "_설명": "오류는 모두 {\"error\": {\"code\", \"message\"}} 한 형식",
+  "examples": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/schedules/9999",
+        "query": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": {
+            "code": "not_found",
+            "message": "일정 9999 없음"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/todos",
+        "body": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": {
+            "code": "invalid_request",
+            "message": "text: Field required"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/todos",
+        "body": {
+          "user_id": "u1",
+          "text": "x",
+          "status": "보류"
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": {
+            "code": "invalid_request",
+            "message": "status: Input should be '대기', '포함', '제외' or '완료'"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "path": "/api/todos/1",
+        "query": {
+          "user_id": "demo"
+        }
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": "demo_readonly",
+            "message": "시연용 demo 데이터는 바꿀 수 없어요"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "stop_id": "08301"
+        }
+      },
+      "response": {
+        "status": 501,
+        "body": {
+          "error": {
+            "code": "not_ready",
+            "message": "실시간 도착은 아직 연결되지 않았어요"
+          }
+        }
+      }
+    }
+  ]
+}

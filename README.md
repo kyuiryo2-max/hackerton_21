@@ -111,6 +111,7 @@ data/
 
 docs/
   design/json-format.md AI 출력 JSON 형식, 질문 종류 ← 서버·AI·앱 공통 약속
+  design/api.md         앱 ↔ 서버 API (서버 코드 기준), 예시는 design/api-examples/
   research/             설문 요약, 인터뷰 메모 (개인정보 X)
   reports/              중간·최종 보고서
   presentation/         포스터, 발표 자료, 시연 대본
@@ -118,6 +119,7 @@ docs/
 scripts/
   tasks.csv             작업 표 (62개)
   create_issues.py      작업 표 → GitHub 라벨·마일스톤·이슈
+  export_questions.py   질문 기록 → 테스트 케이스 후보 CSV
 .github/workflows/      CI (server/tests 실행)
 ```
 

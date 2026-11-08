@@ -1,0 +1,42 @@
+{
+  "_설명": "질문 기록 (#12 회의 4번). 저장은 /api/ask 가 질문 1개 + 답변 1개씩 해요. 앱은 새로고침 뒤 대화창을 다시 그릴 때 써요",
+  "examples": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/messages",
+        "query": {
+          "user_id": "u1",
+          "limit": 10
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 1,
+            "user_id": "u1",
+            "role": "user",
+            "text": "다음 버스 언제야?",
+            "intents": [
+              {
+                "intent": "next_vehicle",
+                "place_types": [],
+                "delay_minutes": null
+              }
+            ],
+            "created_at": "2026-11-08T15:54:57+09:00"
+          },
+          {
+            "id": 2,
+            "user_id": "u1",
+            "role": "assistant",
+            "text": "2115번이 12분 뒤에 와요. 그다음 차는 20분 뒤예요.",
+            "intents": null,
+            "created_at": "2026-11-08T15:54:57+09:00"
+          }
+        ]
+      }
+    }
+  ]
+}
