@@ -16,7 +16,13 @@
 - place_types는 이 목록 안의 값만 쓴다: {{PLACE_TYPES}}
 - 질문 종류가 두 개면 intents 배열에 순서대로 넣는다.
 - context의 현재 할 일 목록을 참고한다.
+- recent_messages는 최근 대화다. "거기", "그거"처럼 앞 대화를 가리키면 여기서 찾는다.
+- 무엇을 묻는지 알 수 없으면 needs_confirm을 true로 하고, question에 되묻는 짧은 문장을 쓴다. 알 수 있으면 needs_confirm은 false, question은 null.
 - JSON 하나만 출력한다.
 
 출력 형식
-{"type": "question", "intents": [{"intent": "stopover_check", "place_types": ["편의점"], "delay_minutes": null}]}
+{"type": "question", "intents": [{"intent": "stopover_check", "place_types": ["편의점"], "delay_minutes": null}], "needs_confirm": false, "question": null}
+
+되묻는 예
+질문: "거기 들러도 돼?" (recent_messages에 장소가 없음)
+출력: {"type": "question", "intents": [{"intent": "stopover_check", "place_types": [], "delay_minutes": null}], "needs_confirm": true, "question": "어디를 들르고 싶은지 알려 줄래요?"}

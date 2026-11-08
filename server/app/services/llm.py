@@ -1,7 +1,7 @@
 """② AI 이해와 ⑤ 설명 문장. AI는 판단과 문장만 맡고, 숫자는 만들지 않아요.
 
 - parse_todo: 할 일 문장 → 장소 종류 JSON (docs/design/json-format.md 1번)
-- classify_question: 질문 문장 → 질문 종류 JSON (json-format.md 2번)
+- classify_question: 질문 문장 → 질문 종류 JSON (json-format.md 2번). 애매하면 needs_confirm + 되묻는 문장
 - numbers_match: 답변 속 숫자가 계산 결과에 있는지 코드로 확인
 """
 import csv
@@ -15,6 +15,12 @@ from app import config
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 PLACE_TYPES_CSV = Path(__file__).resolve().parents[3] / "data" / "demo" / "place_types.csv"
 PROMPT_VERSION = "v1"
+
+INTENTS = (
+    "next_vehicle", "stopover_check", "running_late", "time_left",
+    "change_todo", "place_info", "change_route", "unsupported",
+)
+DEFAULT_CONFIRM_QUESTION = "조금만 더 자세히 말해 줄래요?"
 
 
 def load_prompt(name: str, version: str | None = None) -> str:
@@ -56,9 +62,42 @@ def parse_todo(text: str) -> dict:
     return out
 
 
-def classify_question(text: str, context: dict | None = None) -> dict:
-    user = json.dumps({"question": text, "context": context or {}}, ensure_ascii=False)
-    return _chat_json(load_prompt("question_intent"), user)
+def classify_question(text: str, context: dict | None = None, history: list[dict] | None = None) -> dict:
+    """history 는 최근 대화 (repository.recent_messages). "거기 말고"처럼 앞 대화를 가리킬 때 써요."""
+    user = json.dumps(
+        {"question": text, "context": context or {}, "recent_messages": history or []},
+        ensure_ascii=False,
+    )
+    return normalize_question(_chat_json(load_prompt("question_intent"), user))
+
+
+def normalize_question(out: dict) -> dict:
+    """AI 결과를 json-format.md 2번 모양으로 맞춰요 (#12 회의 5번).
+
+    - 목록에 없는 질문 종류·장소 종류는 버리고 되묻기
+    - 질문 종류가 하나도 없으면 되묻기
+    - 되묻는데 문장이 없으면 기본 문장
+    """
+    allowed_places = set(place_types())
+    intents, dropped = [], False
+    for item in out.get("intents") or []:
+        if not isinstance(item, dict) or item.get("intent") not in INTENTS:
+            dropped = True
+            continue
+        places = item.get("place_types") or []
+        kept = [p for p in places if p in allowed_places]
+        dropped = dropped or len(kept) != len(places)
+        intents.append({**item, "place_types": kept})
+    needs_confirm = bool(out.get("needs_confirm")) or dropped or not intents
+    question = out.get("question") or None
+    if needs_confirm and not question:
+        question = DEFAULT_CONFIRM_QUESTION
+    return {
+        "type": "question",
+        "intents": intents,
+        "needs_confirm": needs_confirm,
+        "question": question if needs_confirm else None,
+    }
 
 
 _NUM = re.compile(r"\d+")

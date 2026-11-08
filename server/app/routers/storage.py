@@ -4,6 +4,7 @@ http://127.0.0.1:8000/docs 에서 직접 눌러 볼 수 있어요.
 목적지 좌표는 저장하지만, 사용자의 현재 위치는 받지도 저장하지도 않아요.
 id로 조회·수정·삭제할 때는 ?user_id= 가 꼭 필요하고, 다른 사용자의 항목은 404로 답해요.
 시연용 demo 데이터는 이 API로 바꿀 수 없어요 (403). 서버가 켜질 때마다 처음 상태로 돌아가요.
+요청·응답 예시: docs/design/api.md, docs/design/api-examples/
 """
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -20,6 +21,8 @@ router = APIRouter(prefix="/api", tags=["저장·조회"])
 
 KST = timezone(timedelta(hours=9))
 Importance = Literal["필수", "선택"]  # docs/design/json-format.md 기준
+Status = Literal["대기", "포함", "제외", "완료"]  # #12 회의 3번
+Source = Literal["입력", "질문"]
 UserId = Query(min_length=1, description="기기마다 만든 임의 ID")
 
 
@@ -124,6 +127,8 @@ class TodoIn(BaseModel):
     text: str = Field(min_length=1, examples=["약 사기"])
     place_types: list[str] = Field(default=[], examples=[["약국"]])
     importance: Importance = "선택"
+    status: Status = "대기"
+    source: Source = Field(default="입력", description="질문이면 중요도는 필수로 저장돼요")
 
     _places = field_validator("place_types")(lambda cls, v: _check_place_types(v))
 
@@ -132,7 +137,8 @@ class TodoUpdate(BaseModel):
     text: str | None = None
     place_types: list[str] | None = None
     importance: Importance | None = None
-    done: bool | None = None
+    status: Status | None = None
+    done: bool | None = Field(default=None, description="예전 방식. true 면 status 완료")
 
     _places = field_validator("place_types")(lambda cls, v: _check_place_types(v))
 
@@ -143,6 +149,8 @@ class Todo(BaseModel):
     text: str
     place_types: list[str]
     importance: Importance
+    status: Status
+    source: Source
     done: bool
 
 
@@ -154,9 +162,9 @@ def create_todo(body: TodoIn):
 
 
 @router.get("/todos", response_model=list[Todo])
-def list_todos(user_id: str = UserId, done: bool | None = None):
-    """필수 먼저. done=false 로 남은 할 일만 볼 수 있어요."""
-    return repo.list_todos(user_id, done)
+def list_todos(user_id: str = UserId, done: bool | None = None, status: Status | None = None):
+    """필수 먼저. done=false 는 완료가 아닌 할 일, status=포함 은 경로에 넣은 할 일만."""
+    return repo.list_todos(user_id, done, status)
 
 
 @router.patch("/todos/{todo_id}", response_model=Todo)
@@ -223,3 +231,20 @@ def create_choice(body: ChoiceIn):
 @router.get("/choices", response_model=list[Choice])
 def list_choices(user_id: str = UserId):
     return repo.list_route_choices(user_id)
+
+
+# ---------- 질문 기록 (#12 회의 4번) ----------
+class Message(BaseModel):
+    id: int
+    user_id: str
+    role: Literal["user", "assistant"]
+    text: str
+    intents: list[dict] | None
+    created_at: str
+
+
+@router.get("/messages", response_model=list[Message])
+def list_messages(user_id: str = UserId, limit: int | None = Query(default=None, ge=1, le=100)):
+    """대화창 다시 그리기용 (새로고침해도 대화 유지). 오래된 것부터.
+    저장은 /api/ask 가 해요 (질문 1개 + 답변 1개)."""
+    return repo.list_messages(user_id, limit)
