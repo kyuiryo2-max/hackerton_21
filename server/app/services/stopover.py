@@ -11,7 +11,9 @@
 """
 from dataclasses import dataclass
 
-DEFAULT_BUFFER_SECONDS = 120  # 정류장에 미리 도착해 있는 여유
+from app.services.timecalc import STOP_BUFFER_SECONDS
+
+DEFAULT_BUFFER_SECONDS = STOP_BUFFER_SECONDS  # 정류장에 미리 도착해 있는 여유 (timecalc 에서 정함)
 SUBWAY_MARGIN_SECONDS = 60    # 지하철 도착 시간은 1분 단위라 더하는 여유
 REQUIRED = "필수"
 
