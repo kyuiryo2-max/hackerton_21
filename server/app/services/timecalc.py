@@ -1,11 +1,18 @@
 """④ 계산: 출발·준비 시각, 경유지에서 최대로 쓸 수 있는 시간.
 
-AI를 쓰지 않는 순수 계산 모듈이에요. (작업 표 15번, 29번)
+AI를 쓰지 않는 순수 계산 모듈이에요. (노션 할 일 #16, #29)
+
+단위 (#12 회의 6번): 서버 안에서는 초로 계산하고, 화면에 보낼 때만 분으로 바꿔요.
+→ 새 코드는 *_seconds 함수를 쓰세요. 분 단위 함수(plan_by_vehicle 등)는 예전 호출용으로 남겨 둔 거예요.
 """
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+
+# 여유 시간은 여기 한 곳에서 정해요. 화면의 "여유 N분 포함" 문구도 이 값을 써요.
+DEPART_BUFFER_SECONDS = 300  # 집에서 나와 정류장에 미리 도착해 있는 여유 (5분)
+STOP_BUFFER_SECONDS = 120    # 정류장 근처에 들렀다 돌아와 미리 도착해 있는 여유 (2분, stopover.py)
 
 
 @dataclass
@@ -85,7 +92,7 @@ def plan_by_vehicle(
     walk_to_stop_minutes: int,
     prep_minutes: int,
     stop_minutes: int = 0,
-    buffer_minutes: int = 5,
+    buffer_minutes: int = DEPART_BUFFER_SECONDS // 60,
 ) -> VehiclePlan | None:
     """탈 교통편을 먼저 고르고 출발·준비 시각을 거꾸로 계산해요.
 
@@ -113,7 +120,7 @@ def plan_departure(
     arrive_by: datetime,
     travel_minutes: int,
     prep_minutes: int,
-    buffer_minutes: int = 5,
+    buffer_minutes: int = DEPART_BUFFER_SECONDS // 60,
 ) -> DepartPlan:
     """출발 시각 = 도착 희망 시각 − 이동 시간(경유 포함) − 여유 시간
     준비 시작 시각 = 출발 시각 − 준비 시간"""
@@ -128,7 +135,7 @@ def max_stay_minutes(
     minutes_until_vehicle: int,
     walk_to_place_minutes: int,
     walk_back_to_stop_minutes: int,
-    buffer_minutes: int = 2,
+    buffer_minutes: int = STOP_BUFFER_SECONDS // 60,
 ) -> int:
     """경유지에서 최대로 쓸 수 있는 시간(분).
 
@@ -143,3 +150,58 @@ def max_stay_minutes(
         - buffer_minutes
     )
     return max(stay, 0)
+
+
+# ---------- 초 단위 (새 코드는 이쪽) ----------
+def pick_vehicle_seconds(
+    vehicle_times: Iterable[datetime],
+    ride_seconds: int,
+    arrive_by: datetime,
+) -> datetime | None:
+    """도착 희망 시각에 늦지 않는 교통편 중 가장 늦은 시각. 없으면 None."""
+    if ride_seconds < 0:
+        raise ValueError("시간은 음수일 수 없어요")
+    latest_board_at = arrive_by - timedelta(seconds=ride_seconds)
+    return max((t for t in vehicle_times if t <= latest_board_at), default=None)
+
+
+def plan_by_vehicle_seconds(
+    arrive_by: datetime,
+    vehicle_times: Iterable[datetime],
+    ride_seconds: int,
+    walk_to_stop_seconds: int,
+    prep_seconds: int,
+    stop_seconds: int = 0,
+    buffer_seconds: int = DEPART_BUFFER_SECONDS,
+) -> VehiclePlan | None:
+    """plan_by_vehicle 과 같은 계산을 초로 해요. 중간에 분으로 올리지 않아요.
+
+    ride_seconds: 탑승부터 목적지 도착까지 (이후 환승·도보 포함)
+    walk_to_stop_seconds: 집에서 정류장까지 도보 (경유 포함)
+    prep_seconds: 준비 시간 (일정의 prep_minutes × 60)
+    stop_seconds: 경유지에 머무는 시간
+    """
+    if min(walk_to_stop_seconds, prep_seconds, stop_seconds, buffer_seconds) < 0:
+        raise ValueError("시간은 음수일 수 없어요")
+    board_at = pick_vehicle_seconds(vehicle_times, ride_seconds, arrive_by)
+    if board_at is None:
+        return None
+    depart_at = board_at - timedelta(seconds=buffer_seconds + walk_to_stop_seconds + stop_seconds)
+    return VehiclePlan(
+        depart_at=depart_at,
+        prep_start_at=depart_at - timedelta(seconds=prep_seconds),
+        board_at=board_at,
+    )
+
+
+def plan_departure_seconds(
+    arrive_by: datetime,
+    travel_seconds: int,
+    prep_seconds: int,
+    buffer_seconds: int = DEPART_BUFFER_SECONDS,
+) -> DepartPlan:
+    """plan_departure 와 같은 계산을 초로 해요 (교통편 정보가 없을 때)."""
+    if min(travel_seconds, prep_seconds, buffer_seconds) < 0:
+        raise ValueError("시간은 음수일 수 없어요")
+    depart_at = arrive_by - timedelta(seconds=travel_seconds + buffer_seconds)
+    return DepartPlan(depart_at=depart_at, prep_start_at=depart_at - timedelta(seconds=prep_seconds))
