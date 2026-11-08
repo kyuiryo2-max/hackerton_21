@@ -58,7 +58,7 @@ flowchart LR
 | 패키지 관리 | uv (uv.lock으로 버전 고정) |
 | DB | SQLite |
 | LLM | OpenRouter (OpenAI 호환 SDK) |
-| 배포 | (결정 후 추가) |
+| 배포 | Render + GitHub Pages |
 
 ## 외부 API 호출 한도
 
