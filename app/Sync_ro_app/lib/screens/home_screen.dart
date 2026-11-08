@@ -10,6 +10,8 @@ import '../providers/todo_controller.dart';
 import '../services/departure_alert_service.dart';
 import '../services/todo_recommendation_service.dart';
 import 'detail_screen.dart';
+import '../config/api_config.dart';
+import '../data/offline_demo_data.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.onOpenRoutes, required this.onSelectWaypoint});
@@ -83,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   String _remainingTime(DateTime target) {
-    final difference = target.difference(_now);
+    final difference = target.difference(_referenceNow);
 
     if (difference.isNegative ||
         difference == Duration.zero) {
@@ -104,6 +106,10 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void openSchedule(Schedule schedule) {
+    if (schedule.id == -210015) {
+      widget.onOpenRoutes();
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -121,6 +127,87 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  // Keep the original home layout. When there is no real upcoming schedule,
+  // populate its existing cards with the bundled demonstration fixture.
+  bool _showingDemoSchedule = false;
+
+  DateTime get _referenceNow => _showingDemoSchedule
+      ? DateTime.parse('${OfflineDemoData.context['now']}')
+      : _now;
+
+  Schedule _demoSchedule() {
+    final data = OfflineDemoData.context;
+    final raw = Map<String, dynamic>.from(data['schedule'] as Map);
+    final destination = Map<String, dynamic>.from(raw['destination'] as Map);
+    final arriveBy = DateTime.parse('${raw['arrive_by']}');
+    return Schedule(
+      id: -210015,
+      title: '청량리역 이동 · 시연 일정',
+      location: '${destination['name']}',
+      destinationAddress: '${destination['name']}',
+      destinationLatitude: (destination['lat'] as num).toDouble(),
+      destinationLongitude: (destination['lng'] as num).toDouble(),
+      startTime: arriveBy,
+      endTime: arriveBy.add(const Duration(hours: 1)),
+      preparationMinutes: (raw['prep_minutes'] as num?)?.toInt() ?? 30,
+    );
+  }
+
+  List<TodoItem> _demoTodos() {
+    final rawTodos = (OfflineDemoData.plan['todos'] as List);
+    return rawTodos.map((raw) {
+      final item = Map<String, dynamic>.from(raw as Map);
+      final place = item['place'] is Map
+          ? Map<String, dynamic>.from(item['place'] as Map)
+          : <String, dynamic>{};
+      return TodoItem(
+        id: -1000 - ((item['todo_id'] as num?)?.toInt() ?? 0),
+        title: '${item['text']}',
+        estimatedMinutes: (item['detour_min'] as num?)?.toInt() ?? 5,
+        requiresTravel: place.isNotEmpty,
+        placeName: place['name']?.toString(),
+        isCompleted: item['status'] == '완료',
+      );
+    }).toList();
+  }
+
+  DateTime _departureFor(Schedule schedule) {
+    if (_showingDemoSchedule && schedule.id == -210015) {
+      final boardAt = OfflineDemoData.plan['board_at'];
+      final parsed = DateTime.tryParse('$boardAt');
+      if (parsed != null) return parsed;
+    }
+    return _departureAlertService.calculateDepartureTime(schedule.startTime);
+  }
+
+  Widget _buildDemoHint() {
+    final route = OfflineDemoData.context['route'] as Map;
+    final stop = OfflineDemoData.context['stop'] as Map;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.directions_bus_outlined, color: Color(0xFF4936D8)),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('시연 이동 정보',
+                style: TextStyle(fontWeight: FontWeight.bold))),
+            const Chip(label: Text('DEMO')),
+          ]),
+          Text('${stop['name']} → 청량리역 · ${route['name']}번'),
+          const SizedBox(height: 4),
+          const Text('저장된 예시 데이터이며 현재 버스 운행 정보가 아닙니다.',
+              style: TextStyle(fontSize: 12, color: Colors.black54)),
+          Align(alignment: Alignment.centerRight, child: TextButton.icon(
+            onPressed: widget.onOpenRoutes,
+            icon: const Icon(Icons.map_outlined),
+            label: const Text('이동 탭에서 지도 보기'),
+          )),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildPreparationCard(Schedule? schedule, List<TodoItem> todos) {
     if (schedule == null) {
       return const Card(
@@ -131,15 +218,13 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    final departure = _departureAlertService.calculateDepartureTime(
-      schedule.startTime,
-    );
+    final departure = _departureFor(schedule);
     final preparation = departure.subtract(
       Duration(minutes: schedule.preparationMinutes),
     );
     final theme = Theme.of(context);
     // 준비 시작 전까지 남은 시간에 처리 가능한, 별도 이동이 없는 할 일만 추천한다.
-    final availableMinutes = preparation.difference(_now).inMinutes;
+    final availableMinutes = preparation.difference(_referenceNow).inMinutes;
     final suggested = _todoRecommendationService.recommendTodos(
       todos: todos,
       availableMinutes: availableMinutes,
@@ -183,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(height: 12),
             const SizedBox(height: 8),
             Text(
-              '목표 도착 ${formatDateTime(schedule.startTime)} · 예상 이동 35분 · 여유 10분 · 준비 ${schedule.preparationMinutes}분 (임시 기준)',
+              _showingDemoSchedule ? '시연 기준 도착 ${formatDateTime(schedule.startTime)} · 예시 경로 약 28분 · 준비 ${schedule.preparationMinutes}분' : '목표 도착 ${formatDateTime(schedule.startTime)} · 예상 이동 35분 · 여유 10분 · 준비 ${schedule.preparationMinutes}분 (임시 기준)',
               style: theme.textTheme.bodySmall,
             ),
             const Divider(height: 28),
@@ -261,10 +346,7 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    final departureTime =
-        _departureAlertService.calculateDepartureTime(
-      schedule.startTime,
-    );
+    final departureTime = _departureFor(schedule);
 
     return Card(
       child: Padding(
@@ -314,10 +396,10 @@ class _HomeScreenState extends State<HomeScreen>
                     icon: Icons.schedule,
                   ),
                 ),
-                const Expanded(
+                Expanded(
                   child: _InfoItem(
                     label: '예상 이동 시간',
-                    value: '$_mockTravelMinutes분',
+                    value: _showingDemoSchedule ? '28분' : '$_mockTravelMinutes분',
                     icon: Icons.directions_bus,
                   ),
                 ),
@@ -330,7 +412,7 @@ class _HomeScreenState extends State<HomeScreen>
               _remainingTime(departureTime),
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: departureTime.isAfter(_now)
+                color: departureTime.isAfter(_referenceNow)
                     ? const Color(0xFF4936D8)
                     : Colors.deepOrange,
               ),
@@ -338,9 +420,8 @@ class _HomeScreenState extends State<HomeScreen>
 
             const SizedBox(height: 8),
 
-            const Text(
-              '임시 계산: 이동 35분 + 여유 10분\n'
-              '실제 대중교통 정보는 반영되지 않았습니다.',
+            Text(
+              _showingDemoSchedule ? '시연 JSON에 저장된 예상 이동 28분 기준입니다.\n실시간 대중교통 정보가 아닙니다.' : '임시 계산: 이동 35분 + 여유 10분\n실제 대중교통 정보는 반영되지 않았습니다.',
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.grey,
@@ -359,6 +440,7 @@ class _HomeScreenState extends State<HomeScreen>
       return const SizedBox.shrink();
     }
 
+    if (_showingDemoSchedule) return const SizedBox.shrink();
     final alert =
         _departureAlertService.checkDeparture(
       scheduleStart: schedule.startTime,
@@ -507,17 +589,18 @@ class _HomeScreenState extends State<HomeScreen>
             a.startTime.compareTo(b.startTime),
       );
 
-    final Schedule? nextSchedule =
-        upcomingSchedules.isNotEmpty
-            ? upcomingSchedules.first
-            : null;
+    _showingDemoSchedule = ApiConfig.offlineDemo && upcomingSchedules.isEmpty;
+    final Schedule? nextSchedule = upcomingSchedules.isNotEmpty
+        ? upcomingSchedules.first
+        : (_showingDemoSchedule ? _demoSchedule() : null);
 
-    final todaySchedules = schedules
+    final todaySchedules = (_showingDemoSchedule && schedules.isEmpty
+        ? <Schedule>[_demoSchedule()] : schedules)
         .where(
           (schedule) =>
               _isSameDay(
                 schedule.startTime,
-                _now,
+                _referenceNow,
               ),
         )
         .toList()
@@ -526,7 +609,7 @@ class _HomeScreenState extends State<HomeScreen>
             a.startTime.compareTo(b.startTime),
       );
 
-    final incompleteTodos = todos
+    final incompleteTodos = (_showingDemoSchedule && todos.isEmpty ? _demoTodos() : todos)
         .where(
           (todo) => !todo.isCompleted,
         )
@@ -580,6 +663,10 @@ class _HomeScreenState extends State<HomeScreen>
               '일정과 이동 상황을 함께 확인하세요.',
             ),
 
+            if (_showingDemoSchedule) ...[
+              const SizedBox(height: 12),
+              _buildDemoHint(),
+            ],
             const SizedBox(height: 16),
             _buildPreparationCard(nextSchedule, incompleteTodos),
             const SizedBox(height: 16),

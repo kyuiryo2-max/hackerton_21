@@ -60,7 +60,7 @@ class RouteInlineMap extends StatelessWidget {
           Positioned(
             left: 12, right: 12, top: 12,
             child: Card(child: Padding(padding: const EdgeInsets.all(10), child: Text(
-              candidate == null ? '출발지를 선택하면 경로를 탐색합니다.' : '경로 좌표가 없어 지도에 경로 선을 표시할 수 없습니다.',
+              candidate == null && origin == null ? '출발지를 선택하면 경로를 탐색합니다.' : '경로 좌표가 없어 실제 이동 경로 선은 표시하지 않습니다.',
               textAlign: TextAlign.center,
             ))),
           ),

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/assistant_analysis.dart';
+import '../config/api_config.dart';
+import '../services/offline_ask_service.dart';
 import '../services/assistant_api_service.dart';
 import '../services/speech_input_service.dart';
 
@@ -14,6 +16,7 @@ class AssistantScreen extends StatefulWidget {
 class _AssistantScreenState extends State<AssistantScreen> {
   final _input = TextEditingController();
   final _api = AssistantApiService();
+  final _offline = OfflineAskService();
   final _speech = SpeechInputService();
   final List<_Message> _history = [];
   bool _loading = false;
@@ -32,9 +35,15 @@ class _AssistantScreenState extends State<AssistantScreen> {
       _loading = true;
     });
     try {
-      final analysis = await _api.analyze(message);
-      if (!mounted) return;
-      setState(() => _history.add(_Message(_format(analysis), false)));
+      if (ApiConfig.offlineDemo) {
+        final response = _offline.reply(message);
+        if (!mounted) return;
+        setState(() => _history.add(_Message(response, false)));
+      } else {
+        final analysis = await _api.analyze(message);
+        if (!mounted) return;
+        setState(() => _history.add(_Message(_format(analysis), false)));
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _history.add(_Message('분석 실패: $error\n서버 주소와 실행 상태를 확인해 주세요.', false)));
@@ -131,13 +140,13 @@ class _AssistantScreenState extends State<AssistantScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('AI 이동 질문')),
+      appBar: AppBar(title: Text(ApiConfig.offlineDemo ? '이동 질문 · 오프라인 시연' : 'AI 이동 질문')),
       body: SafeArea(
         child: Column(children: [
           Expanded(child: _history.isEmpty
               ? const Center(child: Padding(
                   padding: EdgeInsets.all(24),
-                  child: Text('예: 오후 3시까지 광화문에 가야 하는데 감기약을 살 수 있을까?\n\n질문을 입력하거나 마이크 버튼을 누르세요.', textAlign: TextAlign.center),
+                  child: Text(ApiConfig.offlineDemo ? '시연 질문 예시\n“다음 버스 언제야?”\n“아 이어폰 사야 돼”\n“거기 들러도 돼?”\n\n서버 없이 준비된 답변을 표시합니다.' : '예: 오후 3시까지 광화문에 가야 하는데 감기약을 살 수 있을까?\n\n질문을 입력하거나 마이크 버튼을 누르세요.', textAlign: TextAlign.center),
                 ))
               : ListView.builder(
                   padding: const EdgeInsets.all(16),

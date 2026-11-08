@@ -3,12 +3,13 @@ import 'kakao_route_parser.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/route_api_config.dart';
+import '../config/api_config.dart';
 import '../models/route_candidate.dart';
 import '../models/route_request.dart';
 
 class RouteApiService {
   Future<List<RouteCandidate>> searchRoutes(RouteRequest request) async {
-    if (!RouteApiConfig.useRealApi) {
+    if (ApiConfig.offlineDemo || !RouteApiConfig.useRealApi) {
       return _mockRoutes();
     }
 
@@ -26,9 +27,7 @@ class RouteApiService {
       );
     }
 
-    final baseUrl = RouteApiConfig.baseUrl.replaceFirst(RegExp(r'/$'), '');
-
-    final uri = Uri.parse('$baseUrl/api/routes/search');
+    final uri = ApiConfig.endpoint('/api/routes/search');
 
     final response = await http
         .post(

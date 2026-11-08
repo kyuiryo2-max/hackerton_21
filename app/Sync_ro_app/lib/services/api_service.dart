@@ -10,7 +10,7 @@ class ApiService {
   ApiService({http.Client? client}) : _client = client ?? http.Client();
 
   Future<dynamic> get(String endpoint) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}$endpoint');
+    final uri = ApiConfig.endpoint(endpoint);
 
     final response = await _client
         .get(uri, headers: {'Accept': 'application/json'})

@@ -11,6 +11,7 @@ import '../services/route_api_service.dart';
 import '../services/place_search_service.dart';
 import 'place_search_screen.dart';
 import 'route_inline_map.dart';
+import 'demo_route_panel.dart';
 
 class NavigationScreen extends StatefulWidget {
   final ValueNotifier<TodoItem?>? selectedWaypoint;
@@ -308,6 +309,8 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     return Scaffold(
       appBar: AppBar(title: const Text('이동')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
+        const DemoRoutePanel(),
+        const SizedBox(height: 18),
         Text('가장 가까운 일정', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
         if (schedule == null)

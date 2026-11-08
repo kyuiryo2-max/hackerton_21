@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/assistant_config.dart';
+import '../config/api_config.dart';
 import '../models/assistant_analysis.dart';
 
 class AssistantApiService {
@@ -8,7 +8,7 @@ class AssistantApiService {
 
   Future<AssistantAnalysis> analyze(String message) async {
     final response = await _client.post(
-      Uri.parse('${AssistantConfig.baseUrl}/api/assistant/analyze'),
+      ApiConfig.endpoint('/api/assistant/analyze'),
       headers: {'Content-Type': 'application/json; charset=utf-8'},
       body: jsonEncode({'message': message}),
     ).timeout(const Duration(seconds: 35));
