@@ -109,6 +109,113 @@ def test_목록에_없는_중요도는_거절(client):
     assert res.status_code == 422
 
 
+# ---------- 할 일 상태·출처 (#12 회의 3번) ----------
+def test_새_할_일은_대기_입력(client):
+    t = client.post("/api/todos", json={"user_id": "u1", "text": "약 사기", "place_types": ["약국"]}).json()
+    assert (t["status"], t["source"], t["done"]) == ("대기", "입력", False)
+
+
+def test_질문으로_들어온_할_일은_필수(client):
+    """stopover_check '아 우유 사야 돼' → 중요도를 보내지 않아도, 선택으로 보내도 필수"""
+    t = client.post("/api/todos", json={
+        "user_id": "u1", "text": "우유 사기", "place_types": ["편의점"], "importance": "선택", "source": "질문",
+    }).json()
+    assert (t["importance"], t["source"]) == ("필수", "질문")
+
+
+def test_상태_바꾸고_상태로_조회(client):
+    me = {"user_id": "u1"}
+    a = client.post("/api/todos", json={"user_id": "u1", "text": "약 사기"}).json()
+    b = client.post("/api/todos", json={"user_id": "u1", "text": "선물"}).json()
+    client.patch(f"/api/todos/{a['id']}", params=me, json={"status": "포함"})
+    client.patch(f"/api/todos/{b['id']}", params=me, json={"status": "제외"})
+    assert [t["text"] for t in client.get("/api/todos", params={**me, "status": "포함"}).json()] == ["약 사기"]
+    assert [t["text"] for t in client.get("/api/todos", params={**me, "status": "제외"}).json()] == ["선물"]
+
+
+def test_done은_완료_상태와_같음(client):
+    me = {"user_id": "u1"}
+    t = client.post("/api/todos", json={"user_id": "u1", "text": "약 사기"}).json()
+    done = client.patch(f"/api/todos/{t['id']}", params=me, json={"done": True}).json()
+    assert (done["status"], done["done"]) == ("완료", True)
+    undone = client.patch(f"/api/todos/{t['id']}", params=me, json={"done": False}).json()
+    assert (undone["status"], undone["done"]) == ("대기", False)
+
+
+def test_목록에_없는_상태는_거절(client):
+    res = client.post("/api/todos", json={"user_id": "u1", "text": "x", "status": "보류"})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "invalid_request"
+
+
+def test_예전_DB_파일도_상태_열이_생김(tmp_path, monkeypatch):
+    """11/8 이전 DB(done 열만 있음)를 열면 status·source 가 생기고 완료였던 건 '완료'"""
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("""CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+            text TEXT NOT NULL, place_types TEXT, importance TEXT NOT NULL DEFAULT '선택',
+            done INTEGER NOT NULL DEFAULT 0)""")
+        conn.execute("INSERT INTO todos (user_id, text, done) VALUES ('u1', '끝난 일', 1), ('u1', '남은 일', 0)")
+    monkeypatch.setattr("app.config.DATABASE_PATH", str(db))
+    from app.main import app
+
+    with TestClient(app) as c:
+        todos = {t["text"]: t for t in c.get("/api/todos", params={"user_id": "u1"}).json()}
+        assert todos["끝난 일"]["status"] == "완료"
+        assert (todos["남은 일"]["status"], todos["남은 일"]["source"]) == ("대기", "입력")
+        assert c.post("/api/todos", json={"user_id": "u1", "text": "새 일"}).status_code == 201
+
+
+# ---------- 질문 기록 (#12 회의 4번) ----------
+def test_질문_기록_저장과_조회(client):
+    from app.db import repository as repo
+
+    repo.add_message("u1", "user", "약국 들러도 돼?", [{"intent": "stopover_check", "place_types": ["약국"]}])
+    repo.add_message("u1", "assistant", "약국에서 최대 6분 있을 수 있어요.")
+    messages = client.get("/api/messages", params={"user_id": "u1"}).json()
+    assert [m["role"] for m in messages] == ["user", "assistant"]
+    assert messages[0]["intents"][0]["intent"] == "stopover_check"
+    assert messages[1]["intents"] is None
+    assert KST_TIME.match(messages[0]["created_at"])
+    assert client.get("/api/messages", params={"user_id": "u2"}).json() == []
+
+
+def test_최근_대화는_마지막_몇_턴만_오래된_순(client):
+    from app.db import repository as repo
+
+    for i in range(1, 8):
+        repo.add_message("u1", "user", f"질문{i}")
+        repo.add_message("u1", "assistant", f"답변{i}")
+    recent = repo.recent_messages("u1", turns=3)
+    assert [m["text"] for m in recent] == ["질문5", "답변5", "질문6", "답변6", "질문7", "답변7"]
+    assert recent[0] == {"role": "user", "text": "질문5"}
+    assert [m["text"] for m in client.get("/api/messages", params={"user_id": "u1", "limit": 2}).json()] == ["질문7", "답변7"]
+
+
+def test_테스트_케이스로_모을_질문은_사용자_질문만(client):
+    from app.db import repository as repo
+
+    repo.add_message("u1", "user", "다음 버스 언제야?")
+    repo.add_message("u1", "assistant", "12분 뒤예요.")
+    repo.add_message("demo", "user", "시연 질문")
+    assert [m["text"] for m in repo.list_user_questions()] == ["다음 버스 언제야?"]
+
+
+def test_역할은_user_assistant만(client):
+    from app.db import repository as repo
+
+    with pytest.raises(ValueError):
+        repo.add_message("u1", "system", "x")
+
+
+def test_재시작하면_demo_대화도_지워짐(client, tmp_path):
+    from app.db import repository as repo
+
+    repo.add_message("demo", "user", "시연 질문")
+    seed_demo_data(str(tmp_path / "test.db"))
+    assert client.get("/api/messages", params={"user_id": "demo"}).json() == []
+
+
 # ---------- 설정 ----------
 def test_설정_기본값과_저장(client):
     assert client.get("/api/settings/u1").json() == {
@@ -227,6 +334,6 @@ def test_현재_위치는_저장하지_않음(client, tmp_path):
     """목적지 좌표는 저장하지만, 사용자의 현재 위치는 보내도 무시해요."""
     _schedule(client, lat=37.58, lng=127.02, current_location={"lat": 37.58, "lng": 127.02})
     with sqlite3.connect(tmp_path / "test.db") as conn:
-        for table in ("schedules", "todos", "settings", "route_choices"):
+        for table in ("schedules", "todos", "settings", "route_choices", "messages"):
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
             assert not cols & {"lat", "lng", "location", "current_location", "current_lat", "current_lng"}
