@@ -1,0 +1,93 @@
+{
+  "_설명": "일정 저장·조회·수정·삭제. 목적지 좌표는 저장하고 현재 위치는 받지 않아요. id로 접근할 때는 ?user_id= 필수",
+  "examples": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/schedules",
+        "body": {
+          "user_id": "u1",
+          "destination": "청량리역",
+          "destination_lat": 37.58029,
+          "destination_lng": 127.04691,
+          "arrive_by": "2026-11-21T09:00:00+09:00",
+          "prep_minutes": 30
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": 2,
+          "user_id": "u1",
+          "destination": "청량리역",
+          "destination_lat": 37.58029,
+          "destination_lng": 127.04691,
+          "arrive_by": "2026-11-21T09:00:00+09:00",
+          "prep_minutes": 30
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/schedules",
+        "query": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 2,
+            "user_id": "u1",
+            "destination": "청량리역",
+            "destination_lat": 37.58029,
+            "destination_lng": 127.04691,
+            "arrive_by": "2026-11-21T09:00:00+09:00",
+            "prep_minutes": 30
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/schedules/2",
+        "query": {
+          "user_id": "u1"
+        },
+        "body": {
+          "prep_minutes": 40
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": 2,
+          "user_id": "u1",
+          "destination": "청량리역",
+          "destination_lat": 37.58029,
+          "destination_lng": 127.04691,
+          "arrive_by": "2026-11-21T09:00:00+09:00",
+          "prep_minutes": 40
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "path": "/api/schedules/2",
+        "query": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true
+        }
+      }
+    }
+  ]
+}

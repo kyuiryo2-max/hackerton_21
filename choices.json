@@ -1,0 +1,77 @@
+{
+  "_설명": "사용자가 고른 경로 기록 (⑧ 선호 반영용). demo도 저장돼요",
+  "examples": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/choices",
+        "body": {
+          "user_id": "u1",
+          "chosen_route": {
+            "total_min": 28,
+            "transfers": 0,
+            "fare": 1500
+          },
+          "other_routes": [
+            {
+              "total_min": 31,
+              "transfers": 1,
+              "fare": 1500
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": 1,
+          "user_id": "u1",
+          "chosen_route": {
+            "total_min": 28,
+            "transfers": 0,
+            "fare": 1500
+          },
+          "other_routes": [
+            {
+              "total_min": 31,
+              "transfers": 1,
+              "fare": 1500
+            }
+          ],
+          "created_at": "2026-11-08T15:54:57+09:00"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/choices",
+        "query": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 1,
+            "user_id": "u1",
+            "chosen_route": {
+              "total_min": 28,
+              "transfers": 0,
+              "fare": 1500
+            },
+            "other_routes": [
+              {
+                "total_min": 31,
+                "transfers": 1,
+                "fare": 1500
+              }
+            ],
+            "created_at": "2026-11-08T15:54:57+09:00"
+          }
+        ]
+      }
+    }
+  ]
+}
