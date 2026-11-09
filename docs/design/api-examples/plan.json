@@ -38,6 +38,7 @@
               "name": "2115",
               "guidance": "지선 2115 (안암역3번출구 > 청량리역환승센터)",
               "total_min": 28,
+              "first_walk_min": 0,
               "wait_min": 12,
               "moving_min": 14,
               "last_walk_min": 2,

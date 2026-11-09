@@ -35,7 +35,7 @@
 | 있음 | `GET /api/arrivals` | 도착 정보. 버스 `stop_id`, 지하철 `station`(+`line`). `demo=true`면 시연 고정값, 아니면 서울시 실시간 | [arrivals.json](api-examples/arrivals.json) | routers/transit.py |
 | 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로 | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
 | 있음 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | routers/assistant.py |
-| 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외 (지금은 `demo=true`만, 실시간은 501) | [plan.json](api-examples/plan.json) | routers/plan.py |
+| 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외. `demo=true`면 시연, 아니면 `origin`(현재 위치)으로 실시간 | [plan.json](api-examples/plan.json) | routers/plan.py |
 | 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 (계산은 `demo=true`만) | [ask.json](api-examples/ask.json) | routers/assistant.py |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
@@ -72,6 +72,14 @@
 - 요청: `user_id` 필수. `todo_ids`가 없으면 완료하지 않은 할 일 전부. 시연 모드에서는 일정·시각·위치를 시나리오 고정값으로 써서 `schedule_id`는 쓰지 않음
 - 들를 장소 종류가 없는 할 일은 계산에서 뺌. 시연 지역에 없는 장소는 `place: null`, 필수면 `대기`·선택이면 `제외`로 보여 주고 상태는 저장하지 않음
 - demo가 아닌 사용자는 계산한 `status`가 할 일에 저장됨 (부스 관객이 자기 할 일로 시연)
+- **실시간 계획** (`demo=false`): `origin: {"lat", "lng"}` 필수(한국 범위). 현재 위치는 계산에만 쓰고 저장·기록하지 않는다 (11/9 팀 결정). `schedule_id`가 없으면 가장 가까운 일정
+  - 카카오 경로 최대 3개. 처음·마지막 도보는 카카오 도보, 첫 탑승 구간은 서울시 버스·지하철 실시간. 실시간 뒤로는 배차 간격으로 1시간까지 이어 붙여 계산
+  - 들를 곳은 탑승 정류장 300m 안에서 장소 종류별 가장 가까운 곳. 체류 시간은 임시로 4분 (장소별 기본값 미정)
+  - 경로 순서: 필수 할 일을 넣는 경로 → 할 일을 많이 넣는 경로 → 빨리 도착하는 경로. 할 일 상태는 1번 경로 기준
+  - 실시간을 못 찾으면 대기 0으로 계산하고 `has_realtime: false`. 근처에 장소가 없으면 시연과 같이 필수 `대기`·선택 `제외`, 저장 안 함
+  - 오류: `origin` 없음 422, 일정 없음 404 `not_found`, 경로 없음 404 `no_route`, 키 없음 503, 카카오 실패 502
+  - 외부 호출은 한 번에 약 30번(카카오 도보가 가장 많음), 같은 구간을 다시 계산하면 저장값으로 약 10번
+- 경로 카드의 `first_walk_min`: 현재 위치 → 탑승 정류장 도보(분). 시연은 정류장에 서 있는 장면이라 0
 - `board_at`, `arrive_at`: 탈 차 도착 시각, 목적지 도착 예정
 - `routes[]`: 경로 카드 2~3개. `total_min`, `wait_min`, `moving_min`, `transfers`, `fare`, `max_stay_min`(경유지에서 쓸 수 있는 최대 시간, 0이면 경유 불가)
 - `todos[]`: 할 일마다 `status`(포함/제외/대기)와 들를 장소. 대기면 `options`를 버튼으로 보여 준다
@@ -96,5 +104,4 @@
 ## 알려진 차이 (고칠 것)
 
 - DB 시연 데이터는 `data/demo/scenario.json`에서 읽어 넣는다 (일정 청량리역, 할 일 이어폰·커피·다이소). 시연 대본을 바꾸면 이 파일만 고치면 된다
-- `/api/plan` 실시간(`demo=false`)은 출발 위치가 필요하다. "현재 위치를 받지 않는다" 규칙과 맞물려 있어 정하기 전까지 501
 - 서울시 실시간 지하철은 호선에 따라 데이터가 빠질 때가 있다 (11/9 오후 6호선 대부분 `INFO-200`). 이때 `/api/arrivals`는 빈 목록이고, 시연은 `demo=true`로 한다

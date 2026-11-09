@@ -130,10 +130,10 @@ def test_다른_사람_할_일은_404(client):
     assert res.json()["error"]["code"] == "not_found"
 
 
-def test_실시간_계획은_아직_501(client):
+def test_실시간_계획은_현재_위치가_필요(client):
     res = client.post("/api/plan", json={"user_id": "demo"})
-    assert res.status_code == 501
-    assert res.json()["error"]["code"] == "not_ready"
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "invalid_request"
 
 
 def test_user_id가_없으면_오류_형식(client):
