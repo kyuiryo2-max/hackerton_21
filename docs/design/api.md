@@ -32,13 +32,21 @@
 | 있음 | `GET /api/messages` | 질문 기록 조회 (대화창 다시 그리기) | [messages.json](api-examples/messages.json) | routers/storage.py |
 | 있음 | `GET·PUT /api/settings/{user_id}` | 경로 선호 가중치 | [settings.json](api-examples/settings.json) | routers/storage.py |
 | 있음 | `POST·GET /api/choices` | 고른 경로 기록 (⑧) | [choices.json](api-examples/choices.json) | routers/storage.py |
-| 있음 | `GET /api/arrivals` | 정류소 도착 정보 (지금은 `demo=true`만, 실시간은 501) | [arrivals.json](api-examples/arrivals.json) | routers/transit.py |
+| 있음 | `GET /api/arrivals` | 도착 정보. 버스 `stop_id`, 지하철 `station`(+`line`). `demo=true`면 시연 고정값, 아니면 서울시 실시간 | [arrivals.json](api-examples/arrivals.json) | routers/transit.py |
 | 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로 | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
 | 만들 예정 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | #19, #33 |
 | 만들 예정 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외 | [plan.json](api-examples/plan.json) | #33, #35 |
 | 만들 예정 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 | [ask.json](api-examples/ask.json) | #38, #41 |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
+
+## 도착 정보 응답에서 앱이 쓰는 값
+
+**`/api/arrivals`** ([arrivals.json](api-examples/arrivals.json))
+- 항목마다 `route`, `minutes`(분, 내림. 0은 곧 도착), `next_minutes`, `direction`. 버스 `direction`은 종점, 지하철은 다음 역(`보문방면`)
+- `fetched_at`: 조회 시각. **실시간(`demo=false`)에만** 있다. 시연 모드에는 없음
+- `estimated`: 남은 역 수로 계산한 값이면 `true`라 "약"을 붙여 보여 준다. **지하철 실시간에만** 있다. 버스와 시연 모드에는 없음
+- 서울시 응답은 버스·지하철 모두 20초 동안 저장해 다시 쓴다 (하루 1,000건 한도)
 
 ## 할 일 상태·출처 (#12 회의 3번)
 
@@ -75,4 +83,4 @@
 ## 알려진 차이 (고칠 것)
 
 - DB 시연 데이터(`database.seed_demo_data`)는 일정 "공학관", 할 일 "약 사기·엄마 생신 선물"인데, 시연 모드(`scenario.json`)는 청량리역, "이어폰 사기·커피 사기·다이소 들르기"다. #30 시연 대본에 맞춰 하나로 맞추기
-- `/api/arrivals` 실시간(`demo=false`)은 서울 버스 모듈(PR #10)과 아직 연결 안 됨 → 501
+- 서울시 실시간 지하철은 호선에 따라 데이터가 빠질 때가 있다 (11/9 오후 6호선 대부분 `INFO-200`). 이때 `/api/arrivals`는 빈 목록이고, 시연은 `demo=true`로 한다

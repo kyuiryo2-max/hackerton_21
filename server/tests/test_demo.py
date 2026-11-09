@@ -118,10 +118,10 @@ def test_도착_API_시간_경과(client):
     assert res.json()["arrivals"][0]["minutes"] == 2
 
 
-def test_도착_API_실시간은_아직_오류_형식(client):
-    res = client.get("/api/arrivals", params={"stop_id": STOP})
-    assert res.status_code == 501
-    assert res.json()["error"]["code"] == "not_ready"
+def test_도착_API_시연은_실시간_키가_없어도_동작(client, monkeypatch):
+    monkeypatch.setattr("app.config.DATA_GO_KR_SERVICE_KEY", "")
+    res = client.get("/api/arrivals", params={"stop_id": STOP, "demo": True})
+    assert res.status_code == 200
 
 
 def test_시연_정보_API(client):
