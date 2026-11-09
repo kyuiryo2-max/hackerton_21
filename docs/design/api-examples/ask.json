@@ -1,5 +1,5 @@
 {
-  "_설명": "만들 예정 (#38, #41). 질문 1개와 답변 1개를 messages에 저장해요. intents·needs_confirm·question은 json-format.md 2번. result 모양은 회의 8번 미정이라 #37에서 확정 (아래는 제안)",
+  "_설명": "실제 서버 응답 (#38). 질문 1개와 답변 1개를 messages에 저장해요. intents·needs_confirm·question은 json-format.md 2번. result는 질문 종류마다 모양이 달라요(api.md). engine: ai 또는 rule",
   "examples": [
     {
       "request": {
@@ -30,7 +30,8 @@
             "next_minutes": 20
           },
           "answer": "2115번이 12분 뒤에 와요. 그다음 차는 20분 뒤예요.",
-          "todo": null
+          "todo": null,
+          "engine": "ai"
         }
       }
     },
@@ -77,7 +78,8 @@
             "importance": "필수",
             "status": "포함",
             "source": "질문"
-          }
+          },
+          "engine": "ai"
         }
       },
       "note": "들르기 질문은 할 일로 저장 (source 질문 → importance 필수). 들를 수 있으면 status 포함"
@@ -105,7 +107,8 @@
           "question": "어디를 들르고 싶은지 알려 줄래요?",
           "result": null,
           "answer": "어디를 들르고 싶은지 알려 줄래요?",
-          "todo": null
+          "todo": null,
+          "engine": "ai"
         }
       },
       "note": "최근 대화(recent_messages)에도 장소가 없어서 되묻기 (#12 회의 5번). 앱은 question을 대화창에 보여 줌"
@@ -135,7 +138,8 @@
             "intent": "unsupported"
           },
           "answer": "이동과 할 일에 관한 질문만 도와드릴 수 있어요.",
-          "todo": null
+          "todo": null,
+          "engine": "ai"
         }
       }
     }
