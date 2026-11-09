@@ -76,12 +76,14 @@
 - `result`: 코드 계산 결과. 질문이 여러 종류면 마지막 계산 결과이고, `answer`는 순서대로 이어 붙인다. #12 회의 8번은 아직 미정이라 아래는 지금 서버 모양이다
   - `next_vehicle`: `route`, `minutes`, `next_minutes`
   - `stopover_check`: `feasible`, `place{name, address}`, `max_stay_min`, `board_at`
-  - `running_late`: `delay_minutes`, `on_time`, `board_at`, `arrive_at` (뒤 질문도 늦어진 시각으로 계산)
+  - `running_late`: `delay_minutes`, `missed`, `on_time`, `board_at`, `arrive_at` (뒤 질문도 늦어진 시각으로 계산). 분이 없고 "놓쳤어"면 지금 차를 놓친 것으로 보고 다음 차 기준(`missed: true`), 그 밖에는 "몇 분 늦을 것 같아요?"로 되물음
   - `time_left`: `minutes`, `leave_by` (차 도착에서 여유 2분을 뺀 시각)
   - `place_info`: `place`, `change_route`: `route`, `change_todo`: `todo_id`, `action`, `unsupported`: 없음
   - `demo=false`면 교통 계산이 필요한 질문은 `{"intent", "available": false}` 와 준비 중 안내
 - `engine`: `ai` 또는 `rule`. AI 키가 없거나 AI 호출이 실패하면 키워드 규칙(`services/rules.py`)으로 답한다. 규칙 정확도는 팀 테스트 문장 기준 의도 14/25, 장소 10/15라 AI보다 낮다
 - 질문과 할 일 문장은 200자까지
+- `demo` 사용자는 부스에서 여럿이 함께 써서 질문 기록을 저장하지 않고 AI에 이전 대화도 보내지 않는다
+- `demo` 사용자의 들르기 판단은 시연 계획에서 이미 포함된 할 일(이어폰)과 함께 계산한다. 같은 장소는 다시 더하지 않는다
 
 ## 알려진 차이 (고칠 것)
 

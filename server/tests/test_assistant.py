@@ -202,3 +202,72 @@ def test_질문_규칙_늦어짐과_분():
 
 def test_질문_규칙_구매_문장():
     assert rules.todo_text("아 이어폰 사야 돼") == "이어폰 사기"
+
+
+# ---------- PR #26 리뷰 반영 ----------
+def test_대본_질문1_커피도_사도_돼는_시간이_부족(client, no_ai):
+    """이어폰이 이미 경로에 있어서 커피까지 들르면 12분 버스를 놓치고 다음 차는 지각이에요"""
+    body = ask(client, "커피도 사도 돼?")
+    assert [i["intent"] for i in body["intents"]] == ["stopover_check"]
+    assert body["result"]["feasible"] is False
+    assert body["answer"] == "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+
+
+def test_대본_질문1은_AI_분류여도_같은_답(client, ai):
+    ai.append({"intents": [{"intent": "stopover_check", "place_types": ["카페"], "delay_minutes": None}],
+               "needs_confirm": False, "question": None})
+    assert ask(client, "커피도 사도 돼?")["result"]["feasible"] is False
+
+
+def test_plan과_ask의_커피_판단이_같음(client, no_ai):
+    plan = client.post("/api/plan", json={"user_id": "demo", "demo": True}).json()
+    coffee = next(t for t in plan["todos"] if t["text"] == "커피 사기")
+    assert coffee["status"] == "제외"
+    assert ask(client, "커피도 사도 돼?")["todo"]["status"] == "대기"  # 질문으로 들어오면 필수라 대기
+
+
+def test_이미_들르기로_한_장소는_다시_더하지_않음(client, no_ai):
+    body = ask(client, "편의점 들러도 돼?")
+    assert body["result"]["feasible"] is True
+    assert body["result"]["max_stay_min"] == 6
+
+
+def test_안_사도는_들르기가_아님(client, no_ai):
+    assert [i["intent"] for i in rules.classify_question("커피는 안 사도 돼")["intents"]] == ["change_todo"]
+
+
+def test_버스를_놓치면_다음_차_기준(client, no_ai):
+    body = ask(client, "버스 하나 놓쳤어")
+    assert body["result"]["missed"] is True
+    assert body["result"]["board_at"] == "2026-11-21T08:52:00+09:00"
+    assert body["answer"].startswith("지금 차를 놓쳤다면 8시 52분 차를 타고")
+    assert "0분" not in body["answer"]
+
+
+def test_늦는다는데_분이_없으면_되물음(client, no_ai):
+    body = ask(client, "늦을 것 같아")
+    assert body["needs_confirm"] is True
+    assert body["answer"] == "몇 분 늦을 것 같아요?"
+
+
+def test_AI가_분_없이_늦어짐으로_분류해도_되물음(client, ai):
+    ai.append({"intents": [{"intent": "running_late", "place_types": [], "delay_minutes": None}],
+               "needs_confirm": False, "question": None})
+    assert ask(client, "좀 늦을 듯")["question"] == "몇 분 늦을 것 같아요?"
+
+
+def test_demo는_질문_기록을_남기지_않고_이전_대화도_보내지_않음(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "TEST")
+    monkeypatch.setattr(config, "LLM_MODEL", "test-model")
+
+    def fake(system, user):
+        seen.append(json.loads(user)["recent_messages"])
+        return {"intents": [{"intent": "next_vehicle", "place_types": [], "delay_minutes": None}],
+                "needs_confirm": False, "question": None}
+
+    monkeypatch.setattr(llm, "_chat_json", fake)
+    ask(client, "다음 버스 언제야?")
+    ask(client, "다음 버스 언제야?")
+    assert seen == [[], []]
+    assert client.get("/api/messages", params={"user_id": "demo"}).json() == []

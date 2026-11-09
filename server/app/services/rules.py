@@ -9,10 +9,10 @@ from app.services.llm import DEFAULT_CONFIRM_QUESTION, place_types
 
 # 질문 종류 (ai/eval/run.py KEYWORDS 와 같게 유지)
 INTENT_WORDS = {
-    "running_late": ["늦"],
+    "running_late": ["늦", "놓쳤"],
     "next_vehicle": ["다음 버스", "다음 지하철", "언제 와"],
     "time_left": ["몇 분", "언제 나가"],
-    "stopover_check": ["들러", "들렀", "들를", "사야"],
+    "stopover_check": ["들러", "들렀", "들를", "사야", "사도"],
     "place_info": ["어디"],
     "change_route": ["환승", "빠른 걸로", "싼 걸로"],
     "change_todo": ["안 사도", "안 해도"],
@@ -37,6 +37,8 @@ PLACE_WORDS = {
     "빵집": ["빵집", "빵 사"],
 }
 REQUIRED_WORDS = ["꼭", "급해", "반드시"]
+MISSED_WORDS = ["놓쳤", "놓칠", "지나갔"]
+STOPOVER_ONLY = ["들러", "들렀", "들를", "사야"]
 _DELAY = re.compile(r"(\d+)\s*분")
 _BUY = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:사야|사러|살\s*거)")
 _SKIP = re.compile(r"^(.+?)\s*(?:은|는)?\s*안\s*(?:사도|해도)")
@@ -87,12 +89,15 @@ def _intent(name: str, text: str) -> dict:
 def classify_question(text: str) -> dict:
     """질문 → 질문 종류 (json-format.md 2번 모양). 장소나 지연 시간이 빠지면 되물어요."""
     names = [n for n, words in INTENT_WORDS.items() if any(w in text for w in words)]
+    # "안 사도 돼"는 빼기예요. "사도"만으로 들르기가 잡혔으면 들르기를 지워요
+    if "change_todo" in names and "stopover_check" in names and not any(w in text for w in STOPOVER_ONLY):
+        names.remove("stopover_check")
     # "몇 분 늦어"는 늦어짐이에요
     if "running_late" in names and "time_left" in names:
         names.remove("time_left")
     intents = [_intent(n, text) for n in names] or [_intent("unsupported", text)]
     missing_place = any(i["intent"] in ("stopover_check", "place_info") and not i["place_types"] for i in intents)
-    missing_delay = any(i["intent"] == "running_late" and i["delay_minutes"] is None for i in intents)
+    missing_delay = _delay_unknown(intents, text)
     needs_confirm = missing_place or missing_delay
     question = None
     if missing_place:
@@ -105,3 +110,16 @@ def classify_question(text: str) -> dict:
         "needs_confirm": needs_confirm,
         "question": question or (DEFAULT_CONFIRM_QUESTION if needs_confirm else None),
     }
+
+
+def _delay_unknown(intents: list[dict], text: str) -> bool:
+    """늦는다는데 분이 없고, 차를 놓친 말도 아니면 몇 분인지 물어봐야 해요."""
+    late = any(i["intent"] == "running_late" and i.get("delay_minutes") is None for i in intents)
+    return late and not any(w in text for w in MISSED_WORDS)
+
+
+def ask_delay_if_unknown(classified: dict, text: str) -> dict:
+    """AI 결과에도 같은 규칙을 적용해요. "늦을 것 같아" → "몇 분 늦을 것 같아요?" (PR #26 리뷰)"""
+    if classified["needs_confirm"] or not _delay_unknown(classified["intents"], text):
+        return classified
+    return {**classified, "needs_confirm": True, "question": "몇 분 늦을 것 같아요?"}

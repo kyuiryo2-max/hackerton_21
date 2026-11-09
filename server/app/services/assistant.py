@@ -14,7 +14,7 @@ from app import config
 from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
 from app.services import demo, llm, rules
-from app.services.planner import STATUS
+from app.services.planner import ACTIVE, STATUS, _demo_place
 from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, decide_stops
 from app.services.timecalc import wait_minutes_from_seconds
 
@@ -77,16 +77,27 @@ def _next_vehicle(item: dict, state: dict) -> tuple[dict, str]:
     return result, answer
 
 
-def _included_candidates(user_id: str) -> list[StopCandidate]:
-    """이미 경로에 넣은 할 일. 새로 들를 곳은 이 뒤에 더해서 판단해요."""
+def _included(user_id: str) -> list[tuple[StopCandidate, dict]]:
+    """이미 경로에 들어간 할 일과 그 장소. 새로 들를 곳은 이 뒤에 더해서 판단해요.
+
+    demo 사용자는 할 일 상태를 저장하지 않아서, 시연 계획(/api/plan)에서 포함되는 할 일(이어폰)을 써요.
+    그래야 같은 시연 안에서 /api/plan 과 /api/ask 의 답이 엇갈리지 않아요.
+    """
     if user_id == DEMO_USER_ID:
-        return []
-    out = []
-    for todo in repo.list_todos(user_id, status="포함"):
-        place = next((p for p in demo.scenario()["places"] if p["place_type"] in todo["place_types"]), None)
+        todos = [t for t in repo.list_todos(user_id) if t["status"] in ACTIVE]
+    else:
+        todos = repo.list_todos(user_id, status="포함")
+    rows = []
+    for todo in todos:
+        place = _demo_place(todo)
         if place:
-            out.append(StopCandidate(todo["id"], todo["importance"], place["round_trip_walk_seconds"], place["stay_seconds"]))
-    return out
+            rows.append((StopCandidate(todo["id"], todo["importance"], place["round_trip_walk_seconds"],
+                                       place["stay_seconds"]), place))
+    if user_id == DEMO_USER_ID:
+        planned = decide_stops(demo.route_timing(), [c for c, _ in rows], demo.deadline_seconds())
+        keep = {d.todo_id for d in planned.decisions if d.status == "included"}
+        rows = [r for r in rows if r[0].todo_id in keep]
+    return rows
 
 
 def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
@@ -98,10 +109,14 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         kind = item["place_types"][0]
         return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None, "board_at": None},
                 f"시연 지역에서는 {_josa(kind, '을를')} 찾지 못했어요.")
+    included = _included(state["user_id"])
+    # 이미 들르기로 한 장소면 다시 더하지 않아요 (이어폰을 넣은 뒤 "편의점 들러도 돼?")
+    same = [c.todo_id for c, p in included if p["name"] == place["name"]]
     new = StopCandidate(-1, "필수", place["round_trip_walk_seconds"], place["stay_seconds"])
-    result = decide_stops(demo.route_timing(state["elapsed"]), [*_included_candidates(state["user_id"]), new],
-                          demo.deadline_seconds(state["elapsed"]))
-    decision = next(d for d in result.decisions if d.todo_id == -1)
+    candidates = [c for c, _ in included] + ([] if same else [new])
+    result = decide_stops(demo.route_timing(state["elapsed"]), candidates, demo.deadline_seconds(state["elapsed"]))
+    target = same[0] if same else -1
+    decision = next(d for d in result.decisions if d.todo_id == target)
     feasible = decision.status == "included"
     now = demo.current_time(state["elapsed"])
     out = {
@@ -119,19 +134,25 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
 
 
 def _running_late(item: dict, state: dict) -> tuple[dict, str]:
-    delay = item.get("delay_minutes") or 0
-    state["elapsed"] += delay * 60
-    result = decide_stops(demo.route_timing(state["elapsed"]), _included_candidates(state["user_id"]),
+    """늦은 시간만큼 지난 장면으로 다시 계산해요. 분이 없으면("버스 하나 놓쳤어") 지금 차를 놓친 것으로 봐요."""
+    delay = item.get("delay_minutes")
+    if delay is None:
+        first = _demo_route_arrival(state["elapsed"])["first_seconds"]
+        state["elapsed"] += 0 if first is None else first + 1
+    else:
+        state["elapsed"] += delay * 60
+    result = decide_stops(demo.route_timing(state["elapsed"]), [c for c, _ in _included(state["user_id"])],
                           demo.deadline_seconds(state["elapsed"]))
     now = demo.current_time(state["elapsed"])
     arrive_at = now + timedelta(seconds=result.total_seconds)
     board_at = None if result.board_seconds is None else now + timedelta(seconds=result.board_seconds)
     on_time = result.total_seconds <= demo.deadline_seconds(state["elapsed"])
-    out = {"intent": "running_late", "delay_minutes": delay, "on_time": on_time,
+    out = {"intent": "running_late", "delay_minutes": delay, "missed": delay is None, "on_time": on_time,
            "board_at": board_at and board_at.isoformat(), "arrive_at": arrive_at.isoformat()}
+    when = "지금 차를 놓쳤다면" if delay is None else f"{delay}분 늦으면"
     if board_at is None:
-        return out, f"{delay}분 늦으면 탈 수 있는 차가 없어요."
-    answer = f"{delay}분 늦으면 {_hhmm(board_at)} 차를 타고 {_hhmm(arrive_at)}에 도착해요."
+        return out, f"{when} 탈 수 있는 차가 없어요."
+    answer = f"{when} {_hhmm(board_at)} 차를 타고 {_hhmm(arrive_at)}에 도착해요."
     return out, answer if on_time else answer + " 도착 희망 시각보다 늦어요."
 
 
@@ -189,13 +210,17 @@ HANDLERS = {
 
 
 def ask(user_id: str, text: str, use_demo: bool) -> dict:
-    """질문을 분류하고 순서대로 계산해 답해요. 질문과 답변은 messages에 저장해요."""
-    history = repo.recent_messages(user_id)
+    """질문을 분류하고 순서대로 계산해 답해요. 질문과 답변은 messages에 저장해요 (demo 제외)."""
+    # demo는 부스에서 여러 사람이 함께 써서, 앞사람 질문이 섞이지 않게 기록도 이전 대화도 쓰지 않아요
+    keep_history = user_id != DEMO_USER_ID
+    history = repo.recent_messages(user_id) if keep_history else []
     classified, engine = _with_fallback(
         lambda t: llm.classify_question(t, history=history), rules.classify_question, text
     )
+    classified = rules.ask_delay_if_unknown(classified, text)
     intents = classified["intents"]
-    repo.add_message(user_id, "user", text, intents)
+    if keep_history:
+        repo.add_message(user_id, "user", text, intents)
 
     result, answers = None, []
     state = {"user_id": user_id, "text": text, "elapsed": 0, "todo": None}
@@ -217,7 +242,8 @@ def ask(user_id: str, text: str, use_demo: bool) -> dict:
         saved = repo.add_todo(user_id, todo["text"], todo["place_types"], status=todo["status"], source="질문")
         todo = {**todo, "id": saved["id"]}
     answer = " ".join(dict.fromkeys(answers))
-    repo.add_message(user_id, "assistant", answer)
+    if keep_history:
+        repo.add_message(user_id, "assistant", answer)
     return {
         "intents": intents,
         "needs_confirm": classified["needs_confirm"],
