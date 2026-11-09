@@ -4,7 +4,6 @@ import '../models/todo_item.dart';
 import 'schedule_screen.dart';
 import 'todo_screen.dart';
 import 'navigation_screen.dart';
-import 'settings_screen.dart';
 import 'assistant_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -31,7 +30,6 @@ class _MainScreenState extends State<MainScreen> {
     const ScheduleScreen(),
     const TodoScreen(),
     NavigationScreen(selectedWaypoint: _waypoint),
-    const SettingsScreen(),
     ];
   }
 
@@ -162,11 +160,6 @@ class _MainScreenState extends State<MainScreen> {
             icon: Icon(Icons.route_outlined),
             selectedIcon: Icon(Icons.route),
             label: '이동',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: '설정',
           ),
         ],
       ),

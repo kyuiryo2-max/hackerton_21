@@ -76,6 +76,9 @@ class KakaoRouteParser {
         segments.add(
           RouteSegment(
             type: type,
+            lineName: _firstString(sp, ['lineName', 'routeName', 'route', 'line', 'name']),
+            startName: _firstString(sp, ['startName', 'startStation', 'startStop', 'fromName', 'departureName']),
+            endName: _firstString(sp, ['endName', 'endStation', 'endStop', 'toName', 'arrivalName']),
             description:
                 sp['guidance']?.toString() ??
                 _defaultDescription(type),
@@ -105,6 +108,14 @@ class KakaoRouteParser {
     }
 
     return candidates;
+  }
+
+  static String? _firstString(Map<String, dynamic> map, List<String> keys) {
+    for (final key in keys) {
+      final value = map[key];
+      if (value is String && value.trim().isNotEmpty) return value.trim();
+    }
+    return null;
   }
 
   static Map<String, dynamic> _asMap(dynamic value) {

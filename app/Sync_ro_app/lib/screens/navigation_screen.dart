@@ -10,7 +10,7 @@ import '../providers/schedule_controller.dart';
 import '../services/route_api_service.dart';
 import '../services/place_search_service.dart';
 import 'place_search_screen.dart';
-import 'route_inline_map.dart';
+import 'search_route_results_panel.dart';
 import 'demo_route_panel.dart';
 
 class NavigationScreen extends StatefulWidget {
@@ -230,59 +230,15 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     }
   }
 
-  RouteCandidate? _selected(List<RouteCandidate> routes, String? id) {
-    if (routes.isEmpty) return null;
-    for (final route in routes) { if (route.id == id) return route; }
-    return routes.first;
-  }
-
-  void _compareRoutes(List<RouteCandidate> routes, String? selectedId, ValueChanged<String> onSelect) {
-    showModalBottomSheet<void>(
-      context: context, isScrollControlled: true, showDragHandle: true,
-      builder: (sheetContext) => SafeArea(child: FractionallySizedBox(
-        heightFactor: 0.72,
-        child: Column(children: [
-          Padding(padding: const EdgeInsets.all(16), child: Text('추천 경로 비교', style: Theme.of(sheetContext).textTheme.titleLarge)),
-          Expanded(child: ListView.builder(itemCount: routes.length, itemBuilder: (_, i) {
-            final r = routes[i];
-            return ListTile(
-              selected: r.id == selectedId,
-              leading: Icon(r.id == selectedId ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-              title: Text(r.title),
-              subtitle: Text('총 ${r.totalMinutes}분 · 도보 ${r.walkingMinutes}분 · 대기 ${r.waitingMinutes}분 · 환승 ${r.transferCount}회'),
-              trailing: r.isRecommended ? const Icon(Icons.star, color: Colors.amber) : null,
-              onTap: () { onSelect(r.id); Navigator.pop(sheetContext); },
-            );
-          })),
-        ]),
-      )),
+  Widget _routePanel({required List<RouteCandidate> routes, required String? selectedId,
+    required ValueChanged<String> onSelect, required bool loading, required String? error,
+    required String originName, required String destinationName, DateTime? arrival,
+    Place? origin, Place? destination}) {
+    return SearchRouteResultsPanel(
+      routes: routes, selectedId: selectedId, onSelect: onSelect,
+      loading: loading, error: error, origin: origin, destination: destination,
+      originName: originName, destinationName: destinationName, desiredArrival: arrival,
     );
-  }
-
-  Widget _routePanel({required List<RouteCandidate> routes, required String? selectedId, required ValueChanged<String> onSelect, required bool loading, required String? error, Place? origin, Place? destination}) {
-    final selected = _selected(routes, selectedId);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(height: 350, child: RouteInlineMap(key: ValueKey('${selected?.id}-${origin?.id}-${destination?.id}'), candidate: selected, origin: origin, destination: destination)),
-      const SizedBox(height: 12),
-      if (loading) const LinearProgressIndicator(),
-      if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error))),
-      if (selected != null) ...[
-        Card(child: ListTile(
-          title: Text(selected.title),
-          subtitle: Text('총 ${selected.totalMinutes}분 · 도보 ${selected.walkingMinutes}분 · 대기 ${selected.waitingMinutes}분 · 환승 ${selected.transferCount}회'),
-          trailing: const Icon(Icons.unfold_more),
-          onTap: () => _compareRoutes(routes, selected.id, onSelect),
-        )),
-        for (final segment in selected.segments)
-          ListTile(dense: true, leading: Icon(switch (segment.type) {
-            RouteSegmentType.walking => Icons.directions_walk,
-            RouteSegmentType.bus => Icons.directions_bus,
-            RouteSegmentType.subway => Icons.train,
-            RouteSegmentType.waiting => Icons.schedule,
-          }), title: Text(segment.description), trailing: Text('${segment.durationMinutes}분')),
-      ] else if (!loading && error == null)
-        const Padding(padding: EdgeInsets.all(8), child: Text('경로가 아직 없습니다. 출발지를 선택해 탐색해 주세요.')),
-    ]);
   }
 
   String _time(DateTime value) => '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
@@ -335,7 +291,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
           if (_scheduleDestination != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('확인된 목적지: ${_scheduleDestination!.name}')),
           if (_destinationLookupMessage != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_destinationLookupMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
           const SizedBox(height: 12),
-          _routePanel(routes: _scheduleRoutes, selectedId: _scheduleRouteId, onSelect: (id) => setState(() => _scheduleRouteId = id), loading: _loadingSchedule, error: _scheduleError, origin: _origin, destination: _scheduleDestination),
+          _routePanel(routes: _scheduleRoutes, selectedId: _scheduleRouteId, onSelect: (id) => setState(() => _scheduleRouteId = id), loading: _loadingSchedule, error: _scheduleError, origin: _origin, destination: _scheduleDestination, originName: _origin?.name ?? '출발지 미설정', destinationName: schedule.location, arrival: schedule.startTime),
           if (_origin != null) Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: _loadingSchedule ? null : () => _loadScheduleRoutes(schedule), icon: const Icon(Icons.refresh), label: const Text('경로 새로고침'))),
         ],
         const SizedBox(height: 22),
@@ -352,13 +308,13 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
           FilledButton.icon(onPressed: _loadingManual ? null : _loadManualRoutes, icon: const Icon(Icons.route), label: Text(_loadingManual ? '검색 중...' : '이동 경로 검색')),
           if (_manualRoutes.isNotEmpty || _manualError != null || _loadingManual) ...[
             const SizedBox(height: 12),
-            _routePanel(routes: _manualRoutes, selectedId: _manualRouteId, onSelect: (id) => setState(() => _manualRouteId = id), loading: _loadingManual, error: _manualError, origin: _manualOrigin, destination: _manualDestination),
+            _routePanel(routes: _manualRoutes, selectedId: _manualRouteId, onSelect: (id) => setState(() => _manualRouteId = id), loading: _loadingManual, error: _manualError, origin: _manualOrigin, destination: _manualDestination, originName: _manualOriginController.text, destinationName: _manualDestinationController.text, arrival: _manualArrival),
           ],
         ],
         if (widget.selectedWaypoint != null)
           ValueListenableBuilder<TodoItem?>(valueListenable: widget.selectedWaypoint!, builder: (_, todo, __) => todo == null ? const SizedBox.shrink() : Card(child: ListTile(title: Text('선택한 할 일: ${todo.title}'), subtitle: const Text('경유지 자동 검색은 아직 연결되지 않았습니다.'), trailing: IconButton(onPressed: () => widget.selectedWaypoint!.value = null, icon: const Icon(Icons.close))))),
         const SizedBox(height: 24),
-        const Text('장소 검색은 API 설정에 따라 샘플 또는 실제 검색입니다. 경로 검색은 별도 설정이며 샘플 모드에서는 선택한 위치와 무관한 테스트 경로가 나올 수 있습니다.', style: TextStyle(color: Colors.grey)),
+        const Text('오프라인에서는 안암역→청량리역 시연 경로만 검색할 수 있습니다. 다른 출발지·목적지의 실제 경로는 서버 연동 후 이용할 수 있습니다.', style: TextStyle(color: Colors.grey)),
       ]),
     );
   }

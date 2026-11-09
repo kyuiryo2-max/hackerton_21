@@ -8,7 +8,7 @@ class ApiConfig {
     'API_BASE_URL', defaultValue: 'https://teumgil-server.onrender.com');
   static String get normalizedBaseUrl => baseUrl.replaceFirst(RegExp(r'/+$'), '');
   static Uri endpoint(String path, [Map<String, String>? query]) =>
-      Uri.parse('${normalizedBaseUrl}${path.startsWith('/') ? path : '/$path'}')
+      Uri.parse('$normalizedBaseUrl${path.startsWith('/') ? path : '/$path'}')
           .replace(queryParameters: query);
   static const bool useMockData = true; // legacy recommendation fallback
   static const String recommendationsEndpoint = '/api/recommendations';

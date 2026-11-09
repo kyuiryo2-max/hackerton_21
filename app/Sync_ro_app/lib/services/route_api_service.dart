@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'kakao_route_parser.dart';
+import '../data/demo_route_options.dart';
+import '../data/demo_route_style.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/route_api_config.dart';
@@ -10,10 +12,52 @@ import '../models/route_request.dart';
 class RouteApiService {
   Future<List<RouteCandidate>> searchRoutes(RouteRequest request) async {
     if (ApiConfig.offlineDemo || !RouteApiConfig.useRealApi) {
-      return _mockRoutes();
+      if (_isBundledDemoPair(request)) return _bundledDemoRoutes();
+      throw StateError('현재 오프라인 시연 모드입니다. 임의의 출발지·목적지는 실제 경로를 조회할 수 없습니다. '
+          '시연 경로(안암역3번출구 → 청량리역)를 이용하거나, 서버 복구 후 '
+          'SYNC_RO_OFFLINE_DEMO=false 및 SYNC_RO_USE_REAL_API=true로 실행해 주세요.');
     }
 
     return _fetchRoutes(request);
+  }
+
+  bool _isBundledDemoPair(RouteRequest r) {
+    final from = r.origin.replaceAll(' ', '');
+    final to = r.destination.replaceAll(' ', '');
+    return (from.contains('안암역') || from.contains('안암')) &&
+        (to.contains('청량리역') || to.contains('청량리'));
+  }
+
+  List<RouteCandidate> _bundledDemoRoutes() {
+    return [
+      for (var i = 0; i < DemoRouteOptions.routes.length; i++)
+        RouteCandidate(
+          id: 'offline_demo_${i + 1}',
+          title: DemoRouteOptions.routes[i].label,
+          transferCount: DemoRouteOptions.routes[i].transfers,
+          isRecommended: i == 0,
+          totalDurationMinutes: (DemoRouteOptions.routes[i].durationSeconds / 60).ceil(),
+          segments: [
+            for (final leg in DemoRouteOptions.routes[i].legs)
+              RouteSegment(
+                type: switch (leg.mode) {
+                  'BUS' => RouteSegmentType.bus,
+                  'SUBWAY' => RouteSegmentType.subway,
+                  _ => RouteSegmentType.walking,
+                },
+                description: leg.label,
+                lineName: leg.mode == 'WALKING' ? '도보 환승' : leg.label.split(' (').first,
+                startName: DemoRouteStyle.endpoints(leg).$1,
+                endName: DemoRouteStyle.endpoints(leg).$2,
+                durationMinutes: (leg.seconds / 60).ceil(),
+                geometry: [
+                  for (final p in leg.path)
+                    RoutePoint(latitude: p.latitude, longitude: p.longitude),
+                ],
+              ),
+          ],
+        ),
+    ];
   }
 
   Future<List<RouteCandidate>> _fetchRoutes(RouteRequest request) async {
@@ -98,7 +142,10 @@ class RouteApiService {
 
         return RouteSegment(
           type: _parseSegmentType(segment['type'] as String),
-          description: segment['description'] as String,
+          description: segment['description']?.toString() ?? '',
+          lineName: (segment['lineName'] ?? segment['routeName'] ?? segment['line'])?.toString(),
+          startName: (segment['startName'] ?? segment['fromName'])?.toString(),
+          endName: (segment['endName'] ?? segment['toName'])?.toString(),
           durationMinutes: (segment['durationMinutes'] as num).toInt(),
           geometry: geometry,
         );
@@ -131,105 +178,4 @@ class RouteApiService {
     }
   }
 
-  List<RouteCandidate> _mockRoutes() {
-    return const [
-      RouteCandidate(
-        id: 'route_1',
-        title: '도보 + 버스',
-        transferCount: 0,
-        isRecommended: true,
-        segments: [
-          RouteSegment(
-            type: RouteSegmentType.walking,
-            description: '출발지 → 버스 정류장',
-            durationMinutes: 8,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.waiting,
-            description: '버스 대기',
-            durationMinutes: 4,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.bus,
-            description: '버스 탑승',
-            durationMinutes: 25,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.walking,
-            description: '버스 정류장 → 목적지',
-            durationMinutes: 5,
-          ),
-        ],
-      ),
-      RouteCandidate(
-        id: 'route_2',
-        title: '도보 + 지하철',
-        transferCount: 0,
-        segments: [
-          RouteSegment(
-            type: RouteSegmentType.walking,
-            description: '출발지 → 지하철역',
-            durationMinutes: 12,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.waiting,
-            description: '지하철 대기',
-            durationMinutes: 5,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.subway,
-            description: '지하철 탑승',
-            durationMinutes: 22,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.walking,
-            description: '지하철역 → 목적지',
-            durationMinutes: 7,
-          ),
-        ],
-      ),
-      RouteCandidate(
-        id: 'route_3',
-        title: '도보 + 버스 + 지하철',
-        transferCount: 1,
-        segments: [
-          RouteSegment(
-            type: RouteSegmentType.walking,
-            description: '출발지 → 버스 정류장',
-            durationMinutes: 5,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.waiting,
-            description: '버스 대기',
-            durationMinutes: 3,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.bus,
-            description: '버스 탑승',
-            durationMinutes: 12,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.walking,
-            description: '버스 정류장 → 지하철역',
-            durationMinutes: 4,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.waiting,
-            description: '지하철 대기',
-            durationMinutes: 4,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.subway,
-            description: '지하철 탑승',
-            durationMinutes: 15,
-          ),
-          RouteSegment(
-            type: RouteSegmentType.walking,
-            description: '지하철역 → 목적지',
-            durationMinutes: 4,
-          ),
-        ],
-      ),
-    ];
-  }
 }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'route_map_screen.dart';
+import 'search_route_results_panel.dart';
 import '../models/route_request.dart';
 import '../models/travel_recommendation.dart';
 import '../models/route_candidate.dart';
@@ -7,7 +7,6 @@ import '../models/route_plan.dart';
 import '../services/route_planning_service.dart';
 import '../services/todo_recommendation_service.dart';
 import '../providers/todo_controller.dart';
-import '../widgets/route_candidate_card.dart';
 import '../widgets/todo_card.dart';
 import '../services/route_api_service.dart';
 
@@ -70,14 +69,12 @@ class _RouteResultScreenState extends State<RouteResultScreen> {
     }
   }
 
-  String _formatDateTime(DateTime dateTime) {
-    final year = dateTime.year;
-    final month = dateTime.month.toString().padLeft(2, '0');
-    final day = dateTime.day.toString().padLeft(2, '0');
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-
-    return '$year-$month-$day $hour:$minute';
+  String _formatDateTime(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$month/$day $hour:$minute';
   }
 
   Widget _buildInfoRow(String label, String value) {
@@ -165,122 +162,16 @@ class _RouteResultScreenState extends State<RouteResultScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // 출발지 / 목적지
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '이동 정보',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  _buildInfoRow('출발지', widget.request.origin),
-                  _buildInfoRow('목적지', widget.request.destination),
-                  _buildInfoRow(
-                    '도착 희망 시간',
-                    _formatDateTime(widget.request.desiredArrivalTime),
-                  ),
-                ],
-              ),
-            ),
+          SearchRouteResultsPanel(
+            routes: candidates,
+            selectedId: selectedCandidate.id,
+            onSelect: (id) => setState(() => _selectedRouteId = id),
+            originName: widget.request.origin,
+            destinationName: widget.request.destination,
+            desiredArrival: widget.request.desiredArrivalTime,
+            origin: widget.request.originPlace,
+            destination: widget.request.destinationPlace,
           ),
-
-          const SizedBox(height: 16),
-
-          const Text(
-            '추천 경로 후보',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-
-          const Text(
-            '현재는 Mock 데이터로 경로를 표시합니다. '
-            '실제 출발지와 목적지에 따른 경로 탐색은 '
-            '추후 API 연동 시 적용됩니다.',
-            style: TextStyle(color: Colors.grey, fontSize: 13),
-          ),
-
-          const SizedBox(height: 12),
-
-          // 경로 후보 선택
-          ...candidates.map((candidate) {
-            final isSelected = candidate.id == selectedCandidate.id;
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () {
-                  setState(() {
-                    _selectedRouteId = candidate.id;
-                  });
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.transparent,
-                      width: 2,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    children: [
-                      if (isSelected)
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            top: 8,
-                            left: 12,
-                            right: 12,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.check_circle,
-                                size: 18,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 6),
-                              const Text(
-                                '선택한 경로',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                      RouteCandidateCard(candidate: candidate),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
-
-          const SizedBox(height: 12),
-
-          OutlinedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => RouteMapScreen(
-                    origin: widget.request.origin,
-                    destination: widget.request.destination,
-                    originPlace: widget.request.originPlace,
-                    destinationPlace: widget.request.destinationPlace,
-                    candidate: selectedCandidate,
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.map_outlined),
-            label: const Text('선택한 경로 상세 보기'),
-          ),
-
           const SizedBox(height: 20),
 
           // 선택한 경로 기준 시간 계산
