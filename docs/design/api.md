@@ -40,6 +40,14 @@
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
 
+## 도착 정보 응답에서 앱이 쓰는 값
+
+**`/api/arrivals`** ([arrivals.json](api-examples/arrivals.json))
+- 항목마다 `route`, `minutes`(분, 내림. 0은 곧 도착), `next_minutes`, `direction`. 버스 `direction`은 종점, 지하철은 다음 역(`보문방면`)
+- `fetched_at`: 조회 시각. **실시간(`demo=false`)에만** 있다. 시연 모드에는 없음
+- `estimated`: 남은 역 수로 계산한 값이면 `true`라 "약"을 붙여 보여 준다. **지하철 실시간에만** 있다. 버스와 시연 모드에는 없음
+- 서울시 응답은 버스·지하철 모두 20초 동안 저장해 다시 쓴다 (하루 1,000건 한도)
+
 ## 할 일 상태·출처 (#12 회의 3번)
 
 | 필드 | 값 | 누가 바꾸나 |
