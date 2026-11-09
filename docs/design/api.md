@@ -34,9 +34,9 @@
 | 있음 | `POST·GET /api/choices` | 고른 경로 기록 (⑧) | [choices.json](api-examples/choices.json) | routers/storage.py |
 | 있음 | `GET /api/arrivals` | 도착 정보. 버스 `stop_id`, 지하철 `station`(+`line`). `demo=true`면 시연 고정값, 아니면 서울시 실시간 | [arrivals.json](api-examples/arrivals.json) | routers/transit.py |
 | 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로 | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
-| 만들 예정 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | #19, #33 |
-| 만들 예정 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외 | [plan.json](api-examples/plan.json) | #33, #35 |
-| 만들 예정 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 | [ask.json](api-examples/ask.json) | #38, #41 |
+| 있음 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | routers/assistant.py |
+| 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외 (지금은 `demo=true`만, 실시간은 501) | [plan.json](api-examples/plan.json) | routers/plan.py |
+| 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 (계산은 `demo=true`만) | [ask.json](api-examples/ask.json) | routers/assistant.py |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
 
@@ -68,19 +68,33 @@
 
 ## 만들 예정 API 응답에서 앱이 쓰는 값
 
-**`/api/plan`** ([plan.json](api-examples/plan.json), 시연 모드 `demo.decide([1, 2, 3])` 결과)
+**`/api/plan`** ([plan.json](api-examples/plan.json), 실제 응답)
+- 요청: `user_id` 필수. `todo_ids`가 없으면 완료하지 않은 할 일 전부. 시연 모드에서는 일정·시각·위치를 시나리오 고정값으로 써서 `schedule_id`는 쓰지 않음
+- 들를 장소 종류가 없는 할 일은 계산에서 뺌. 시연 지역에 없는 장소는 `place: null`, 필수면 `대기`·선택이면 `제외`로 보여 주고 상태는 저장하지 않음
+- demo가 아닌 사용자는 계산한 `status`가 할 일에 저장됨 (부스 관객이 자기 할 일로 시연)
 - `board_at`, `arrive_at`: 탈 차 도착 시각, 목적지 도착 예정
 - `routes[]`: 경로 카드 2~3개. `total_min`, `wait_min`, `moving_min`, `transfers`, `fare`, `max_stay_min`(경유지에서 쓸 수 있는 최대 시간, 0이면 경유 불가)
 - `todos[]`: 할 일마다 `status`(포함/제외/대기)와 들를 장소. 대기면 `options`를 버튼으로 보여 준다
-- `explanation`: AI 한두 문장. 숫자가 계산과 다르면 정해진 문장으로 바뀐다 (`llm.numbers_match`)
+- `explanation`: 지금은 계산값으로 만든 정해진 문장. AI 문장(#36)이 붙으면 숫자가 계산과 다를 때 이 문장으로 바뀐다 (`llm.numbers_match`)
 
 **`/api/ask`** ([ask.json](api-examples/ask.json))
 - `intents`, `needs_confirm`, `question`: json-format.md 2번 그대로
 - `needs_confirm: true` 면 `result: null`, 앱은 `question`을 대화창에 보여 준다
 - `todo`: 들르기 질문으로 저장된 할 일 (`source: 질문`, `importance: 필수`). 아니면 `null`
-- `result`: 코드 계산 결과. **모양은 #12 회의 8번 미정이라 #37에서 확정** (예시는 제안 값)
+- `result`: 코드 계산 결과. 질문이 여러 종류면 마지막 계산 결과이고, `answer`는 순서대로 이어 붙인다. #12 회의 8번은 아직 미정이라 아래는 지금 서버 모양이다
+  - `next_vehicle`: `route`, `minutes`, `next_minutes`
+  - `stopover_check`: `feasible`, `place{name, address}`, `max_stay_min`, `board_at`
+  - `running_late`: `delay_minutes`, `missed`, `on_time`, `board_at`, `arrive_at` (뒤 질문도 늦어진 시각으로 계산). 분이 없고 "놓쳤어"면 지금 차를 놓친 것으로 보고 다음 차 기준(`missed: true`), 그 밖에는 "몇 분 늦을 것 같아요?"로 되물음
+  - `time_left`: `minutes`, `leave_by` (차 도착에서 여유 2분을 뺀 시각)
+  - `place_info`: `place`, `change_route`: `route`, `change_todo`: `todo_id`, `action`, `unsupported`: 없음
+  - `demo=false`면 교통 계산이 필요한 질문은 `{"intent", "available": false}` 와 준비 중 안내
+- `engine`: `ai` 또는 `rule`. AI 키가 없거나 AI 호출이 실패하면 키워드 규칙(`services/rules.py`)으로 답한다. 규칙 정확도는 팀 테스트 문장 기준 의도 14/25, 장소 10/15라 AI보다 낮다
+- 질문과 할 일 문장은 200자까지
+- `demo` 사용자는 부스에서 여럿이 함께 써서 질문 기록을 저장하지 않고 AI에 이전 대화도 보내지 않는다
+- `demo` 사용자의 들르기 판단은 시연 계획에서 이미 포함된 할 일(이어폰)과 함께 계산한다. 같은 장소는 다시 더하지 않는다
 
 ## 알려진 차이 (고칠 것)
 
-- DB 시연 데이터(`database.seed_demo_data`)는 일정 "공학관", 할 일 "약 사기·엄마 생신 선물"인데, 시연 모드(`scenario.json`)는 청량리역, "이어폰 사기·커피 사기·다이소 들르기"다. #30 시연 대본에 맞춰 하나로 맞추기
+- DB 시연 데이터는 `data/demo/scenario.json`에서 읽어 넣는다 (일정 청량리역, 할 일 이어폰·커피·다이소). 시연 대본을 바꾸면 이 파일만 고치면 된다
+- `/api/plan` 실시간(`demo=false`)은 출발 위치가 필요하다. "현재 위치를 받지 않는다" 규칙과 맞물려 있어 정하기 전까지 501
 - 서울시 실시간 지하철은 호선에 따라 데이터가 빠질 때가 있다 (11/9 오후 6호선 대부분 `INFO-200`). 이때 `/api/arrivals`는 빈 목록이고, 시연은 `demo=true`로 한다

@@ -9,10 +9,12 @@
 - 3번: 할 일에 상태(대기/포함/제외/완료)와 출처(입력/질문). 질문으로 들어온 경유는 필수
 - 4번: 질문 기록 표(messages). 최근 몇 턴을 AI에 함께 보내고, 테스트 케이스로 모아요
 """
+import json
 import sqlite3
 from contextlib import contextmanager
 
 from app import config
+from app.services.demo import scenario as demo_scenario
 
 DEMO_USER_ID = "demo"
 
@@ -106,16 +108,21 @@ def seed_demo_data(path: str | None = None) -> None:
     with connect(path) as conn:
         for table in USER_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (DEMO_USER_ID,))
+        # 시연 대본(data/demo/scenario.json)과 같은 일정·할 일을 넣어요
+        data = demo_scenario()
+        schedule = data["schedule"]
+        destination = schedule["destination"]
         conn.execute(
             "INSERT INTO schedules (user_id, destination, destination_lat, destination_lng, arrive_by, prep_minutes) "
-            "VALUES (?, '공학관', 37.5833, 127.0263, '2026-11-21T09:00:00+09:00', 30)",
-            (DEMO_USER_ID,),
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (DEMO_USER_ID, destination["name"], destination["lat"], destination["lng"],
+             schedule["arrive_by"], schedule["prep_minutes"]),
         )
         conn.executemany(
             "INSERT INTO todos (user_id, text, place_types, importance) VALUES (?, ?, ?, ?)",
             [
-                (DEMO_USER_ID, "약 사기", '["약국"]', "필수"),
-                (DEMO_USER_ID, "엄마 생신 선물", '["꽃집","케이크집"]', "선택"),
+                (DEMO_USER_ID, p["todo"], json.dumps([p["place_type"]], ensure_ascii=False), p["importance"])
+                for p in data["places"]
             ],
         )
         conn.execute("INSERT INTO settings (user_id) VALUES (?)", (DEMO_USER_ID,))

@@ -23,10 +23,10 @@ RESULTS = ROOT / "ai" / "results"
 # 비교 기준선: AI 없이 키워드만으로 분류했을 때
 # 질문 종류 이름은 docs/design/json-format.md 2번 표와 같아야 해요.
 KEYWORDS = {
-    "running_late": ["늦"],
+    "running_late": ["늦", "놓쳤"],
     "next_vehicle": ["다음 버스", "다음 지하철", "언제 와"],
     "time_left": ["몇 분", "언제 나가"],
-    "stopover_check": ["들러", "들렀", "들를", "사야"],
+    "stopover_check": ["들러", "들렀", "들를", "사야", "사도"],
     "place_info": ["어디"],
     "change_route": ["환승", "빠른 걸로", "싼 걸로"],
     "change_todo": ["안 사도", "안 해도"],
@@ -35,6 +35,11 @@ KEYWORDS = {
 
 def keyword_intents(text: str) -> list[str]:
     found = [intent for intent, words in KEYWORDS.items() if any(w in text for w in words)]
+    # "안 사도 돼"는 빼기예요. "사도"만으로 들르기가 잡혔으면 지워요 (server/app/services/rules.py 와 같게)
+    if "change_todo" in found and "stopover_check" in found and not any(
+        w in text for w in ["들러", "들렀", "들를", "사야"]
+    ):
+        found.remove("stopover_check")
     return found or ["unsupported"]
 
 

@@ -1,7 +1,7 @@
 """docs/design/api-examples 가 서버 코드와 같은지 확인해요 (#12 회의 9번).
 
 - "있음" 예시의 경로는 서버에 실제로 있어야 해요
-- "만들 예정" 예시(plan, ask, tasks_parse)의 경로가 서버에 생기면 이 테스트가 알려 줘요 → 문서의 상태를 "있음"으로
+- "만들 예정" 예시의 경로가 서버에 생기면 이 테스트가 알려 줘요 → 문서의 상태를 "있음"으로
 """
 import json
 import re
@@ -10,7 +10,7 @@ from pathlib import Path
 from app.main import app
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "docs" / "design" / "api-examples"
-PLANNED = {"plan", "ask", "tasks_parse"}
+PLANNED: set[str] = set()
 
 
 def _routes() -> set[tuple[str, str]]:

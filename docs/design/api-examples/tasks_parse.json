@@ -1,5 +1,5 @@
 {
-  "_설명": "만들 예정 (#19, #33). AI 결과만 돌려주고 저장은 안 해요. 앱이 사용자 확인 뒤 POST /api/todos 로 저장 (json-format.md 1번)",
+  "_설명": "실제 서버 응답 (#33). 저장은 안 해요. 앱이 사용자 확인 뒤 POST /api/todos 로 저장 (json-format.md 1번). engine: ai 또는 rule(AI 키가 없거나 실패해 키워드 규칙으로 처리)",
   "examples": [
     {
       "request": {
@@ -20,7 +20,8 @@
             "케이크집"
           ],
           "importance": null,
-          "needs_confirm": false
+          "needs_confirm": false,
+          "engine": "ai"
         }
       }
     },
@@ -40,7 +41,8 @@
           "text": "그거 사야 됨",
           "place_types": [],
           "importance": null,
-          "needs_confirm": true
+          "needs_confirm": true,
+          "engine": "ai"
         }
       },
       "note": "장소를 알 수 없음 → 화면에서 사용자가 장소 종류를 고름"
