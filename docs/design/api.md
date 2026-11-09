@@ -62,7 +62,7 @@
 
 **`/api/plan`** ([plan.json](api-examples/plan.json), 실제 응답)
 - 요청: `user_id` 필수. `todo_ids`가 없으면 완료하지 않은 할 일 전부. 시연 모드에서는 일정·시각·위치를 시나리오 고정값으로 써서 `schedule_id`는 쓰지 않음
-- 들를 장소 종류가 없는 할 일은 계산에서 뺌. 시연 지역에 없는 장소는 `제외`, `place: null`
+- 들를 장소 종류가 없는 할 일은 계산에서 뺌. 시연 지역에 없는 장소는 `place: null`, 필수면 `대기`·선택이면 `제외`로 보여 주고 상태는 저장하지 않음
 - demo가 아닌 사용자는 계산한 `status`가 할 일에 저장됨 (부스 관객이 자기 할 일로 시연)
 - `board_at`, `arrive_at`: 탈 차 도착 시각, 목적지 도착 예정
 - `routes[]`: 경로 카드 2~3개. `total_min`, `wait_min`, `moving_min`, `transfers`, `fare`, `max_stay_min`(경유지에서 쓸 수 있는 최대 시간, 0이면 경유 불가)

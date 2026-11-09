@@ -79,7 +79,8 @@ def plan_demo(user_id: str, todo_ids: list[int] | None = None) -> dict:
     for todo_id in [d.todo_id for d in result.decisions] + [t["id"] for t in todos if not places[t["id"]]]:
         todo, place = by_id[todo_id], places[todo_id]
         decision = decided.get(todo_id)
-        status = STATUS[decision.status] if decision else "제외"
+        # 시연 지역에 장소가 없으면 계산을 못 한 것이라 저장하지 않고, 필수는 사라지지 않게 대기로 보여 줘요
+        status = STATUS[decision.status] if decision else ("대기" if todo["importance"] == "필수" else "제외")
         row = {
             "todo_id": todo_id,
             "text": todo["text"],
@@ -92,7 +93,7 @@ def plan_demo(user_id: str, todo_ids: list[int] | None = None) -> dict:
         if decision and decision.status == "ask":
             row["options"] = ASK_OPTIONS
         todo_rows.append(row)
-        if user_id != DEMO_USER_ID:
+        if decision and user_id != DEMO_USER_ID:
             repo.update_todo(todo_id, user_id, status=status)
 
     route_info = data["route"]
