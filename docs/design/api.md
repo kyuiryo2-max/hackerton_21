@@ -35,7 +35,7 @@
 | 있음 | `GET /api/arrivals` | 정류소 도착 정보 (지금은 `demo=true`만, 실시간은 501) | [arrivals.json](api-examples/arrivals.json) | routers/transit.py |
 | 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로 | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
 | 만들 예정 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | #19, #33 |
-| 만들 예정 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외 | [plan.json](api-examples/plan.json) | #33, #35 |
+| 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외 (지금은 `demo=true`만, 실시간은 501) | [plan.json](api-examples/plan.json) | routers/plan.py |
 | 만들 예정 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 | [ask.json](api-examples/ask.json) | #38, #41 |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
@@ -60,11 +60,14 @@
 
 ## 만들 예정 API 응답에서 앱이 쓰는 값
 
-**`/api/plan`** ([plan.json](api-examples/plan.json), 시연 모드 `demo.decide([1, 2, 3])` 결과)
+**`/api/plan`** ([plan.json](api-examples/plan.json), 실제 응답)
+- 요청: `user_id` 필수. `todo_ids`가 없으면 완료하지 않은 할 일 전부. 시연 모드에서는 일정·시각·위치를 시나리오 고정값으로 써서 `schedule_id`는 쓰지 않음
+- 들를 장소 종류가 없는 할 일은 계산에서 뺌. 시연 지역에 없는 장소는 `제외`, `place: null`
+- demo가 아닌 사용자는 계산한 `status`가 할 일에 저장됨 (부스 관객이 자기 할 일로 시연)
 - `board_at`, `arrive_at`: 탈 차 도착 시각, 목적지 도착 예정
 - `routes[]`: 경로 카드 2~3개. `total_min`, `wait_min`, `moving_min`, `transfers`, `fare`, `max_stay_min`(경유지에서 쓸 수 있는 최대 시간, 0이면 경유 불가)
 - `todos[]`: 할 일마다 `status`(포함/제외/대기)와 들를 장소. 대기면 `options`를 버튼으로 보여 준다
-- `explanation`: AI 한두 문장. 숫자가 계산과 다르면 정해진 문장으로 바뀐다 (`llm.numbers_match`)
+- `explanation`: 지금은 계산값으로 만든 정해진 문장. AI 문장(#36)이 붙으면 숫자가 계산과 다를 때 이 문장으로 바뀐다 (`llm.numbers_match`)
 
 **`/api/ask`** ([ask.json](api-examples/ask.json))
 - `intents`, `needs_confirm`, `question`: json-format.md 2번 그대로
@@ -74,5 +77,6 @@
 
 ## 알려진 차이 (고칠 것)
 
-- DB 시연 데이터(`database.seed_demo_data`)는 일정 "공학관", 할 일 "약 사기·엄마 생신 선물"인데, 시연 모드(`scenario.json`)는 청량리역, "이어폰 사기·커피 사기·다이소 들르기"다. #30 시연 대본에 맞춰 하나로 맞추기
+- DB 시연 데이터는 `data/demo/scenario.json`에서 읽어 넣는다 (일정 청량리역, 할 일 이어폰·커피·다이소). 시연 대본을 바꾸면 이 파일만 고치면 된다
+- `/api/plan` 실시간(`demo=false`)은 출발 위치가 필요하다. "현재 위치를 받지 않는다" 규칙과 맞물려 있어 정하기 전까지 501
 - `/api/arrivals` 실시간(`demo=false`)은 서울 버스 모듈(PR #10)과 아직 연결 안 됨 → 501

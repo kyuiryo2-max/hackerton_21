@@ -244,10 +244,10 @@ def test_경로_선택_기록(client):
 # ---------- 시연 데이터 ----------
 def test_시연_데이터가_조회됨(client):
     schedule = client.get("/api/schedules", params={"user_id": "demo"}).json()[0]
-    assert schedule["destination"] == "공학관"
+    assert schedule["destination"] == "청량리역"
     assert KST_TIME.match(schedule["arrive_by"])
     texts = [t["text"] for t in client.get("/api/todos", params={"user_id": "demo"}).json()]
-    assert texts == ["약 사기", "엄마 생신 선물"]
+    assert texts == ["이어폰 사기", "다이소 들르기", "커피 사기"]  # 필수 먼저
 
 
 def test_시연_데이터는_API로_바꿀_수_없음(client):
@@ -266,17 +266,17 @@ def test_시연_데이터는_API로_바꿀_수_없음(client):
     for res in blocked:
         assert res.status_code == 403
         assert res.json()["error"]["code"] == "demo_readonly"
-    assert len(client.get("/api/todos", params=demo).json()) == 2
+    assert len(client.get("/api/todos", params=demo).json()) == 3
 
 
 def test_재시작하면_시연_데이터가_처음_상태로(client, tmp_path):
     db = str(tmp_path / "test.db")
     with sqlite3.connect(db) as conn:  # API를 거치지 않고 망가뜨린 상황
-        conn.execute("DELETE FROM todos WHERE user_id = 'demo' AND text = '약 사기'")
+        conn.execute("DELETE FROM todos WHERE user_id = 'demo' AND text = '이어폰 사기'")
         conn.execute("INSERT INTO todos (user_id, text) VALUES ('demo', '장난')")
     seed_demo_data(db)
     texts = [t["text"] for t in client.get("/api/todos", params={"user_id": "demo"}).json()]
-    assert texts == ["약 사기", "엄마 생신 선물"]
+    assert texts == ["이어폰 사기", "다이소 들르기", "커피 사기"]
     assert len(client.get("/api/schedules", params={"user_id": "demo"}).json()) == 1
 
 
