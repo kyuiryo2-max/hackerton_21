@@ -34,9 +34,9 @@
 | 있음 | `POST·GET /api/choices` | 고른 경로 기록 (⑧) | [choices.json](api-examples/choices.json) | routers/storage.py |
 | 있음 | `GET /api/arrivals` | 정류소 도착 정보 (지금은 `demo=true`만, 실시간은 501) | [arrivals.json](api-examples/arrivals.json) | routers/transit.py |
 | 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로 | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
-| 만들 예정 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | #19, #33 |
+| 있음 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | routers/assistant.py |
 | 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외 (지금은 `demo=true`만, 실시간은 501) | [plan.json](api-examples/plan.json) | routers/plan.py |
-| 만들 예정 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 | [ask.json](api-examples/ask.json) | #38, #41 |
+| 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 (계산은 `demo=true`만) | [ask.json](api-examples/ask.json) | routers/assistant.py |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
 
@@ -73,7 +73,17 @@
 - `intents`, `needs_confirm`, `question`: json-format.md 2번 그대로
 - `needs_confirm: true` 면 `result: null`, 앱은 `question`을 대화창에 보여 준다
 - `todo`: 들르기 질문으로 저장된 할 일 (`source: 질문`, `importance: 필수`). 아니면 `null`
-- `result`: 코드 계산 결과. **모양은 #12 회의 8번 미정이라 #37에서 확정** (예시는 제안 값)
+- `result`: 코드 계산 결과. 질문이 여러 종류면 마지막 계산 결과이고, `answer`는 순서대로 이어 붙인다. #12 회의 8번은 아직 미정이라 아래는 지금 서버 모양이다
+  - `next_vehicle`: `route`, `minutes`, `next_minutes`
+  - `stopover_check`: `feasible`, `place{name, address}`, `max_stay_min`, `board_at`
+  - `running_late`: `delay_minutes`, `missed`, `on_time`, `board_at`, `arrive_at` (뒤 질문도 늦어진 시각으로 계산). 분이 없고 "놓쳤어"면 지금 차를 놓친 것으로 보고 다음 차 기준(`missed: true`), 그 밖에는 "몇 분 늦을 것 같아요?"로 되물음
+  - `time_left`: `minutes`, `leave_by` (차 도착에서 여유 2분을 뺀 시각)
+  - `place_info`: `place`, `change_route`: `route`, `change_todo`: `todo_id`, `action`, `unsupported`: 없음
+  - `demo=false`면 교통 계산이 필요한 질문은 `{"intent", "available": false}` 와 준비 중 안내
+- `engine`: `ai` 또는 `rule`. AI 키가 없거나 AI 호출이 실패하면 키워드 규칙(`services/rules.py`)으로 답한다. 규칙 정확도는 팀 테스트 문장 기준 의도 14/25, 장소 10/15라 AI보다 낮다
+- 질문과 할 일 문장은 200자까지
+- `demo` 사용자는 부스에서 여럿이 함께 써서 질문 기록을 저장하지 않고 AI에 이전 대화도 보내지 않는다
+- `demo` 사용자의 들르기 판단은 시연 계획에서 이미 포함된 할 일(이어폰)과 함께 계산한다. 같은 장소는 다시 더하지 않는다
 
 ## 알려진 차이 (고칠 것)
 
