@@ -87,10 +87,22 @@ def test_관객_할_일도_계산하고_상태_저장(client):
     assert {x["id"]: x["status"] for x in saved} == {t["id"]: "포함"}
 
 
-def test_시연_지역에_없는_장소는_제외(client):
+def test_시연_지역에_없는_장소는_선택이면_제외로_보여_줌(client):
     add_todo(client, "꽃 사기", ["꽃집"])
     todo = plan(client, user_id="u1").json()["todos"][0]
     assert (todo["status"], todo["place"], todo["reason"]) == ("제외", None, "시연 지역에 없는 장소예요")
+
+
+def test_시연_지역에_없는_장소는_필수면_대기(client):
+    add_todo(client, "약 사기", ["약국"], "필수")
+    assert plan(client, user_id="u1").json()["todos"][0]["status"] == "대기"
+
+
+def test_시연_지역에_없는_장소는_상태를_저장하지_않음(client):
+    """계산하지 못한 할 일이 사라진 것처럼 보이지 않게 해요 (PR #25 리뷰)"""
+    add_todo(client, "꽃 사기", ["꽃집"])
+    plan(client, user_id="u1")
+    assert client.get("/api/todos", params={"user_id": "u1"}).json()[0]["status"] == "대기"
 
 
 def test_들를_곳이_없는_할_일은_계산에서_뺌(client):

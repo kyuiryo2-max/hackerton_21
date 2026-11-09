@@ -1,0 +1,26 @@
+id,text,expected,keyword,keyword_pass,ai,ai_pass
+Q01,편의점 들렀다 가도 돼?,stopover_check,stopover_check,True,stopover_check,True
+Q02,아 우유 사야 돼,stopover_check,stopover_check,True,stopover_check,True
+Q03,10분 늦을 것 같아,running_late,running_late,True,running_late,True
+Q04,다음 버스 언제야?,next_vehicle,next_vehicle,True,next_vehicle,True
+Q05,몇 분까지 나가면 돼?,time_left,time_left,True,time_left,True
+Q06,약은 안 사도 돼,change_todo,change_todo,True,change_todo,True
+Q07,근처 약국 어디야?,place_info,place_info,True,place_info,True
+Q08,환승 적은 걸로,change_route,change_route,True,change_route,True
+Q09,점심 뭐 먹지?,unsupported,unsupported,True,unsupported,True
+Q10,늦을 것 같은데 약국은 들를 수 있어?,running_late|stopover_check,running_late|stopover_check,True,running_late|stopover_check,True
+Q11,정류장 옆 다이소 잠깐 가도 될까,stopover_check,unsupported,False,stopover_check,True
+Q12,15분 정도 밀릴 듯,running_late,unsupported,False,running_late,True
+Q13,버스 하나 놓쳤어,running_late,unsupported,False,next_vehicle,False
+Q14,지하철 몇 분 남았어?,next_vehicle,time_left,False,next_vehicle,True
+Q15,273번 아직 멀었어?,next_vehicle,unsupported,False,next_vehicle,True
+Q16,나 지금 바로 나가야 돼?,time_left,unsupported,False,time_left,True
+Q17,준비 얼마나 더 해도 돼?,time_left,unsupported,False,time_left,True
+Q18,선물이 더 급해,change_todo,unsupported,False,change_todo,True
+Q19,출력은 학교 가서 할게,change_todo,unsupported,False,change_todo,True
+Q20,여기서 제일 가까운 ATM,place_info,unsupported,False,place_info,True
+Q21,돈 덜 드는 쪽으로 가자,change_route,unsupported,False,change_route,True
+Q22,오늘 비 와?,unsupported,unsupported,True,unsupported,True
+Q23,그 약국 몇 시에 닫아?,unsupported,unsupported,True,place_info,False
+Q24,5분 늦게 나가는데 다음 버스 언제야?,running_late|next_vehicle,running_late|next_vehicle,True,running_late|next_vehicle,True
+Q25,약 안 사도 되니까 편의점만 들를게,change_todo|stopover_check,stopover_check|change_todo,True,change_todo|stopover_check,True
