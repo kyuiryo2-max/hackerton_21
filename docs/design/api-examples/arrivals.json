@@ -1,5 +1,5 @@
 {
-  "_설명": "정류소 도착 정보. 분은 늦지 않게 내림. 실시간(demo=false)은 아직 501",
+  "_설명": "정류소 도착 정보. 버스는 stop_id(arsId), 지하철은 station(+line). 분은 늦지 않게 내림. demo=true는 시연 고정값, 아니면 서울시 실시간. 실시간 응답의 fetched_at은 조회 시각. 키가 없으면 503, 외부 API 실패는 502",
   "examples": [
     {
       "request": {
@@ -70,14 +70,97 @@
         }
       },
       "response": {
-        "status": 501,
+        "status": 200,
+        "body": {
+          "arrivals": [
+            {
+              "route": "성북04",
+              "minutes": 3,
+              "next_minutes": 9,
+              "direction": "신설동역"
+            },
+            {
+              "route": "273",
+              "minutes": 2,
+              "next_minutes": 9,
+              "direction": "중랑공영차고지"
+            },
+            {
+              "route": "1111",
+              "minutes": 2,
+              "next_minutes": 7,
+              "direction": "번동"
+            },
+            {
+              "route": "1112",
+              "minutes": 2,
+              "next_minutes": 14,
+              "direction": "정릉4동"
+            },
+            {
+              "route": "2115",
+              "minutes": 0,
+              "next_minutes": 6,
+              "direction": "중랑공영차고지"
+            }
+          ],
+          "fetched_at": "2026-11-09T14:31:55+09:00"
+        }
+      },
+      "note": "버스 실시간 (2026-11-09 실제 응답). minutes 0은 곧 도착"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "station": "서울역",
+          "line": "1호선"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "arrivals": [
+            {
+              "route": "1호선",
+              "minutes": 0,
+              "next_minutes": 1,
+              "direction": "시청방면",
+              "estimated": true
+            },
+            {
+              "route": "1호선",
+              "minutes": 1,
+              "next_minutes": 3,
+              "direction": "남영방면",
+              "estimated": false
+            }
+          ],
+          "fetched_at": "2026-11-09T14:31:55+09:00"
+        }
+      },
+      "note": "지하철 실시간 (2026-11-09 실제 응답). 방향은 다음 역, estimated는 남은 역 수로 계산한 값"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "stop_id": "08301",
+          "station": "서울역"
+        }
+      },
+      "response": {
+        "status": 422,
         "body": {
           "error": {
-            "code": "not_ready",
-            "message": "실시간 도착은 아직 연결되지 않았어요"
+            "code": "invalid_request",
+            "message": "stop_id와 station 중 하나만 보내 주세요"
           }
         }
-      }
+      },
+      "note": "stop_id와 station은 하나만"
     }
   ]
 }
