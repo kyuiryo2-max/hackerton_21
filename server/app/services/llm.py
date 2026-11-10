@@ -53,13 +53,20 @@ def _chat_json(system: str, user: str) -> dict:
 
 def parse_todo(text: str) -> dict:
     out = _chat_json(load_prompt("todo_to_place"), text)
+    places = out.get("place_types", [])
+    if not isinstance(places, list):
+        # 형식이 깨진 출력은 버려요. 부르는 쪽이 키워드 규칙으로 대신 처리해요
+        raise ValueError("AI 출력의 place_types가 목록이 아니에요")
     # 목록에 없는 장소 종류는 버리고 확인 요청 (json-format.md 규칙)
     allowed = set(place_types())
-    kept = [p for p in out.get("place_types", []) if p in allowed]
-    if len(kept) != len(out.get("place_types", [])):
-        out["needs_confirm"] = True
-    out["place_types"] = kept
-    return out
+    kept = [p for p in places if p in allowed]
+    return {
+        "type": "todo",
+        "text": out.get("text") if isinstance(out.get("text"), str) and out.get("text") else text,
+        "place_types": kept,
+        "importance": "필수" if out.get("importance") == "필수" else None,
+        "needs_confirm": bool(out.get("needs_confirm")) or len(kept) != len(places) or not kept,
+    }
 
 
 def classify_question(text: str, context: dict | None = None, history: list[dict] | None = None) -> dict:

@@ -1,5 +1,5 @@
 {
-  "_설명": "오류는 모두 {\"error\": {\"code\", \"message\"}} 한 형식",
+  "_설명": "오류는 모두 {\"error\": {\"code\", \"message\"}} 한 형식. 코드 목록은 api.md 공통 규칙",
   "examples": [
     {
       "request": {
@@ -84,14 +84,73 @@
         }
       },
       "response": {
-        "status": 501,
+        "status": 502,
         "body": {
           "error": {
-            "code": "not_ready",
-            "message": "실시간 도착은 아직 연결되지 않았어요"
+            "code": "upstream_error",
+            "message": "서울시 버스 API 연결 실패: ConnectTimeout"
           }
         }
-      }
+      },
+      "note": "서울시·카카오 API가 실패하거나 응답이 이상할 때"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "stop_id": "08301"
+        }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "error": {
+            "code": "not_configured",
+            "message": "서버에 교통 API 키가 설정되지 않았어요"
+          }
+        }
+      },
+      "note": "서버에 키가 없을 때"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/todos",
+        "query": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "error": {
+            "code": "db_busy",
+            "message": "잠시 뒤 다시 시도해 주세요"
+          }
+        }
+      },
+      "note": "DB가 잠깐 잠겼을 때. 앱은 잠시 뒤 다시 요청"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "stop_id": "08301",
+          "demo": "true"
+        }
+      },
+      "response": {
+        "status": 500,
+        "body": {
+          "error": {
+            "code": "server_error",
+            "message": "서버에서 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요"
+          }
+        }
+      },
+      "note": "예상 못 한 서버 오류. 자세한 내용은 서버 로그에만 남음"
     }
   ]
 }
