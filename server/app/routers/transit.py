@@ -18,7 +18,10 @@ def _minutes(seconds: int | None) -> int | None:
 
 @router.get("/demo/context")
 def demo_context():
-    """시연 모드의 고정 시각·위치·일정. 앱은 이 값을 현재 상태로 보여 주면 돼요."""
+    """시연 모드의 고정 시각·위치·일정. 앱은 이 값을 현재 상태로 보여 주면 돼요.
+
+    지도용: route.path(버스 경로 선, [경도, 위도]), route.stop_points(정류장), places(들를 곳 좌표)
+    """
     data = demo_mode.scenario()
     return {
         "now": data["now"],
@@ -26,6 +29,10 @@ def demo_context():
         "schedule": data["schedule"],
         "stop": data["stop"],
         "route": data["route"],
+        "places": [
+            {k: p.get(k) for k in ("todo_id", "todo", "place_type", "name", "address", "lng", "lat")}
+            for p in data["places"]
+        ],
     }
 
 

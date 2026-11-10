@@ -129,3 +129,47 @@ def test_시연_정보_API(client):
     assert data["now"] == "2026-11-21T08:32:00+09:00"
     assert data["stop"]["ars_id"] == STOP
     assert data["schedule"]["destination"]["name"] == "청량리역"
+
+
+def _meters(a, b) -> float:
+    """두 좌표(경도, 위도) 사이 대략 거리(m)."""
+    dx = (a[0] - b[0]) * 88_000  # 서울 위도에서 경도 1도 ≈ 88km
+    dy = (a[1] - b[1]) * 110_540
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def test_지도용_경로_선은_출발_정류장에서_도착_정류장까지():
+    data = demo.scenario()
+    path, location = data["route"]["path"], data["location"]
+    assert len(path) >= 2
+    assert all(len(p) == 2 and 126 < p[0] < 128 and 37 < p[1] < 38 for p in path)  # [경도, 위도]
+    assert _meters(path[0], (location["lng"], location["lat"])) < 50
+    destination = data["schedule"]["destination"]
+    # 하차 후 도보 120초 거리 안
+    assert _meters(path[-1], (destination["lng"], destination["lat"])) < 300
+
+
+def test_지도용_정류장은_경로_순서대로_경로_선_근처():
+    route = demo.scenario()["route"]
+    points = route["stop_points"]
+    assert [p["name"] for p in points] == route["stops"]
+    for p in points:
+        nearest = min(_meters((p["lng"], p["lat"]), q) for q in route["path"])
+        assert nearest < 50, f"{p['name']} 정류장이 경로 선에서 {nearest:.0f}m 떨어져 있어요"
+
+
+def test_지도용_장소_좌표는_출발_정류장_근처():
+    data = demo.scenario()
+    here = (data["location"]["lng"], data["location"]["lat"])
+    for p in data["places"]:
+        assert p.get("lng") and p.get("lat"), f"{p['name']} 좌표가 없어요. scripts/add_demo_coords.py 를 실행해 주세요"
+        # 왕복 도보가 가장 긴 다이소도 690초라 1km 안이에요
+        assert _meters((p["lng"], p["lat"]), here) < 1000
+
+
+def test_시연_정보_API에_지도_좌표가_있음(client):
+    data = client.get("/api/demo/context").json()
+    assert data["route"]["path"][0] == demo.scenario()["route"]["path"][0]
+    assert [p["name"] for p in data["route"]["stop_points"]] == data["route"]["stops"]
+    assert [p["todo"] for p in data["places"]] == ["이어폰 사기", "커피 사기", "다이소 들르기"]
+    assert all({"lng", "lat"} <= p.keys() for p in data["places"])
