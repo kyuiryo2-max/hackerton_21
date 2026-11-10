@@ -224,7 +224,8 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
     if not legs:
         return None
     first, last = legs[0], legs[-1]
-    first_walk = kakao.walk_seconds(origin, tuple(first["start"]))
+    # 현재 좌표가 들어간 호출은 메모리에도 남기지 않아요 (PR #29 리뷰)
+    first_walk = kakao.walk_seconds(origin, tuple(first["start"]), use_cache=False)
     last_walk = kakao.walk_seconds(tuple(last["end"] or last["start"]), destination)
     if first_walk is None or last_walk is None:
         # 도보 경로를 못 찾으면 카카오 총 시간에서 구간 시간을 뺀 나머지를 처음 도보로 봐요
@@ -247,6 +248,24 @@ def _missed(option: RouteOption, todos: list[dict], importance: str | None) -> i
     return sum(1 for t in todos if (importance is None or t["importance"] == importance) and t["id"] not in included)
 
 
+def _arrive_by(schedule: dict) -> datetime:
+    arrive_by = datetime.fromisoformat(schedule["arrive_by"])
+    return arrive_by if arrive_by.tzinfo else arrive_by.replace(tzinfo=KST)
+
+
+def _pick_schedule(user_id: str, schedule_id: int | None, now: datetime) -> dict:
+    """schedule_id가 있으면 그 일정, 없으면 지금 이후 가장 가까운 일정이에요. 지난 일정은 고르지 않아요."""
+    if schedule_id is not None:
+        schedule = repo.get_schedule(schedule_id, user_id)
+        if schedule is None:
+            raise PlanError(404, "not_found", f"일정 {schedule_id} 없음")
+        return schedule
+    upcoming = [s for s in repo.list_schedules(user_id) if _arrive_by(s) > now]
+    if not upcoming:
+        raise PlanError(404, "not_found", "다가오는 일정이 없어요")
+    return min(upcoming, key=_arrive_by)
+
+
 def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
               todo_ids: list[int] | None = None, now: datetime | None = None) -> dict:
     """실시간 계획. origin은 (경도, 위도)이고 저장하지 않아요.
@@ -254,19 +273,14 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
     카카오 경로 최대 3개를 계산하고 할 일을 잘 넣는 경로부터 보여 줘요. 할 일 상태는 첫 번째 경로 기준이에요.
     """
     now = now or datetime.now(KST).replace(microsecond=0)
-    schedules = repo.list_schedules(user_id)
-    schedule = next((s for s in schedules if schedule_id is None or s["id"] == schedule_id), None)
-    if schedule is None:
-        raise PlanError(404, "not_found", "일정이 없어요" if schedule_id is None else f"일정 {schedule_id} 없음")
+    schedule = _pick_schedule(user_id, schedule_id, now)
     destination = (schedule["destination_lng"], schedule["destination_lat"])
-    arrive_by = datetime.fromisoformat(schedule["arrive_by"])
-    if arrive_by.tzinfo is None:
-        arrive_by = arrive_by.replace(tzinfo=KST)
+    arrive_by = _arrive_by(schedule)
     deadline = int((arrive_by - now).total_seconds())
 
     todos = [t for t in _todos(user_id, todo_ids) if t["place_types"]]
     try:
-        routes = kakao.transit_routes(origin, destination)
+        routes = kakao.transit_routes(origin, destination, use_cache=False)
         place_cache: dict = {}
         options = [o for r in routes[:MAX_ROUTES]
                    if (o := _live_option(r, origin, destination, todos, place_cache))]

@@ -161,11 +161,14 @@ def parse_transit(data: dict) -> list[dict]:
     return routes
 
 
-def transit_routes(start: Coord, end: Coord) -> list[dict]:
-    """대중교통 경로 목록. 경로가 없으면 빈 목록이고, 빈 결과는 저장하지 않아요."""
+def transit_routes(start: Coord, end: Coord, use_cache: bool = True) -> list[dict]:
+    """대중교통 경로 목록. 경로가 없으면 빈 목록이고, 빈 결과는 저장하지 않아요.
+
+    use_cache=False면 저장하지도 꺼내지도 않아요 (사용자 현재 위치가 들어간 호출).
+    """
     start, end = _rounded(start), _rounded(end)
     key = ("transit", start, end)
-    cached = _cache_get(key)
+    cached = _cache_get(key) if use_cache else None
     if cached is not None:
         return cached
     data = _get("/v2/routing/publictraffic", {
@@ -175,12 +178,12 @@ def transit_routes(start: Coord, end: Coord) -> list[dict]:
     if data.get("status") != "OK":
         return []
     routes = parse_transit(data)
-    if routes:
+    if routes and use_cache:
         _cache_set(key, routes, TRANSIT_TTL_SECONDS)
     return routes
 
 
-def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None) -> int | None:
+def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None, use_cache: bool = True) -> int | None:
     """도보 시간(초). via는 경유지 최대 5개. 경로를 찾지 못하면 None.
 
     출발과 도착이 같고 경유지가 없으면 호출 없이 0이에요.
@@ -193,7 +196,7 @@ def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None) -> in
     if start == end and not via:
         return 0
     key = ("walk", start, end, tuple(via))
-    cached = _cache_get(key)
+    cached = _cache_get(key) if use_cache else None
     if cached is not None:
         return cached
     params: dict = {
@@ -210,5 +213,6 @@ def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None) -> in
     if data.get("status") != "OK":
         return None
     seconds = data["route"]["properties"]["totalTime"]
-    _cache_set(key, seconds, WALK_TTL_SECONDS)
+    if use_cache:
+        _cache_set(key, seconds, WALK_TTL_SECONDS)
     return seconds

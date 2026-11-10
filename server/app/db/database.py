@@ -104,8 +104,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def seed_demo_data(path: str | None = None) -> None:
-    """시연용 사용자 데이터. 켜질 때마다 demo 데이터를 지우고 처음 상태로 다시 넣어요."""
+    """시연용 사용자 데이터. 켜질 때마다 demo 데이터를 지우고 처음 상태로 다시 넣어요.
+
+    앱이 시연 할 일 id(예: [1, 2, 3])를 그대로 쓰므로, 다시 넣을 때 이전 id를 재사용해요.
+    처음 켜진 서버에서는 시연 데이터가 가장 먼저 들어가 일정 1, 할 일 1~3이에요.
+    """
     with connect(path) as conn:
+        old_schedule_ids = _demo_ids(conn, "schedules")
+        old_todo_ids = _demo_ids(conn, "todos")
         for table in USER_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (DEMO_USER_ID,))
         # 시연 대본(data/demo/scenario.json)과 같은 일정·할 일을 넣어요
@@ -113,16 +119,27 @@ def seed_demo_data(path: str | None = None) -> None:
         schedule = data["schedule"]
         destination = schedule["destination"]
         conn.execute(
-            "INSERT INTO schedules (user_id, destination, destination_lat, destination_lng, arrive_by, prep_minutes) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (DEMO_USER_ID, destination["name"], destination["lat"], destination["lng"],
+            "INSERT INTO schedules (id, user_id, destination, destination_lat, destination_lng, arrive_by, prep_minutes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (_reuse(old_schedule_ids, 0), DEMO_USER_ID, destination["name"], destination["lat"], destination["lng"],
              schedule["arrive_by"], schedule["prep_minutes"]),
         )
         conn.executemany(
-            "INSERT INTO todos (user_id, text, place_types, importance) VALUES (?, ?, ?, ?)",
+            "INSERT INTO todos (id, user_id, text, place_types, importance) VALUES (?, ?, ?, ?, ?)",
             [
-                (DEMO_USER_ID, p["todo"], json.dumps([p["place_type"]], ensure_ascii=False), p["importance"])
-                for p in data["places"]
+                (_reuse(old_todo_ids, i), DEMO_USER_ID, p["todo"],
+                 json.dumps([p["place_type"]], ensure_ascii=False), p["importance"])
+                for i, p in enumerate(data["places"])
             ],
         )
         conn.execute("INSERT INTO settings (user_id) VALUES (?)", (DEMO_USER_ID,))
+
+
+def _demo_ids(conn, table: str) -> list[int]:
+    rows = conn.execute(f"SELECT id FROM {table} WHERE user_id = ? ORDER BY id", (DEMO_USER_ID,)).fetchall()
+    return [r[0] for r in rows]
+
+
+def _reuse(ids: list[int], i: int) -> int | None:
+    """이전 시연 id가 있으면 그대로, 없으면 None (새 id)"""
+    return ids[i] if i < len(ids) else None

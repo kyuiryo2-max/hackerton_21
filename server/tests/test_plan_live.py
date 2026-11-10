@@ -30,8 +30,8 @@ def client(tmp_path, monkeypatch):
 def world(monkeypatch):
     """외부 API 대신 쓸 값. 테스트마다 바꿀 수 있어요."""
     w = {"routes": ROUTES, "bus": [600, 1200], "places": {"편의점": [CU]}}
-    monkeypatch.setattr(planner.kakao, "transit_routes", lambda s, e: w["routes"])
-    monkeypatch.setattr(planner.kakao, "walk_seconds", lambda s, e, via=None: 300 if via else 120)
+    monkeypatch.setattr(planner.kakao, "transit_routes", lambda s, e, **kw: w["routes"])
+    monkeypatch.setattr(planner.kakao, "walk_seconds", lambda s, e, via=None, **kw: 300 if via else 120)
     monkeypatch.setattr(planner.places, "search_by_place_type",
                         lambda t, center, radius_m=300, size=1: w["places"].get(t, []))
     monkeypatch.setattr(planner.seoul_bus, "match_leg", lambda leg: {"arrival": {
@@ -99,13 +99,41 @@ def test_근처에_장소가_없으면_필수는_대기이고_저장_안_함(cli
 
 
 def test_시간이_부족하면_선택_할_일은_제외(client, world):
-    setup_user(client, hours=0, todos=(("우유 사기", ["편의점"], "선택"),))
+    setup_user(client, hours=0.25, todos=(("우유 사기", ["편의점"], "선택"),))  # 15분 뒤 도착
     assert plan(client).json()["todos"][0]["status"] == "제외"
 
 
 def test_일정이_없으면_404(client, world):
     res = plan(client)
     assert (res.status_code, res.json()["error"]["code"]) == (404, "not_found")
+
+
+def test_지난_일정은_고르지_않고_다가오는_일정을_고름(client, world):
+    setup_user(client, hours=-1, todos=())  # 지난 일정
+    setup_user(client, hours=3)              # 다가오는 일정
+    setup_user(client, hours=1, todos=())    # 가장 가까운 다가오는 일정
+    body = plan(client).json()
+    arrive_by = datetime.fromisoformat(body["schedule"]["arrive_by"])
+    assert timedelta(minutes=50) < arrive_by - datetime.now(planner.KST) < timedelta(minutes=70)
+
+
+def test_지난_일정만_있으면_404(client, world):
+    setup_user(client, hours=-1)
+    res = plan(client)
+    assert (res.status_code, res.json()["error"]["message"]) == (404, "다가오는 일정이 없어요")
+
+
+def test_현재_좌표가_들어간_호출은_캐시하지_않음(client, world, monkeypatch):
+    seen = []
+    monkeypatch.setattr(planner.kakao, "transit_routes",
+                        lambda s, e, use_cache=True: seen.append(("transit", use_cache)) or world["routes"])
+    monkeypatch.setattr(planner.kakao, "walk_seconds",
+                        lambda s, e, via=None, use_cache=True: seen.append(("walk", s, use_cache)) or (300 if via else 120))
+    setup_user(client)
+    plan(client)
+    origin = (ORIGIN["lng"], ORIGIN["lat"])
+    assert ("transit", False) in seen
+    assert all(not used for kind, *rest, used in seen if kind == "walk" and rest[0] == origin)
 
 
 def test_경로가_없으면_404(client, world):
@@ -116,7 +144,7 @@ def test_경로가_없으면_404(client, world):
 
 
 def test_카카오_실패는_502(client, world, monkeypatch):
-    def broken(s, e):
+    def broken(s, e, **kw):
         raise kakao.KakaoError("카카오 API 오류: HTTP 429")
 
     monkeypatch.setattr(planner.kakao, "transit_routes", broken)
