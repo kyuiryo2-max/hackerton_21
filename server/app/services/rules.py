@@ -13,6 +13,13 @@ from app.services.llm import DEFAULT_CONFIRM_QUESTION, place_types
 def _vector_classifier():
     """벡터 분류기 인스턴스를 캐싱하여 가져옵니다."""
     try:
+        import sys
+        from pathlib import Path
+
+        repo_root = str(Path(__file__).resolve().parents[3])
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
         from ai.vector.classifier import VectorIntentClassifier
 
         return VectorIntentClassifier()
