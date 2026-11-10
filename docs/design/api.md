@@ -19,7 +19,7 @@
 | 시연 | `user_id=demo`. demo 데이터는 API로 바꿀 수 없음(403). 서버가 켜질 때마다 처음 상태로 돌아감 |
 | 시연 모드 | `demo=true` 면 시각·위치·도착 정보를 `data/demo/scenario.json` 고정값으로 |
 | 오류 | `{"error": {"code", "message"}}` 한 형식 → [errors.json](api-examples/errors.json). 코드: `invalid_request` 422, `not_found` 404, `no_route` 404, `demo_readonly` 403, `method_not_allowed` 405, `upstream_error` 502 (외부 API 실패), `not_configured` 503 (키 없음), `db_busy` 503 (잠시 뒤 다시), `server_error` 500 (예상 못 한 오류, 내용은 서버 로그에만). 오류 응답에도 CORS 헤더가 붙는다 |
-| 위치 | 목적지 좌표는 저장, 사용자 현재 위치는 받지도 저장하지도 않음 |
+| 위치 | 목적지 좌표는 저장, 사용자 현재 위치는 받되 저장하지 않음 (실시간 계획 계산에만 씀) |
 | 키 | API 키는 서버에만. 앱은 카카오·서울시·LLM을 직접 부르지 않음 |
 
 ## API 목록

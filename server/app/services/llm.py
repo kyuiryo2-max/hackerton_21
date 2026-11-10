@@ -65,7 +65,8 @@ def parse_todo(text: str) -> dict:
         "text": out.get("text") if isinstance(out.get("text"), str) and out.get("text") else text,
         "place_types": kept,
         "importance": "필수" if out.get("importance") == "필수" else None,
-        "needs_confirm": bool(out.get("needs_confirm")) or len(kept) != len(places) or not kept,
+        # 장소가 필요 없는 할 일("엄마한테 전화하기")은 빈 목록이 정답이라 되묻지 않아요
+        "needs_confirm": bool(out.get("needs_confirm")) or len(kept) != len(places),
     }
 
 

@@ -95,3 +95,17 @@ def test_AI가_일부러_되물으면_그대로(client, ai):
                "question": "어디를 들르고 싶은지 알려 줄래요?"})
     body = client.post("/api/ask", json={"user_id": "u1", "text": "거기 들러도 돼?", "demo": True}).json()
     assert (body["engine"], body["question"]) == ("ai", "어디를 들르고 싶은지 알려 줄래요?")
+
+
+def test_장소가_필요_없는_할_일은_되묻지_않음(client, ai):
+    """빈 장소 목록이 정답인 할 일까지 되물으면 안 돼요 (PR #34 리뷰)"""
+    ai.append({"type": "todo", "text": "엄마한테 전화하기", "place_types": [], "needs_confirm": False})
+    body = client.post("/api/tasks/parse", json={"user_id": "u1", "text": "엄마한테 전화하기"}).json()
+    assert (body["place_types"], body["needs_confirm"], body["engine"]) == ([], False, "ai")
+
+
+def test_목록에_없는_장소를_버렸으면_되물음(client, ai):
+    ai.append({"type": "todo", "text": "우주선 타기", "place_types": ["우주정거장"], "needs_confirm": False})
+    body = client.post("/api/tasks/parse", json={"user_id": "u1", "text": "우주선 타기"}).json()
+    assert (body["place_types"], body["needs_confirm"]) == ([], True)
+
