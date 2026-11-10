@@ -41,14 +41,50 @@ def _client():
     return OpenAI(base_url=config.OPENAI_BASE_URL, api_key=config.OPENAI_API_KEY)
 
 
+def _parse_json_safe(content: str) -> dict:
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return json.loads(text or "{}")
+
+
 def _chat_json(system: str, user: str) -> dict:
+    # 1. httpx를 통한 직접 호출 (jiter DLL 차단 우회 및 OpenRouter 완벽 지원)
+    try:
+        import httpx
+
+        headers = {
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": config.LLM_MODEL,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        }
+        base_url = config.OPENAI_BASE_URL.rstrip("/")
+        url = f"{base_url}/chat/completions"
+        resp = httpx.post(url, headers=headers, json=payload, timeout=60)
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"] or "{}"
+        return _parse_json_safe(content)
+    except Exception:
+        pass
+
+    # 2. openai 클라이언트 폴백
     resp = _client().chat.completions.create(
         model=config.LLM_MODEL,
         temperature=0,
         response_format={"type": "json_object"},
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
     )
-    return json.loads(resp.choices[0].message.content or "{}")
+    return _parse_json_safe(resp.choices[0].message.content or "{}")
 
 
 def parse_todo(text: str) -> dict:
