@@ -26,6 +26,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
   bool _saving = false;
   Place? _selectedDestination;
+  late String _originMode;
+  Place? _selectedOrigin;
+  late final TextEditingController _originController;
 
   @override
   void initState() {
@@ -49,6 +52,18 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         address: widget.existing!.destinationAddress ?? '',
         latitude: widget.existing!.destinationLatitude!,
         longitude: widget.existing!.destinationLongitude!,
+      );
+    }
+    _originMode = widget.existing?.originMode == 'place' ? 'place' : 'current';
+    _originController = TextEditingController(text: widget.existing?.originName ?? '');
+    if (widget.existing?.originLatitude != null &&
+        widget.existing?.originLongitude != null) {
+      _selectedOrigin = Place(
+        id: widget.existing!.originPlaceId ?? '',
+        name: widget.existing!.originName ?? '출발지',
+        address: widget.existing!.originAddress ?? '',
+        latitude: widget.existing!.originLatitude!,
+        longitude: widget.existing!.originLongitude!,
       );
     }
     _preparationController = TextEditingController(
@@ -97,6 +112,21 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     });
   }
 
+  Future<void> _selectOrigin() async {
+    final place = await Navigator.push<Place>(
+      context,
+      MaterialPageRoute(builder: (_) => PlaceSearchScreen(
+        title: '출발지 선택',
+        initialQuery: _originController.text.trim(),
+      )),
+    );
+    if (!mounted || place == null) return;
+    setState(() {
+      _selectedOrigin = place;
+      _originController.text = place.name;
+    });
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -113,36 +143,55 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       );
       return;
     }
+    if (_originMode == 'place' && _selectedOrigin == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('출발지를 검색한 뒤 장소를 선택해 주세요.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
 
     final controller = ScheduleScope.of(context);
 
+    Schedule saved;
     if (widget.existing == null) {
-      await controller.addSchedule(
+      saved = await controller.addSchedule(
         title: _titleController.text.trim(),
         location: _selectedDestination!.name,
         destinationPlaceId: _selectedDestination!.id,
         destinationAddress: _selectedDestination!.address,
         destinationLatitude: _selectedDestination!.latitude,
         destinationLongitude: _selectedDestination!.longitude,
+        originMode: _originMode,
+        originPlaceId: _originMode == 'place' ? _selectedOrigin?.id : null,
+        originName: _originMode == 'place' ? _selectedOrigin?.name : null,
+        originAddress: _originMode == 'place' ? _selectedOrigin?.address : null,
+        originLatitude: _originMode == 'place' ? _selectedOrigin?.latitude : null,
+        originLongitude: _originMode == 'place' ? _selectedOrigin?.longitude : null,
         startTime: _startTime,
         endTime: _endTime,
         preparationMinutes: int.parse(_preparationController.text.trim()),
       );
     } else {
-      await controller.updateSchedule(
-        widget.existing!.copyWith(
+      saved = widget.existing!.copyWith(
           title: _titleController.text.trim(),
           location: _selectedDestination!.name,
           destinationPlaceId: _selectedDestination!.id,
           destinationAddress: _selectedDestination!.address,
           destinationLatitude: _selectedDestination!.latitude,
           destinationLongitude: _selectedDestination!.longitude,
+          originMode: _originMode,
+          clearOrigin: _originMode == 'current',
+          originPlaceId: _selectedOrigin?.id,
+          originName: _selectedOrigin?.name,
+          originAddress: _selectedOrigin?.address,
+          originLatitude: _selectedOrigin?.latitude,
+          originLongitude: _selectedOrigin?.longitude,
           startTime: _startTime,
           endTime: _endTime,
           preparationMinutes: int.parse(_preparationController.text.trim()),
-        ),
-      );
+        );
+      await controller.updateSchedule(saved);
     }
 
     if (!mounted) return;
@@ -154,13 +203,16 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     }
 
     setState(() => _saving = false);
-    Navigator.pop(context);
+    if (controller.error == null) {
+      Navigator.pop(context, saved);
+    }
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _locationController.dispose();
+    _originController.dispose();
     _preparationController.dispose();
     super.dispose();
   }
@@ -222,6 +274,45 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                         style: Theme.of(context).textTheme.bodySmall),
                     ),
                   ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('출발지 설정', style: Theme.of(context).textTheme.titleMedium),
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'current', label: Text('현재 위치'), icon: Icon(Icons.my_location)),
+                    ButtonSegment(value: 'place', label: Text('직접 선택'), icon: Icon(Icons.search)),
+                  ],
+                  selected: {_originMode},
+                  onSelectionChanged: (values) => setState(() => _originMode = values.first),
+                ),
+                const SizedBox(height: 8),
+                if (_originMode == 'current')
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('경로를 조회할 때 기기의 현재 위치를 사용합니다.'),
+                  )
+                else ...[
+                  TextFormField(
+                    controller: _originController,
+                    readOnly: true,
+                    onTap: _selectOrigin,
+                    decoration: InputDecoration(
+                      labelText: '출발 장소',
+                      hintText: '검색 결과에서 선택',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: _selectOrigin),
+                    ),
+                    validator: (_) => _originMode == 'place' && _selectedOrigin == null
+                        ? '출발 장소를 선택해 주세요.' : null,
+                  ),
+                  if (_selectedOrigin != null)
+                    Align(alignment: Alignment.centerLeft,
+                      child: Text(_selectedOrigin!.address,
+                        style: Theme.of(context).textTheme.bodySmall)),
+                ],
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _preparationController,

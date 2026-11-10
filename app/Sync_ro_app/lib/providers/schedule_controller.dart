@@ -43,13 +43,19 @@ class ScheduleController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addSchedule({
+  Future<Schedule> addSchedule({
     required String title,
     required String location,
     String? destinationPlaceId,
     String? destinationAddress,
     double? destinationLatitude,
     double? destinationLongitude,
+    String originMode = 'current',
+    String? originPlaceId,
+    String? originName,
+    String? originAddress,
+    double? originLatitude,
+    double? originLongitude,
     required DateTime startTime,
     required DateTime endTime,
     int preparationMinutes = 30,
@@ -58,8 +64,7 @@ class ScheduleController extends ChangeNotifier {
         ? 1
         : _schedules.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
 
-    _schedules.add(
-      Schedule(
+    final added = Schedule(
         id: nextId,
         title: title,
         location: location,
@@ -67,14 +72,20 @@ class ScheduleController extends ChangeNotifier {
         destinationAddress: destinationAddress,
         destinationLatitude: destinationLatitude,
         destinationLongitude: destinationLongitude,
+        originMode: originMode,
+        originPlaceId: originPlaceId,
+        originName: originName,
+        originAddress: originAddress,
+        originLatitude: originLatitude,
+        originLongitude: originLongitude,
         startTime: startTime,
         endTime: endTime,
         preparationMinutes: preparationMinutes,
-      ),
-    );
-
+      );
+    _schedules.add(added);
     _sort();
     await _save();
+    return added;
   }
 
   Future<void> updateSchedule(Schedule updated) async {

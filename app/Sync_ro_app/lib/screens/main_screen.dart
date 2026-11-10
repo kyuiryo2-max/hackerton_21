@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import '../models/todo_item.dart';
+import '../models/schedule.dart';
 import 'schedule_screen.dart';
 import 'todo_screen.dart';
 import 'navigation_screen.dart';
@@ -21,19 +22,27 @@ class _MainScreenState extends State<MainScreen> {
 
   late final List<Widget> _screens;
   final ValueNotifier<TodoItem?> _waypoint = ValueNotifier<TodoItem?>(null);
+  final ValueNotifier<Schedule?> _requestedSchedule = ValueNotifier<Schedule?>(null);
 
   @override
   void initState() {
     super.initState();
     _screens = [
-    HomeScreen(onOpenRoutes: _openRoutes, onSelectWaypoint: _selectWaypoint),
-    const ScheduleScreen(),
+    HomeScreen(onOpenRoutes: _openRoutes, onSelectWaypoint: _selectWaypoint, onOpenScheduleRoutes: _openScheduleRoutes),
+    ScheduleScreen(onOpenScheduleRoutes: _openScheduleRoutes),
     const TodoScreen(),
-    NavigationScreen(selectedWaypoint: _waypoint),
+    NavigationScreen(selectedWaypoint: _waypoint, requestedSchedule: _requestedSchedule),
     ];
   }
 
   void _openRoutes() => _onDestinationSelected(3);
+
+  void _openScheduleRoutes(Schedule schedule) {
+    // Force a refresh even when the same schedule is selected twice.
+    _requestedSchedule.value = null;
+    _requestedSchedule.value = schedule;
+    _onDestinationSelected(3);
+  }
 
   void _selectWaypoint(TodoItem todo) {
     _waypoint.value = todo;
@@ -64,6 +73,7 @@ class _MainScreenState extends State<MainScreen> {
   void dispose() {
     _pageController.dispose();
     _waypoint.dispose();
+    _requestedSchedule.dispose();
     super.dispose();
   }
 

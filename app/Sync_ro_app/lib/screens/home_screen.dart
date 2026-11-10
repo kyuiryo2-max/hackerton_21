@@ -17,9 +17,10 @@ import '../providers/active_route_controller.dart';
 import '../widgets/home_live_status.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.onOpenRoutes, required this.onSelectWaypoint});
+  const HomeScreen({super.key, required this.onOpenRoutes, required this.onSelectWaypoint, this.onOpenScheduleRoutes});
 
   final VoidCallback onOpenRoutes;
+  final ValueChanged<Schedule>? onOpenScheduleRoutes;
   final ValueChanged<TodoItem> onSelectWaypoint;
 
   @override
@@ -119,6 +120,7 @@ class _HomeScreenState extends State<HomeScreen>
         builder: (context) => DetailScreen(
           title: schedule.title,
           schedule: schedule,
+          onOpenScheduleRoutes: widget.onOpenScheduleRoutes,
         ),
       ),
     ).then((_) {

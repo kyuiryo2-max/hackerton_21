@@ -16,10 +16,11 @@ import '../providers/active_route_controller.dart';
 
 class NavigationScreen extends StatefulWidget {
   final ValueNotifier<TodoItem?>? selectedWaypoint;
+  final ValueNotifier<Schedule?>? requestedSchedule;
   final String? initialDestination;
   final DateTime? initialArrivalTime;
 
-  const NavigationScreen({super.key, this.selectedWaypoint, this.initialDestination, this.initialArrivalTime});
+  const NavigationScreen({super.key, this.selectedWaypoint, this.requestedSchedule, this.initialDestination, this.initialArrivalTime});
 
   @override
   State<NavigationScreen> createState() => _NavigationScreenState();
@@ -40,9 +41,6 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Place? _manualOrigin;
   Place? _manualDestination;
   DateTime? _manualArrival;
-  List<RouteCandidate> _scheduleRoutes = [];
-  List<RouteCandidate> _manualRoutes = [];
-  String? _scheduleRouteId;
   String? _scheduleError;
   String? _manualError;
   bool _loadingSchedule = false;
@@ -55,6 +53,19 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   bool _didApplyInitial = false;
   bool _manualIsActive = false;
   bool _autoLocating = false;
+  Schedule? _explicitSchedule;
+
+  void _handleRequestedSchedule() {
+    final requested = widget.requestedSchedule;
+    final schedule = requested?.value;
+    if (schedule == null) return;
+    setState(() {
+      _explicitSchedule = schedule;
+      _manualIsActive = false;
+      _manualExpanded = false;
+      _scheduleKey = null; // Re-run destination/location lookup on build.
+    });
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -64,6 +75,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     super.initState();
     _manualDestinationController.text = widget.initialDestination ?? '';
     _manualArrival = widget.initialArrivalTime;
+    widget.requestedSchedule?.addListener(_handleRequestedSchedule);
   }
 
   Schedule? _nextSchedule(List<Schedule> schedules) {
@@ -85,14 +97,6 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Future<Place?> _pickPlace(String title) => Navigator.push<Place>(
     context, MaterialPageRoute(builder: (_) => PlaceSearchScreen(title: title)),
   );
-
-  Future<void> _pickOrigin() async {
-    final place = await _pickPlace('일정 출발지 검색');
-    if (!mounted || place == null) return;
-    setState(() { _origin = place; _originController.text = place.name; });
-    final schedule = _nextSchedule(ScheduleScope.of(context).schedules);
-    if (schedule != null) await _loadScheduleRoutes(schedule);
-  }
 
   Future<void> _useCurrentLocation() async {
     if (_locating) return;
@@ -116,8 +120,11 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         id: 'device_current_location', name: '현재 위치', address: '기기 위치',
         latitude: position.latitude, longitude: position.longitude,
       );
-      setState(() { _origin = place; _originController.text = place.name; });
-      final schedule = _nextSchedule(ScheduleScope.of(context).schedules);
+      setState(() {
+        _origin = place;
+        _originController.text = place.name;
+      });
+      final schedule = _explicitSchedule ?? _nextSchedule(ScheduleScope.of(context).schedules);
       if (schedule != null && _scheduleDestination != null && !_manualIsActive) {
         await _loadScheduleRoutes(schedule);
       }
@@ -177,7 +184,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Future<void> _loadScheduleRoutes(Schedule schedule) async {
     if (_origin == null || _scheduleDestination == null) return;
     final serial = ++_scheduleRequestSerial;
-    setState(() { _loadingSchedule = true; _scheduleError = null; _scheduleRoutes = []; });
+    setState(() { _loadingSchedule = true; _scheduleError = null; });
     try {
       final result = await _routeApi.searchWithDetails(RouteRequest(
         origin: _origin!.name, destination: schedule.location,
@@ -185,7 +192,6 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       ));
       if (!mounted || serial != _scheduleRequestSerial) return;
       final routes = result.routes;
-      setState(() { _scheduleRoutes = routes; _scheduleRouteId = routes.isEmpty ? null : routes.first.id; });
       if (routes.isNotEmpty) {
         activeRouteController.setSearch(ActiveRouteSelection(
           routes: routes, selectedId: routes.first.id,
@@ -227,7 +233,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       return;
     }
     final serial = ++_manualRequestSerial;
-    setState(() { _loadingManual = true; _manualError = null; _manualRoutes = []; });
+    setState(() { _loadingManual = true; _manualError = null; });
     try {
       final result = await _routeApi.searchWithDetails(RouteRequest(
         origin: _manualOriginController.text.trim(), destination: _manualDestinationController.text.trim(),
@@ -235,7 +241,6 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       ));
       if (!mounted || serial != _manualRequestSerial) return;
       final routes = result.routes;
-      setState(() { _manualRoutes = routes; });
       if (routes.isNotEmpty) {
         _manualIsActive = true;
         activeRouteController.setSearch(ActiveRouteSelection(
@@ -299,18 +304,35 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Widget build(BuildContext context) {
     super.build(context);
     final controller = ScheduleScope.of(context);
-    final schedule = _nextSchedule(controller.schedules);
-    final scheduleKey = schedule == null ? null : '${schedule.id}|${schedule.location}|${schedule.startTime.toIso8601String()}';
+    final schedule = _explicitSchedule ?? _nextSchedule(controller.schedules);
+    final scheduleKey = schedule == null ? null :
+        '${schedule.id}|${schedule.location}|${schedule.startTime.toIso8601String()}|'
+        '${schedule.destinationLatitude}|${schedule.destinationLongitude}|'
+        '${schedule.originMode}|${schedule.originLatitude}|${schedule.originLongitude}|'
+        '${schedule.preparationMinutes}';
     if (scheduleKey != _scheduleKey) {
       _scheduleKey = scheduleKey;
       _destinationLookupSerial++;
       _scheduleDestination = null;
       _destinationLookupMessage = null;
       _scheduleRequestSerial++;
-      _scheduleRoutes = [];
-      _scheduleRouteId = null;
       _scheduleError = null;
       _manualIsActive = false;
+      _locationError = null;
+      // Do not reuse the previous schedule's origin.
+      _origin = null;
+      _originController.clear();
+      if (schedule != null && schedule.originMode == 'place' &&
+          schedule.originLatitude != null && schedule.originLongitude != null) {
+        _origin = Place(
+          id: schedule.originPlaceId ?? '',
+          name: schedule.originName ?? '선택한 출발지',
+          address: schedule.originAddress ?? '',
+          latitude: schedule.originLatitude!,
+          longitude: schedule.originLongitude!,
+        );
+        _originController.text = _origin!.name;
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _scheduleKey != scheduleKey) return;
         activeRouteController.clearSearch();
@@ -319,8 +341,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || _scheduleKey != scheduleKey) return;
           _resolveScheduleDestination(schedule);
-          // Request device location automatically, but never substitute demo coordinates.
-          if (_origin == null && !_autoLocating) {
+          // GPS is requested only when the schedule uses current location.
+          // A manually saved origin is never silently replaced with GPS.
+          if (schedule.originMode != 'place' && _origin == null && !_autoLocating) {
             _autoLocating = true;
             _useCurrentLocation().whenComplete(() { _autoLocating = false; });
           } else if (_origin != null && _scheduleDestination != null) {
@@ -341,7 +364,6 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             TextButton.icon(onPressed: () {
               activeRouteController.clearSearch();
               _manualIsActive = false;
-              setState(() { _manualRoutes = []; _scheduleRoutes = []; });
               if (schedule != null) {
                 if (_origin == null) {
                   _useCurrentLocation();
@@ -389,7 +411,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             children: [
               Text(schedule.title, style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 5),
-              Text('현재 위치 → ${schedule.location}'),
+              Text('${_origin?.name ?? (schedule.originMode == 'place' ? '등록한 출발지' : '현재 위치')} → ${schedule.location}'),
               Text('도착 목표 ${_time(schedule.startTime)}'),
               if (_loadingSchedule || _locating || _resolvingDestination)
                 const Padding(padding: EdgeInsets.only(top: 10), child: LinearProgressIndicator()),
@@ -401,18 +423,27 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
                 Text('자동 경로 조회 실패: $_scheduleError',
                   style: TextStyle(color: Theme.of(context).colorScheme.error)),
               const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _locating ? null : _useCurrentLocation,
-                icon: const Icon(Icons.my_location),
-                label: Text(_locating ? '현재 위치 확인 중' : '현재 위치에서 경로 다시 찾기'),
-              ),
+              if (schedule.originMode == 'current')
+                OutlinedButton.icon(
+                  onPressed: _locating ? null : _useCurrentLocation,
+                  icon: const Icon(Icons.my_location),
+                  label: Text(_locating ? '현재 위치 확인 중' : '현재 위치에서 경로 다시 찾기'),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: () => _resolveScheduleDestination(schedule),
+                  icon: const Icon(Icons.route),
+                  label: const Text('저장된 출발지로 경로 다시 찾기'),
+                ),
               if (_scheduleDestination == null && !_resolvingDestination)
                 TextButton(onPressed: () => _resolveScheduleDestination(schedule),
                   child: const Text('일정 목적지 다시 검색')),
             ],
           ))),
-          const Text('현재 위치 권한과 서버의 일반 경로 탐색 지원이 필요합니다. 시연 경로로 대체하지 않습니다.',
-            style: TextStyle(color: Colors.grey, fontSize: 12)),
+          Text(schedule.originMode == 'current'
+              ? '현재 위치 권한과 서버의 일반 경로 탐색 지원이 필요합니다. 시연 경로로 대체하지 않습니다.'
+              : '등록된 출발지와 목적지로 실제 경로를 요청합니다. 서버에서 일반 경로 탐색을 지원해야 합니다.',
+            style: const TextStyle(color: Colors.grey, fontSize: 12)),
         ],
         const SizedBox(height: 22),
         const Divider(),
@@ -443,6 +474,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
 
   @override
   void dispose() {
+    widget.requestedSchedule?.removeListener(_handleRequestedSchedule);
     _scheduleRequestSerial++;
     _destinationLookupSerial++;
     _manualRequestSerial++;
