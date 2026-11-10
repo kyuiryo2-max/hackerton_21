@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../models/assistant_analysis.dart';
-import '../config/api_config.dart';
-import '../services/offline_ask_service.dart';
-import '../services/assistant_api_service.dart';
+import '../services/server_ask_service.dart';
 import '../services/speech_input_service.dart';
+import '../providers/todo_controller.dart';
+import '../providers/active_route_controller.dart';
+import '../config/api_config.dart';
+
 
 class AssistantScreen extends StatefulWidget {
   const AssistantScreen({super.key});
@@ -15,8 +16,7 @@ class AssistantScreen extends StatefulWidget {
 
 class _AssistantScreenState extends State<AssistantScreen> {
   final _input = TextEditingController();
-  final _api = AssistantApiService();
-  final _offline = OfflineAskService();
+  final _api = ServerAskService();
   final _speech = SpeechInputService();
   final List<_Message> _history = [];
   bool _loading = false;
@@ -35,38 +35,67 @@ class _AssistantScreenState extends State<AssistantScreen> {
       _loading = true;
     });
     try {
-      if (ApiConfig.offlineDemo) {
-        final response = _offline.reply(message);
-        if (!mounted) return;
-        setState(() => _history.add(_Message(response, false)));
-      } else {
-        final analysis = await _api.analyze(message);
-        if (!mounted) return;
-        setState(() => _history.add(_Message(_format(analysis), false)));
+      final response = await _api.ask(message);
+      if (!mounted) return;
+      setState(() => _history.add(_Message(
+        response.needsConfirm && response.question != null ? response.question! : response.answer,
+        false, todo: response.needsConfirm ? null : response.todo,
+        intent: response.result?['intent']?.toString(),
+        engine: response.engine,
+      )));
+      // A persisted server-side change can invalidate the current plan.
+      // The demo account does not persist changes, so don't imply recalculation.
+      if (!ApiConfig.demoMode && !response.needsConfirm &&
+          (response.result?['intent'] == 'change_todo' || response.todo != null)) {
+        activeRouteController.requestPlanRefresh();
       }
     } catch (error) {
       if (!mounted) return;
-      setState(() => _history.add(_Message('분석 실패: $error\n서버 주소와 실행 상태를 확인해 주세요.', false)));
+      setState(() => _history.add(_Message('서버 질문 요청 실패: $error\n시연 질문은 /api/ask 서버 응답만 사용합니다.', false)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  String _format(AssistantAnalysis a) {
-    final lines = <String>[
-      '질문 분석 결과 (${a.provider})',
-      '의도: ${a.intent}',
-      '목적지: ${a.destination ?? '미확인'}',
-      '도착 희망 시간: ${a.arrivalTime ?? '미확인'}',
-      '할 일: ${a.todoDescription ?? '미확인'}',
-      '장소 유형: ${a.placeCategory ?? '미확인'}',
-      '예상 체류시간: ${a.estimatedMinutes == null ? '미정' : '${a.estimatedMinutes}분'}',
-    ];
-    if (a.needsClarification && a.clarificationQuestion != null) {
-      lines.add('추가 확인: ${a.clarificationQuestion}');
+  Future<void> _addSuggestedTodo(_Message message) async {
+    final raw = message.todo;
+    if (raw == null || message.added) return;
+    final title = '${raw['text'] ?? ''}'.trim();
+    if (title.isEmpty) return;
+    final controller = TodoScope.of(context);
+    if (controller.todos.any((item) => item.title.trim() == title && !item.isCompleted)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('같은 이름의 할 일이 이미 등록되어 있어요.')),
+        );
+      }
+      return;
     }
-    lines.add('※ 아직 실제 장소 검색·경로 계산은 수행하지 않았습니다.');
-    return lines.join('\n');
+    final confirmed = await showDialog<bool>(context: context, builder: (context) =>
+      AlertDialog(title: const Text('할 일에 추가할까요?'),
+        content: Text('「$title」를 내 할 일 목록에 추가합니다.\n'
+          '서버의 경로 추천에 자동으로 반영되는 것은 아니며, 계획은 다시 조회해야 합니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('추가')),
+        ]));
+    if (confirmed != true || !mounted) return;
+    try {
+      await controller.addTodo(title: title, minutes: 10,
+        requiresTravel: (raw['place_types'] is List && (raw['place_types'] as List).isNotEmpty),
+        placeName: null);
+      if (!mounted) return;
+      setState(() => message.added = true);
+      activeRouteController.requestPlanRefresh();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('앱의 할 일 목록에 추가했어요. 예상 소요시간은 기본 10분으로 설정했어요.')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('할 일 저장 실패: $error')),
+        );
+      }
+    }
   }
 
   void _onSpeechStatus(String status) {
@@ -140,13 +169,13 @@ class _AssistantScreenState extends State<AssistantScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(ApiConfig.offlineDemo ? '이동 질문 · 오프라인 시연' : 'AI 이동 질문')),
+      appBar: AppBar(title: const Text('AI 이동 질문')),
       body: SafeArea(
         child: Column(children: [
           Expanded(child: _history.isEmpty
               ? const Center(child: Padding(
                   padding: EdgeInsets.all(24),
-                  child: Text(ApiConfig.offlineDemo ? '시연 질문 예시\n“다음 버스 언제야?”\n“아 이어폰 사야 돼”\n“거기 들러도 돼?”\n\n서버 없이 준비된 답변을 표시합니다.' : '예: 오후 3시까지 광화문에 가야 하는데 감기약을 살 수 있을까?\n\n질문을 입력하거나 마이크 버튼을 누르세요.', textAlign: TextAlign.center),
+                  child: Text('예: 오후 3시까지 광화문에 가야 하는데 감기약을 살 수 있을까?\n\n질문을 입력하거나 마이크 버튼을 누르세요.', textAlign: TextAlign.center),
                 ))
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
@@ -157,7 +186,22 @@ class _AssistantScreenState extends State<AssistantScreen> {
                       alignment: m.mine ? Alignment.centerRight : Alignment.centerLeft,
                       child: Card(child: Padding(
                         padding: const EdgeInsets.all(12),
-                        child: SelectableText(m.text),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          SelectableText(m.text),
+                          if (!m.mine && m.todo != null) ...[
+                            const SizedBox(height: 7),
+                            OutlinedButton.icon(
+                              onPressed: m.added ? null : () => _addSuggestedTodo(m),
+                              icon: const Icon(Icons.playlist_add),
+                              label: Text(m.added ? '할 일 추가 완료' : '할 일 목록에 추가'),
+                            ),
+                          ],
+                          if (!m.mine && m.intent == 'change_route')
+                            const Text('실제 경로 재탐색은 서버 경로 API 지원 후 가능합니다.',
+                              style: TextStyle(fontSize: 11, color: Colors.black54)),
+                          if (!m.mine && m.engine == 'rule')
+                            const Text('서버 규칙 기반 응답', style: TextStyle(fontSize: 11, color: Colors.black54)),
+                        ]),
                       )),
                     );
                   },
@@ -203,5 +247,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
 class _Message {
   final String text;
   final bool mine;
-  _Message(this.text, this.mine);
+  final Map<String, dynamic>? todo;
+  final String? intent;
+  final String? engine;
+  bool added = false;
+  _Message(this.text, this.mine, {this.todo, this.intent, this.engine});
 }

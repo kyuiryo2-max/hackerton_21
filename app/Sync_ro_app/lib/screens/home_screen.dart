@@ -12,6 +12,9 @@ import '../services/todo_recommendation_service.dart';
 import 'detail_screen.dart';
 import '../config/api_config.dart';
 import '../data/offline_demo_data.dart';
+import '../widgets/active_route_summary.dart';
+import '../providers/active_route_controller.dart';
+import '../widgets/home_live_status.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.onOpenRoutes, required this.onSelectWaypoint});
@@ -190,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen>
           Row(children: [
             const Icon(Icons.directions_bus_outlined, color: Color(0xFF4936D8)),
             const SizedBox(width: 8),
-            const Expanded(child: Text('시연 이동 정보',
+            const Expanded(child: Text('예시 데이터입니다 · 이동 정보',
                 style: TextStyle(fontWeight: FontWeight.bold))),
             const Chip(label: Text('DEMO')),
           ]),
@@ -385,6 +388,7 @@ class _HomeScreenState extends State<HomeScreen>
               onTap: () => openSchedule(schedule),
             ),
 
+            if (ApiConfig.offlineDemo) ...[
             const Divider(height: 24),
 
             Row(
@@ -427,6 +431,7 @@ class _HomeScreenState extends State<HomeScreen>
                 color: Colors.grey,
               ),
             ),
+            ],
           ],
         ),
       ),
@@ -589,7 +594,7 @@ class _HomeScreenState extends State<HomeScreen>
             a.startTime.compareTo(b.startTime),
       );
 
-    _showingDemoSchedule = ApiConfig.offlineDemo && upcomingSchedules.isEmpty;
+    _showingDemoSchedule = false; // Demo routes must never be treated as real schedules.
     final Schedule? nextSchedule = upcomingSchedules.isNotEmpty
         ? upcomingSchedules.first
         : (_showingDemoSchedule ? _demoSchedule() : null);
@@ -662,24 +667,40 @@ class _HomeScreenState extends State<HomeScreen>
             const Text(
               '일정과 이동 상황을 함께 확인하세요.',
             ),
+            const SizedBox(height: 10),
+            const HomeLiveStatus(),
+            const SizedBox(height: 12),
 
-            if (_showingDemoSchedule) ...[
-              const SizedBox(height: 12),
-              _buildDemoHint(),
-            ],
+            AnimatedBuilder(animation: activeRouteController, builder: (context, _) =>
+              activeRouteController.active == null
+                ? (nextSchedule == null
+                    ? _buildDemoHint()
+                    : Card(child: Padding(padding: const EdgeInsets.all(16),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Text('다음 일정의 이동 계획', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          Text('목적지: ${nextSchedule.location}'),
+                          Text('도착 목표: ${formatDateTime(nextSchedule.startTime)}'),
+                          const SizedBox(height: 4),
+                          const Text('이동 탭에서 현재 위치를 확인하고 경로를 조회합니다. 경로가 확정되면 준비 시작 시각을 안내해요.'),
+                          TextButton(onPressed: widget.onOpenRoutes,
+                              child: const Text('이동 경로 확인')),
+                        ]))))
+                : ActiveRouteSummary(
+                    preparationMinutes: nextSchedule?.preparationMinutes ?? 30,
+                    onOpenRoutes: widget.onOpenRoutes)),
             const SizedBox(height: 16),
-            _buildPreparationCard(nextSchedule, incompleteTodos),
+            if (ApiConfig.offlineDemo)
+              _buildPreparationCard(nextSchedule, incompleteTodos),
             const SizedBox(height: 16),
 
             _buildNextScheduleCard(
               nextSchedule,
             ),
 
-            if (nextSchedule != null) ...[
+            if (ApiConfig.offlineDemo && nextSchedule != null) ...[
               const SizedBox(height: 12),
-              _buildDepartureAlert(
-                nextSchedule,
-              ),
+              _buildDepartureAlert(nextSchedule),
             ],
 
             const SizedBox(height: 24),

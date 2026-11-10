@@ -12,12 +12,15 @@ class RouteInlineMap extends StatelessWidget {
   final RouteCandidate? candidate;
   final Place? origin;
   final Place? destination;
+  final List<Place> routeStops;
+  final List<Place> nearbyPlaces;
   final List<LatLng>? demoPath;
   final List<DemoRouteLeg>? demoLegs;
   final List<String>? demoStopNames;
   final List<LatLng>? demoStopPositions;
   const RouteInlineMap({super.key, this.candidate, this.origin, this.destination,
-    this.demoPath, this.demoStopNames, this.demoStopPositions, this.demoLegs});
+    this.demoPath, this.demoStopNames, this.demoStopPositions, this.demoLegs,
+    this.routeStops = const [], this.nearbyPlaces = const []});
 
   /// Render a walking route as short grey dashed polylines without plugin-specific patterns.
   static List<Polyline> walkingDashes(List<LatLng> geometry) {
@@ -133,6 +136,30 @@ class RouteInlineMap extends StatelessWidget {
           ]),
         ));
       }
+    }
+    // Use real stop and place coordinates from /api/demo/context, not local guesses.
+    for (var i = 0; i < routeStops.length; i++) {
+      final stop = routeStops[i];
+      final point = LatLng(stop.latitude, stop.longitude);
+      points.add(point);
+      markers.add(Marker(point: point, width: 112, height: 51,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.circle, color: Color(0xFF087F8C), size: 13),
+          Container(color: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: Text(stop.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center, style: const TextStyle(fontSize: 9))),
+        ])));
+    }
+    for (final place in nearbyPlaces) {
+      final point = LatLng(place.latitude, place.longitude);
+      points.add(point);
+      markers.add(Marker(point: point, width: 116, height: 51,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.storefront, color: Color(0xFFF59E0B), size: 18),
+          Container(color: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: Text(place.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center, style: const TextStyle(fontSize: 9))),
+        ])));
     }
     if (origin != null && demoPath == null) {
       final p = LatLng(origin!.latitude, origin!.longitude);

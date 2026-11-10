@@ -4,6 +4,8 @@ import '../data/demo_route_style.dart';
 import '../models/place.dart';
 import '../models/route_candidate.dart';
 import 'route_inline_map.dart';
+import '../services/server_plan_service.dart';
+import '../widgets/plan_details_panel.dart';
 
 /// Search results use the same card / map / expanded-leg layout as the demo.
 /// This widget never substitutes demo coordinates for a user's searched route.
@@ -16,6 +18,11 @@ class SearchRouteResultsPanel extends StatefulWidget {
   final String originName;
   final String destinationName;
   final DateTime? desiredArrival;
+  final DateTime? referenceTime;
+  final List<Place> routeStops;
+  final List<Place> nearbyPlaces;
+  final bool serverDemo;
+  final ServerPlan? plan;
   final bool loading;
   final String? error;
 
@@ -29,6 +36,11 @@ class SearchRouteResultsPanel extends StatefulWidget {
     this.origin,
     this.destination,
     this.desiredArrival,
+    this.referenceTime,
+    this.routeStops = const [],
+    this.nearbyPlaces = const [],
+    this.serverDemo = false,
+    this.plan,
     this.loading = false,
     this.error,
   });
@@ -199,7 +211,7 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
       Container(padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(color: Colors.white, border: Border.all(color: const Color(0xFFEAE9EE)), borderRadius: BorderRadius.circular(17)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('이동 경로 검색 결과', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          Text(widget.serverDemo ? '서버 시연 경로' : '이동 경로 검색 결과', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
           const SizedBox(height: 12),
           Row(children: [const Icon(Icons.trip_origin, color: Color(0xFF4936D8), size: 19), const SizedBox(width: 9),
             Expanded(child: Text(widget.originName, style: const TextStyle(fontWeight: FontWeight.w600)))]),
@@ -208,7 +220,7 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
             Expanded(child: Text(widget.destinationName, style: const TextStyle(fontWeight: FontWeight.w600)))]),
           const Divider(height: 22),
           Wrap(spacing: 12, runSpacing: 6, children: [
-            Text('기준 ${_clock(DateTime.now())}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+            Text('기준 ${_clock(widget.referenceTime ?? DateTime.now())}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             if (widget.desiredArrival != null)
               Text('도착 희망 ${_clock(widget.desiredArrival!)}', style: const TextStyle(color: Color(0xFF4936D8), fontWeight: FontWeight.w700, fontSize: 12)),
           ]),
@@ -228,9 +240,11 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
           SizedBox(height: 285, child: RouteInlineMap(
             key: ValueKey('${route.id}-${widget.origin?.id}-${widget.destination?.id}'),
             candidate: route, origin: widget.origin, destination: widget.destination,
+            routeStops: route.segments.any((s) => s.geometry.isNotEmpty) ? widget.routeStops : const [],
+            nearbyPlaces: route.segments.any((s) => s.geometry.isNotEmpty) ? widget.nearbyPlaces : const [],
           )),
           const SizedBox(height: 5),
-          const Text('경로 좌표는 API가 제공한 구간에만 표시합니다. 지도 배경에는 인터넷이 필요합니다.',
+          const Text('서버에서 제공된 좌표만 지도에 표시합니다. 지도 배경에는 인터넷이 필요합니다.',
               style: TextStyle(fontSize: 11, color: Colors.black54)),
           const SizedBox(height: 8),
           OutlinedButton.icon(onPressed: () => setState(() => _expanded = !_expanded),
@@ -238,6 +252,8 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
             label: Text(_expanded ? '구간 정보 접기' : '구간별 출발·도착 정보 펼치기')),
           if (_expanded) _details(route),
         ],
+        PlanDetailsPanel(key: ValueKey(widget.selectedId ?? route?.id ?? 'none'),
+          selectedRoute: route, plan: widget.plan, desiredArrival: widget.desiredArrival),
       ] else if (!widget.loading && widget.error == null)
         const Padding(padding: EdgeInsets.all(12), child: Text('검색된 경로가 없습니다.')),
     ]);
