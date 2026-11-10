@@ -139,10 +139,73 @@ def normalize_question(out: dict) -> dict:
 _NUM = re.compile(r"\d+")
 
 
+def extract_allowed_numbers(result: dict | None, base_answer: str = "") -> set[int]:
+    """계산 결과(result)와 기본 답변(base_answer)에서 허용된 모든 정수 집합을 추출합니다."""
+    allowed: set[int] = set()
+    if base_answer:
+        for n in _NUM.findall(base_answer):
+            allowed.add(int(n))
+
+    def _collect(val):
+        if isinstance(val, int) and not isinstance(val, bool):
+            allowed.add(val)
+        elif isinstance(val, str):
+            # 문자열 내 숫자 추출 (예: "2115", "2026-11-21T08:44:00+09:00" -> 8, 44 등)
+            for n in _NUM.findall(val):
+                # 연도나 일자 등 너무 큰 숫자는 제외하고 시각/분/노선 중심 추출
+                v = int(n)
+                if v < 10000:
+                    allowed.add(v)
+        elif isinstance(val, dict):
+            for v in val.values():
+                _collect(v)
+        elif isinstance(val, (list, tuple)):
+            for v in val:
+                _collect(v)
+
+    if result:
+        _collect(result)
+    return allowed
+
+
 def numbers_match(answer: str, allowed: set[int]) -> bool:
     """답변에 나온 숫자가 전부 계산 결과(allowed)에 있으면 True.
 
     allowed에는 분 값과 시각의 시·분을 넣어요. 예: 8시 23분 → {8, 23}
     False면 AI 문장 대신 정해진 템플릿 문장을 보여 줘요.
     """
-    return all(int(n) in allowed for n in _NUM.findall(answer))
+    found = [int(n) for n in _NUM.findall(answer)]
+    return all(n in allowed for n in found)
+
+
+def explain_result(
+    question: str,
+    result: dict,
+    base_answer: str,
+    version: str | None = None,
+) -> str:
+    """#37: AI를 호출하여 자연스러운 설명 문장을 생성하고, numbers_match로 숫자를 대조 검증합니다.
+
+    - 검증 통과 시: AI가 생성한 자연스러운 문장 반환
+    - 검증 실패(숫자 조작/환각) 또는 오류 시: 안전한 기존 템플릿(base_answer) 반환
+    """
+    if not result:
+        return base_answer
+
+    allowed = extract_allowed_numbers(result, base_answer)
+    user_payload = json.dumps({"question": question, "result": result}, ensure_ascii=False)
+
+    try:
+        system_prompt = load_prompt("explain_result", version=version)
+        out = _chat_json(system_prompt, user_payload)
+        ai_answer = out.get("answer", "").strip()
+        if not ai_answer:
+            return base_answer
+
+        # 숫자 대조 검증
+        if numbers_match(ai_answer, allowed):
+            return ai_answer
+        else:
+            return base_answer
+    except Exception:
+        return base_answer

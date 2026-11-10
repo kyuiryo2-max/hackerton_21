@@ -12,9 +12,10 @@ def env(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
 
-OPENAI_API_KEY = env("OPENAI_API_KEY")
+OPENAI_KEY = OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_BASE_URL = env("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_MODEL = env("LLM_MODEL")
+EXPLAIN_WITH_AI = env("EXPLAIN_WITH_AI", "false").lower() == "true"
 
 DATA_GO_KR_SERVICE_KEY = env("DATA_GO_KR_SERVICE_KEY")
 SEOUL_OPEN_API_KEY = env("SEOUL_OPEN_API_KEY")

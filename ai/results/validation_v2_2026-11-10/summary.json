@@ -1,0 +1,478 @@
+{
+  "metadata": {
+    "date": "2026-11-10",
+    "split": "validation",
+    "total_cases": 40,
+    "prompt_version": "v2",
+    "methods": [
+      "keyword",
+      "vector",
+      "llm"
+    ],
+    "policy_name": "P2",
+    "vector_model": "jhgan/ko-sroberta-multitask",
+    "top_m": 2,
+    "git_sha": "cffbadd9e678821db99b39c03354db7d0a3c3742"
+  },
+  "methods": {
+    "keyword": {
+      "total_cases": 40,
+      "exact_match": 0.525,
+      "exact_match_ci": [
+        0.375,
+        0.6706
+      ],
+      "macro_precision": 0.7976,
+      "macro_recall": 0.4857,
+      "macro_f1": 0.6038,
+      "micro_precision": 0.9,
+      "micro_recall": 0.5,
+      "micro_f1": 0.6429,
+      "per_class": {
+        "next_vehicle": {
+          "support": 5,
+          "tp": 3,
+          "fp": 1,
+          "fn": 2,
+          "tn": 34,
+          "precision": 0.75,
+          "precision_ci": [
+            0.3006,
+            0.9544
+          ],
+          "recall": 0.6,
+          "recall_ci": [
+            0.2307,
+            0.8824
+          ],
+          "f1": 0.6667
+        },
+        "stopover_check": {
+          "support": 6,
+          "tp": 4,
+          "fp": 0,
+          "fn": 2,
+          "tn": 34,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 0.6667,
+          "recall_ci": [
+            0.3,
+            0.9032
+          ],
+          "f1": 0.8
+        },
+        "running_late": {
+          "support": 6,
+          "tp": 5,
+          "fp": 1,
+          "fn": 1,
+          "tn": 33,
+          "precision": 0.8333,
+          "precision_ci": [
+            0.4365,
+            0.9699
+          ],
+          "recall": 0.8333,
+          "recall_ci": [
+            0.4365,
+            0.9699
+          ],
+          "f1": 0.8333
+        },
+        "time_left": {
+          "support": 5,
+          "tp": 2,
+          "fp": 0,
+          "fn": 3,
+          "tn": 35,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.4,
+          "recall_ci": [
+            0.1176,
+            0.7693
+          ],
+          "f1": 0.5714
+        },
+        "change_todo": {
+          "support": 5,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5,
+          "tn": 35,
+          "precision": 0.0,
+          "precision_ci": [
+            0.0,
+            0.0
+          ],
+          "recall": 0.0,
+          "recall_ci": [
+            0.0,
+            0.4345
+          ],
+          "f1": 0.0
+        },
+        "place_info": {
+          "support": 4,
+          "tp": 2,
+          "fp": 0,
+          "fn": 2,
+          "tn": 36,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.5,
+          "recall_ci": [
+            0.15,
+            0.85
+          ],
+          "f1": 0.6667
+        },
+        "change_route": {
+          "support": 5,
+          "tp": 2,
+          "fp": 0,
+          "fn": 3,
+          "tn": 35,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.4,
+          "recall_ci": [
+            0.1176,
+            0.7693
+          ],
+          "f1": 0.5714
+        }
+      }
+    },
+    "vector": {
+      "total_cases": 40,
+      "exact_match": 0.375,
+      "exact_match_ci": [
+        0.2422,
+        0.5297
+      ],
+      "macro_precision": 0.7381,
+      "macro_recall": 0.4571,
+      "macro_f1": 0.5646,
+      "micro_precision": 0.8947,
+      "micro_recall": 0.4722,
+      "micro_f1": 0.6182,
+      "per_class": {
+        "next_vehicle": {
+          "support": 5,
+          "tp": 1,
+          "fp": 1,
+          "fn": 4,
+          "tn": 34,
+          "precision": 0.5,
+          "precision_ci": [
+            0.0945,
+            0.9055
+          ],
+          "recall": 0.2,
+          "recall_ci": [
+            0.0362,
+            0.6245
+          ],
+          "f1": 0.2857
+        },
+        "stopover_check": {
+          "support": 6,
+          "tp": 4,
+          "fp": 0,
+          "fn": 2,
+          "tn": 34,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 0.6667,
+          "recall_ci": [
+            0.3,
+            0.9032
+          ],
+          "f1": 0.8
+        },
+        "running_late": {
+          "support": 6,
+          "tp": 5,
+          "fp": 0,
+          "fn": 1,
+          "tn": 34,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 0.8333,
+          "recall_ci": [
+            0.4365,
+            0.9699
+          ],
+          "f1": 0.9091
+        },
+        "time_left": {
+          "support": 5,
+          "tp": 2,
+          "fp": 1,
+          "fn": 3,
+          "tn": 34,
+          "precision": 0.6667,
+          "precision_ci": [
+            0.2077,
+            0.9385
+          ],
+          "recall": 0.4,
+          "recall_ci": [
+            0.1176,
+            0.7693
+          ],
+          "f1": 0.5
+        },
+        "change_todo": {
+          "support": 5,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5,
+          "tn": 35,
+          "precision": 0.0,
+          "precision_ci": [
+            0.0,
+            0.0
+          ],
+          "recall": 0.0,
+          "recall_ci": [
+            0.0,
+            0.4345
+          ],
+          "f1": 0.0
+        },
+        "place_info": {
+          "support": 4,
+          "tp": 2,
+          "fp": 0,
+          "fn": 2,
+          "tn": 36,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.5,
+          "recall_ci": [
+            0.15,
+            0.85
+          ],
+          "f1": 0.6667
+        },
+        "change_route": {
+          "support": 5,
+          "tp": 3,
+          "fp": 0,
+          "fn": 2,
+          "tn": 35,
+          "precision": 1.0,
+          "precision_ci": [
+            0.4385,
+            1.0
+          ],
+          "recall": 0.6,
+          "recall_ci": [
+            0.2307,
+            0.8824
+          ],
+          "f1": 0.75
+        }
+      }
+    },
+    "llm": {
+      "total_cases": 40,
+      "exact_match": 0.975,
+      "exact_match_ci": [
+        0.8712,
+        0.9956
+      ],
+      "macro_precision": 0.9762,
+      "macro_recall": 1.0,
+      "macro_f1": 0.9879,
+      "micro_precision": 0.973,
+      "micro_recall": 1.0,
+      "micro_f1": 0.9863,
+      "per_class": {
+        "next_vehicle": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 35,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "stopover_check": {
+          "support": 6,
+          "tp": 6,
+          "fp": 0,
+          "fn": 0,
+          "tn": 34,
+          "precision": 1.0,
+          "precision_ci": [
+            0.6097,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.6097,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "running_late": {
+          "support": 6,
+          "tp": 6,
+          "fp": 0,
+          "fn": 0,
+          "tn": 34,
+          "precision": 1.0,
+          "precision_ci": [
+            0.6097,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.6097,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "time_left": {
+          "support": 5,
+          "tp": 5,
+          "fp": 1,
+          "fn": 0,
+          "tn": 34,
+          "precision": 0.8333,
+          "precision_ci": [
+            0.4365,
+            0.9699
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 0.9091
+        },
+        "change_todo": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 35,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "place_info": {
+          "support": 4,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "tn": 36,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5101,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "change_route": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 35,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        }
+      }
+    }
+  },
+  "policy": {
+    "total_cases": 40,
+    "auto_accepted_count": 22,
+    "coverage": 0.55,
+    "coverage_ci": [
+      0.3983,
+      0.6929
+    ],
+    "selective_risk": 0.1818,
+    "selective_risk_ci": [
+      0.0731,
+      0.3852
+    ],
+    "fallback_rate": 0.45,
+    "overall_accuracy": 0.875,
+    "overall_accuracy_ci": [
+      0.7389,
+      0.9454
+    ],
+    "unsupported_cases": 8,
+    "unsupported_recall": 0.875,
+    "unsupported_recall_ci": [
+      0.5291,
+      0.9776
+    ]
+  },
+  "latency_ms": {
+    "p50": 1333.77,
+    "p90": 4115.34,
+    "p95": 4188.77,
+    "p99": 4481.0,
+    "mean": 1912.37
+  }
+}

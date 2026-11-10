@@ -1,0 +1,478 @@
+{
+  "metadata": {
+    "date": "2026-11-10",
+    "split": "questions_v2",
+    "total_cases": 25,
+    "prompt_version": "v2",
+    "methods": [
+      "keyword",
+      "vector",
+      "llm"
+    ],
+    "policy_name": "P2",
+    "vector_model": "jhgan/ko-sroberta-multitask",
+    "top_m": 2,
+    "git_sha": "cffbadd9e678821db99b39c03354db7d0a3c3742"
+  },
+  "methods": {
+    "keyword": {
+      "total_cases": 25,
+      "exact_match": 1.0,
+      "exact_match_ci": [
+        0.8668,
+        1.0
+      ],
+      "macro_precision": 1.0,
+      "macro_recall": 1.0,
+      "macro_f1": 1.0,
+      "micro_precision": 1.0,
+      "micro_recall": 1.0,
+      "micro_f1": 1.0,
+      "per_class": {
+        "next_vehicle": {
+          "support": 4,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5101,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "stopover_check": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 20,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "running_late": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 20,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "time_left": {
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.4385,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.4385,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "change_todo": {
+          "support": 4,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5101,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "place_info": {
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.4385,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.4385,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "change_route": {
+          "support": 2,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "tn": 23,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.3424,
+            1.0
+          ],
+          "f1": 1.0
+        }
+      }
+    },
+    "vector": {
+      "total_cases": 25,
+      "exact_match": 0.52,
+      "exact_match_ci": [
+        0.335,
+        0.6997
+      ],
+      "macro_precision": 0.9643,
+      "macro_recall": 0.6762,
+      "macro_f1": 0.7949,
+      "micro_precision": 0.9444,
+      "micro_recall": 0.6538,
+      "micro_f1": 0.7727,
+      "per_class": {
+        "next_vehicle": {
+          "support": 4,
+          "tp": 2,
+          "fp": 0,
+          "fn": 2,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.5,
+          "recall_ci": [
+            0.15,
+            0.85
+          ],
+          "f1": 0.6667
+        },
+        "stopover_check": {
+          "support": 5,
+          "tp": 3,
+          "fp": 1,
+          "fn": 2,
+          "tn": 19,
+          "precision": 0.75,
+          "precision_ci": [
+            0.3006,
+            0.9544
+          ],
+          "recall": 0.6,
+          "recall_ci": [
+            0.2307,
+            0.8824
+          ],
+          "f1": 0.6667
+        },
+        "running_late": {
+          "support": 5,
+          "tp": 4,
+          "fp": 0,
+          "fn": 1,
+          "tn": 20,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 0.8,
+          "recall_ci": [
+            0.3755,
+            0.9638
+          ],
+          "f1": 0.8889
+        },
+        "time_left": {
+          "support": 3,
+          "tp": 2,
+          "fp": 0,
+          "fn": 1,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.6667,
+          "recall_ci": [
+            0.2077,
+            0.9385
+          ],
+          "f1": 0.8
+        },
+        "change_todo": {
+          "support": 4,
+          "tp": 2,
+          "fp": 0,
+          "fn": 2,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.5,
+          "recall_ci": [
+            0.15,
+            0.85
+          ],
+          "f1": 0.6667
+        },
+        "place_info": {
+          "support": 3,
+          "tp": 2,
+          "fp": 0,
+          "fn": 1,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 0.6667,
+          "recall_ci": [
+            0.2077,
+            0.9385
+          ],
+          "f1": 0.8
+        },
+        "change_route": {
+          "support": 2,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "tn": 23,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.3424,
+            1.0
+          ],
+          "f1": 1.0
+        }
+      }
+    },
+    "llm": {
+      "total_cases": 25,
+      "exact_match": 1.0,
+      "exact_match_ci": [
+        0.8668,
+        1.0
+      ],
+      "macro_precision": 1.0,
+      "macro_recall": 1.0,
+      "macro_f1": 1.0,
+      "micro_precision": 1.0,
+      "micro_recall": 1.0,
+      "micro_f1": 1.0,
+      "per_class": {
+        "next_vehicle": {
+          "support": 4,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5101,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "stopover_check": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 20,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "running_late": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 20,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "time_left": {
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.4385,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.4385,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "change_todo": {
+          "support": 4,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5101,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "place_info": {
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.4385,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.4385,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "change_route": {
+          "support": 2,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "tn": 23,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.3424,
+            1.0
+          ],
+          "f1": 1.0
+        }
+      }
+    }
+  },
+  "policy": {
+    "total_cases": 25,
+    "auto_accepted_count": 23,
+    "coverage": 0.92,
+    "coverage_ci": [
+      0.7503,
+      0.9778
+    ],
+    "selective_risk": 0.0,
+    "selective_risk_ci": [
+      0.0,
+      0.1431
+    ],
+    "fallback_rate": 0.08,
+    "overall_accuracy": 1.0,
+    "overall_accuracy_ci": [
+      0.8668,
+      1.0
+    ],
+    "unsupported_cases": 2,
+    "unsupported_recall": 1.0,
+    "unsupported_recall_ci": [
+      0.3424,
+      1.0
+    ]
+  },
+  "latency_ms": {
+    "p50": 1037.59,
+    "p90": 2177.39,
+    "p95": 2390.99,
+    "p99": 2474.03,
+    "mean": 1290.68
+  }
+}

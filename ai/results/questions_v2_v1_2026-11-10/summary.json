@@ -6,12 +6,13 @@
     "prompt_version": "v1",
     "methods": [
       "keyword",
-      "vector"
+      "vector",
+      "llm"
     ],
     "policy_name": "P2",
     "vector_model": "jhgan/ko-sroberta-multitask",
     "top_m": 2,
-    "git_sha": "unknown"
+    "git_sha": "cffbadd9e678821db99b39c03354db7d0a3c3742"
   },
   "methods": {
     "keyword": {
@@ -297,6 +298,148 @@
           "f1": 1.0
         }
       }
+    },
+    "llm": {
+      "total_cases": 25,
+      "exact_match": 1.0,
+      "exact_match_ci": [
+        0.8668,
+        1.0
+      ],
+      "macro_precision": 1.0,
+      "macro_recall": 1.0,
+      "macro_f1": 1.0,
+      "micro_precision": 1.0,
+      "micro_recall": 1.0,
+      "micro_f1": 1.0,
+      "per_class": {
+        "next_vehicle": {
+          "support": 4,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5101,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "stopover_check": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 20,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "running_late": {
+          "support": 5,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 20,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5655,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5655,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "time_left": {
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.4385,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.4385,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "change_todo": {
+          "support": 4,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "tn": 21,
+          "precision": 1.0,
+          "precision_ci": [
+            0.5101,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.5101,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "place_info": {
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "tn": 22,
+          "precision": 1.0,
+          "precision_ci": [
+            0.4385,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.4385,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "change_route": {
+          "support": 2,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "tn": 23,
+          "precision": 1.0,
+          "precision_ci": [
+            0.3424,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.3424,
+            1.0
+          ],
+          "f1": 1.0
+        }
+      }
     }
   },
   "policy": {
@@ -326,10 +469,10 @@
     ]
   },
   "latency_ms": {
-    "p50": 0.11,
-    "p90": 0.2,
-    "p95": 0.25,
-    "p99": 0.54,
-    "mean": 0.14
+    "p50": 998.85,
+    "p90": 1651.18,
+    "p95": 2053.63,
+    "p99": 2105.07,
+    "mean": 1122.69
   }
 }
