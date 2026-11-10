@@ -1,10 +1,20 @@
+/// All backend HTTP calls share API_BASE_URL.
+/// Example: flutter run --dart-define=API_BASE_URL=https://teumgil-server.onrender.com
 class ApiConfig {
-  // true: 임시 데이터 사용
-  // false: 실제 서버 API 사용
-  static const bool useMockData = true;
-
-  // Android 에뮬레이터에서 PC의 localhost에 접근하는 주소
-  static const String baseUrl = 'http://10.0.2.2:8000';
-
+  /// Use the real server by default; offline samples require explicit opt-in.
+  static const bool offlineDemo = bool.fromEnvironment(
+      'SYNC_RO_OFFLINE_DEMO', defaultValue: false);
+  // Demo data on the REAL server; distinct from offline demo assets.
+  static const bool demoMode = bool.fromEnvironment(
+      'SYNC_RO_DEMO_MODE', defaultValue: false);
+  static const String userId = String.fromEnvironment(
+      'SYNC_RO_USER_ID', defaultValue: 'demo');
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL', defaultValue: 'https://teumgil-server.onrender.com');
+  static String get normalizedBaseUrl => baseUrl.replaceFirst(RegExp(r'/+$'), '');
+  static Uri endpoint(String path, [Map<String, String>? query]) =>
+      Uri.parse('$normalizedBaseUrl${path.startsWith('/') ? path : '/$path'}')
+          .replace(queryParameters: query);
+  static const bool useMockData = true; // legacy recommendation fallback
   static const String recommendationsEndpoint = '/api/recommendations';
 }

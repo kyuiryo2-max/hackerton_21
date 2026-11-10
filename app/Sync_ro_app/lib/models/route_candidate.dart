@@ -23,12 +23,18 @@ class RouteSegment {
 
   // 실제 지도 경로 좌표 (선택적)
   final List<RoutePoint> geometry;
+  final String? startName;
+  final String? endName;
+  final String? lineName;
 
   const RouteSegment({
     required this.type,
     required this.description,
     required this.durationMinutes,
     this.geometry = const [],
+    this.startName,
+    this.endName,
+    this.lineName,
   });
 }
 

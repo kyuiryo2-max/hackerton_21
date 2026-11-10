@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../models/schedule.dart';
-import 'navigation_screen.dart';
+
 
 class DetailScreen extends StatelessWidget {
   final String title;
   final Schedule? schedule;
+  final ValueChanged<Schedule>? onOpenScheduleRoutes;
 
-  const DetailScreen({super.key, required this.title, this.schedule});
+  const DetailScreen({super.key, required this.title, this.schedule, this.onOpenScheduleRoutes});
 
   String _formatDateTime(DateTime value) {
     final year = value.year;
@@ -63,16 +64,12 @@ class DetailScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             FilledButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => NavigationScreen(
-                      initialDestination: schedule!.location,
-                      initialArrivalTime: schedule!.startTime,
-                    ),
-                  ),
-                );
+              onPressed: onOpenScheduleRoutes == null ? null : () {
+                final target = schedule!;
+                // Return to the existing tab navigator rather than stacking a
+                // second NavigationScreen with no bottom navigation bar.
+                Navigator.of(context).pop();
+                onOpenScheduleRoutes!(target);
               },
               icon: const Icon(Icons.route),
               label: const Text('이 일정으로 이동 추천'),

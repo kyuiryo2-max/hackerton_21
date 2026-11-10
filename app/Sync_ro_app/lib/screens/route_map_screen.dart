@@ -4,6 +4,8 @@ import 'package:latlong2/latlong.dart';
 
 import '../models/place.dart';
 import '../models/route_candidate.dart';
+import 'route_inline_map.dart';
+import '../data/demo_route_style.dart';
 
 class RouteMapScreen extends StatelessWidget {
   final String origin;
@@ -21,14 +23,14 @@ class RouteMapScreen extends StatelessWidget {
     this.destinationPlace,
   });
 
-  Color _segmentColor(RouteSegmentType type) {
-    switch (type) {
+  Color _segmentColor(RouteSegment segment) {
+    switch (segment.type) {
       case RouteSegmentType.walking:
-        return Colors.green;
+        return Colors.grey;
       case RouteSegmentType.bus:
-        return Colors.blue;
+        return DemoRouteStyle.bus;
       case RouteSegmentType.subway:
-        return Colors.deepOrange;
+        return DemoRouteStyle.colorFor('SUBWAY', '${segment.lineName ?? ''} ${segment.description}');
       case RouteSegmentType.waiting:
         return Colors.grey;
     }
@@ -86,13 +88,11 @@ class RouteMapScreen extends StatelessWidget {
         return LatLng(point.latitude, point.longitude);
       }).toList();
 
-      polylines.add(
-        Polyline(
-          points: points,
-          color: _segmentColor(segment.type),
-          strokeWidth: 5,
-        ),
-      );
+      if (segment.type == RouteSegmentType.walking) {
+        polylines.addAll(RouteInlineMap.walkingDashes(points));
+      } else {
+        polylines.add(Polyline(points: points, color: _segmentColor(segment), strokeWidth: 5));
+      }
     }
 
     final allPositions = <LatLng>[
@@ -189,9 +189,9 @@ class RouteMapScreen extends StatelessWidget {
             spacing: 16,
             runSpacing: 8,
             children: [
-              _MapLegend(label: '도보', color: Colors.green),
-              _MapLegend(label: '버스', color: Colors.blue),
-              _MapLegend(label: '지하철', color: Colors.deepOrange),
+              _MapLegend(label: '도보 (점선)', color: Colors.grey),
+              _MapLegend(label: '버스', color: Colors.green),
+              _MapLegend(label: '지하철', color: Colors.orange),
             ],
           ),
 
@@ -230,7 +230,7 @@ class RouteMapScreen extends StatelessWidget {
               child: ListTile(
                 leading: Icon(
                   _segmentIcon(segment.type),
-                  color: _segmentColor(segment.type),
+                  color: _segmentColor(segment),
                 ),
                 title: Text(
                   '${index + 1}. '

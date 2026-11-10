@@ -6,6 +6,13 @@ class Schedule {
   final String? destinationAddress;
   final double? destinationLatitude;
   final double? destinationLongitude;
+  /// current: use device location when planning; place: stored selected place.
+  final String originMode;
+  final String? originPlaceId;
+  final String? originName;
+  final String? originAddress;
+  final double? originLatitude;
+  final double? originLongitude;
   final DateTime startTime;
   final DateTime endTime;
   final bool isCompleted;
@@ -19,6 +26,12 @@ class Schedule {
     this.destinationAddress,
     this.destinationLatitude,
     this.destinationLongitude,
+    this.originMode = 'current',
+    this.originPlaceId,
+    this.originName,
+    this.originAddress,
+    this.originLatitude,
+    this.originLongitude,
     required this.startTime,
     required this.endTime,
     this.isCompleted = false,
@@ -32,6 +45,13 @@ class Schedule {
     String? destinationAddress,
     double? destinationLatitude,
     double? destinationLongitude,
+    String? originMode,
+    bool clearOrigin = false,
+    String? originPlaceId,
+    String? originName,
+    String? originAddress,
+    double? originLatitude,
+    double? originLongitude,
     DateTime? startTime,
     DateTime? endTime,
     bool? isCompleted,
@@ -45,6 +65,12 @@ class Schedule {
       destinationAddress: destinationAddress ?? this.destinationAddress,
       destinationLatitude: destinationLatitude ?? this.destinationLatitude,
       destinationLongitude: destinationLongitude ?? this.destinationLongitude,
+      originMode: originMode ?? this.originMode,
+      originPlaceId: clearOrigin ? null : (originPlaceId ?? this.originPlaceId),
+      originName: clearOrigin ? null : (originName ?? this.originName),
+      originAddress: clearOrigin ? null : (originAddress ?? this.originAddress),
+      originLatitude: clearOrigin ? null : (originLatitude ?? this.originLatitude),
+      originLongitude: clearOrigin ? null : (originLongitude ?? this.originLongitude),
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       isCompleted: isCompleted ?? this.isCompleted,
@@ -60,6 +86,12 @@ class Schedule {
     'destination_address': destinationAddress,
     'destination_latitude': destinationLatitude,
     'destination_longitude': destinationLongitude,
+    'origin_mode': originMode,
+    'origin_place_id': originMode == 'place' ? originPlaceId : null,
+    'origin_name': originMode == 'place' ? originName : null,
+    'origin_address': originMode == 'place' ? originAddress : null,
+    'origin_latitude': originMode == 'place' ? originLatitude : null,
+    'origin_longitude': originMode == 'place' ? originLongitude : null,
     'start_time': startTime.toIso8601String(),
     'end_time': endTime.toIso8601String(),
     'is_completed': isCompleted,
@@ -75,6 +107,12 @@ class Schedule {
       destinationAddress: json['destination_address'] as String?,
       destinationLatitude: (json['destination_latitude'] as num?)?.toDouble(),
       destinationLongitude: (json['destination_longitude'] as num?)?.toDouble(),
+      originMode: json['origin_mode'] == 'place' ? 'place' : 'current',
+      originPlaceId: json['origin_place_id'] as String?,
+      originName: json['origin_name'] as String?,
+      originAddress: json['origin_address'] as String?,
+      originLatitude: (json['origin_latitude'] as num?)?.toDouble(),
+      originLongitude: (json['origin_longitude'] as num?)?.toDouble(),
       startTime: DateTime.parse(json['start_time'] as String),
       endTime: DateTime.parse(json['end_time'] as String),
       isCompleted: json['is_completed'] as bool? ?? false,

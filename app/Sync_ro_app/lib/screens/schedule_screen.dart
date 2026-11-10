@@ -6,7 +6,9 @@ import 'schedule_form_screen.dart';
 import 'detail_screen.dart';
 
 class ScheduleScreen extends StatelessWidget {
-  const ScheduleScreen({super.key});
+  const ScheduleScreen({super.key, this.onOpenScheduleRoutes});
+
+  final ValueChanged<Schedule>? onOpenScheduleRoutes;
 
   @override
   Widget build(BuildContext context) {
@@ -16,11 +18,14 @@ class ScheduleScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('내 일정')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
+        onPressed: () async {
+          final saved = await Navigator.push<Schedule>(
             context,
             MaterialPageRoute(builder: (_) => const ScheduleFormScreen()),
           );
+          if (saved != null && context.mounted) {
+            onOpenScheduleRoutes?.call(saved);
+          }
         },
         icon: const Icon(Icons.add),
         label: const Text('일정 추가'),
@@ -55,20 +60,23 @@ class ScheduleScreen extends StatelessWidget {
                           builder: (_) => DetailScreen(
                             title: schedule.title,
                             schedule: schedule,
+                            onOpenScheduleRoutes: onOpenScheduleRoutes,
                           ),
                         ),
                       );
                     },
                     trailing: PopupMenuButton<String>(
-                      onSelected: (value) {
+                      onSelected: (value) async {
                         if (value == 'edit') {
-                          Navigator.push(
+                          final saved = await Navigator.push<Schedule>(
                             context,
                             MaterialPageRoute(
-                              builder: (_) =>
-                                  ScheduleFormScreen(existing: schedule),
+                              builder: (_) => ScheduleFormScreen(existing: schedule),
                             ),
                           );
+                          if (saved != null && context.mounted) {
+                            onOpenScheduleRoutes?.call(saved);
+                          }
                         } else if (value == 'delete') {
                           controller.deleteSchedule(schedule.id);
                         }
