@@ -1,0 +1,41 @@
+id,text,expected_intents,expected_args,group
+VAL01,다음 버스 도착 예정 시간 알려줘,next_vehicle,,val_next_bus
+VAL02,지하철 언제 오는지 봐줘,next_vehicle,,val_next_subway
+VAL03,정류장에 151번 버스 몇 분 남았어?,next_vehicle,,val_bus_time
+VAL04,다음 차 언제 탈 수 있어?,next_vehicle,,val_next_transit
+VAL05,약국 들렀다 가도 약속에 안 늦어?,stopover_check,place_types=약국,val_stopover_pharma
+VAL06,가는 길에 편의점 잠깐 들를 수 있을까?,stopover_check,place_types=편의점,val_stopover_cvs
+VAL07,커피 테이크아웃해서 가도 시간 괜찮아?,stopover_check,place_types=카페,val_stopover_cafe
+VAL08,다이소 들러서 쇼핑백 사가도 돼?,stopover_check,place_types=다이소,val_stopover_daiso
+VAL09,20분 정도 늦을 것 같아,running_late,delay_minutes=20,val_late_20
+VAL10,차가 너무 밀려서 10분 지연될 듯,running_late,delay_minutes=10,val_late_traffic
+VAL11,약속에 좀 늦을 것 같아,running_late,,val_late_general
+VAL12,늦어질 것 같아서 연락했어,running_late,,val_late_msg
+VAL13,언제 나가야 버스 안 놓쳐?,time_left,,val_time_leave
+VAL14,나 몇 분 뒤에 출발하면 돼?,time_left,,val_time_minutes
+VAL15,출발 시각 몇 분 남았어?,time_left,,val_time_slack
+VAL16,지금 바로 뛰어나가야 돼?,time_left,,val_time_run
+VAL17,커피 사는 건 취소할게,change_todo,action=delete;todo_text=커피,val_todo_cancel
+VAL18,다이소는 안 가도 돼,change_todo,action=delete;todo_text=다이소,val_todo_drop
+VAL19,보고서 인쇄가 제일 급해,change_todo,action=raise;todo_text=보고서 인쇄,val_todo_urgent
+VAL20,약 사기는 내일로 미룰게,change_todo,action=delete;todo_text=약 사기,val_todo_defer
+VAL21,가장 가까운 약국 위치가 어디야?,place_info,place_types=약국,val_place_pharma
+VAL22,근처 다이소 몇 번 출구에 있어?,place_info,place_types=다이소,val_place_exit
+VAL23,이 편의점 24시간 영업해?,place_info,place_types=편의점,val_place_24h
+VAL24,주변에 은행 어디 있는지 찾아줘,place_info,place_types=은행·ATM,val_place_bank
+VAL25,최소 환승 경로로 바꿔줘,change_route,preference=transfer,val_route_transfer
+VAL26,제일 싼 요금 경로로 가자,change_route,preference=fare,val_route_fare
+VAL27,가장 덜 걷는 길로 찾아줄래?,change_route,preference=time,val_route_walk
+VAL28,더 빠른 경로 있으면 변경해줘,change_route,preference=time,val_route_fast
+VAL29,15분 늦을 것 같은데 편의점 들를 수 있어?,running_late|stopover_check,delay_minutes=15;place_types=편의점,val_multi_late_cvs
+VAL30,약 안 사고 바로 갈 건데 다음 버스 언제야?,change_todo|next_vehicle,action=delete;todo_text=약,val_multi_todo_bus
+VAL31,늦었는데 환승 적은 길로 가자,running_late|change_route,preference=transfer,val_multi_late_route
+VAL32,커피 사려면 몇 분까지 나가야 돼?,stopover_check|time_left,place_types=카페,val_multi_stop_time
+VAL33,오늘 저녁에 비 올까?,unsupported,,val_unsupp_weather
+VAL34,강남역 근처 삼겹살 맛집 추천해줘,unsupported,,val_unsupp_food
+VAL35,택시 부르면 얼마 나와?,unsupported,,val_unsupp_taxi
+VAL36,오늘 미세먼지 농도 어때?,unsupported,,val_unsupp_dust
+VAL37,노래 한 곡 틀어줘,unsupported,,val_unsupp_music
+VAL38,주말에 영화 뭐 볼까?,unsupported,,val_unsupp_movie
+VAL39,너 이름이 뭐야?,unsupported,,val_unsupp_chitchat
+VAL40,지금 몇 시야?,unsupported,,val_unsupp_clock

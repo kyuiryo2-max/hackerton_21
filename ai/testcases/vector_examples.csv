@@ -1,0 +1,53 @@
+id,text,intents,group
+VE001,다음 버스 언제 와?,next_vehicle,next_bus
+VE002,다음 지하철 언제 도착해?,next_vehicle,next_subway
+VE003,273번 버스 몇 분 남았어?,next_vehicle,bus_number
+VE004,이번 열차 놓치면 다음 건 몇 분 뒤에 와?,next_vehicle,next_train
+VE005,버스 아직 안 왔어?,next_vehicle,bus_wait
+VE006,정류장에 버스 몇 분 뒤에 와?,next_vehicle,bus_station
+VE007,다음 차 언제야?,next_vehicle,next_transit
+VE008,지하철 배차 간격 어떻게 돼?,next_vehicle,transit_interval
+VE009,편의점 들렀다 가도 돼?,stopover_check,stopover_cvs
+VE010,가는 길에 약국 잠깐 들를 수 있을까?,stopover_check,stopover_pharmacy
+VE011,카페 들러서 커피 사갈 시간 돼?,stopover_check,stopover_cafe
+VE012,다이소 잠깐 들러야 하는데 경로에 있어?,stopover_check,stopover_daiso
+VE013,우유 사야 되는데 편의점 들를 시간 나와?,stopover_check,stopover_milk
+VE014,정류장 근처 올리브영 들렀다 갈게,stopover_check,stopover_olive
+VE015,프린트할 곳 들러도 안 늦어?,stopover_check,stopover_print
+VE016,가는 도중에 ATM 들러서 현금 찾아도 돼?,stopover_check,stopover_atm
+VE017,10분 늦을 것 같아,running_late,late_explicit
+VE018,약속 시간에 15분 정도 밀릴 듯해,running_late,late_delay
+VE019,차가 막혀서 늦어질 것 같아,running_late,late_traffic
+VE020,좀 늦을 것 같아요,running_late,late_simple
+VE021,5분 정도 지연될 것 같아,running_late,late_minutes
+VE022,예정보다 20분 늦게 도착할 것 같아,running_late,late_arrival
+VE023,차가 너무 막혀서 늦겠어,running_late,late_traffic_jam
+VE024,몇 분까지 나가면 돼?,time_left,time_leave
+VE025,지금 바로 나가야 돼?,time_left,time_now
+VE026,출발까지 시간 얼마나 남았어?,time_left,time_remaining
+VE027,준비 얼마나 더 해도 돼?,time_left,time_prep
+VE028,집에서 몇 시 몇 분에 출발해야 안 늦어?,time_left,time_schedule
+VE029,나갈 때까지 여유 시간 얼마나 있어?,time_left,time_slack
+VE030,약은 안 사도 돼,change_todo,todo_cancel
+VE031,우유 사는 거 취소해 줘,change_todo,todo_cancel_item
+VE032,과제 출력이 더 급해,change_todo,todo_raise
+VE033,선물 사는 거 우선순위 올려줘,change_todo,todo_prioritize
+VE034,다이소 들르는 건 다음에 할게,change_todo,todo_drop
+VE035,프린트는 학교 가서 할게,change_todo,todo_defer
+VE036,근처 약국 어디야?,place_info,place_loc_pharmacy
+VE037,여기서 제일 가까운 편의점 위치 알려줘,place_info,place_loc_cvs
+VE038,가장 가까운 은행 ATM 어디 있어?,place_info,place_loc_atm
+VE039,근처에 문 연 카페 어디 있어?,place_info,place_loc_cafe
+VE040,그 약국 몇 시에 닫아?,place_info,place_hours
+VE041,정류장 앞 다이소 영업시간 어떻게 돼?,place_info,place_hours_daiso
+VE042,환승 적은 걸로 경로 바꿔줘,change_route,route_transfer
+VE043,돈 덜 드는 경로로 가자,change_route,route_fare
+VE044,가장 빠른 길로 다시 찾아줘,change_route,route_fastest
+VE045,지하철 위주로 가는 경로로 안내해줘,change_route,route_subway
+VE046,환승 최소화로 재검색해줘,change_route,route_min_transfer
+VE047,걷는 거리 적은 경로로 갈래,change_route,route_min_walk
+VE048,늦을 것 같은데 약국은 들를 수 있어?,running_late|stopover_check,multi_late_stop
+VE049,5분 늦게 나가는데 다음 버스 언제야?,running_late|next_vehicle,multi_late_bus
+VE050,약 안 사도 되니까 편의점만 들를게,change_todo|stopover_check,multi_todo_stop
+VE051,10분 늦는데 환승 적은 경로 있어?,running_late|change_route,multi_late_route
+VE052,다이소 들렀다 가려면 몇 분까지 나가야 돼?,stopover_check|time_left,multi_stop_time
