@@ -337,3 +337,22 @@ def test_현재_위치는_저장하지_않음(client, tmp_path):
         for table in ("schedules", "todos", "settings", "route_choices", "messages"):
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
             assert not cols & {"lat", "lng", "location", "current_location", "current_lat", "current_lng"}
+
+
+def test_재시작해도_시연_id가_그대로(client, tmp_path):
+    """앱이 시연 할 일 id를 그대로 쓰므로 재시작해도 바뀌면 안 돼요 (PR #29)"""
+    demo = {"user_id": "demo"}
+    before = ([t["id"] for t in client.get("/api/todos", params=demo).json()],
+              [s["id"] for s in client.get("/api/schedules", params=demo).json()])
+    client.post("/api/todos", json={"user_id": "u1", "text": "약 사기"})  # 다른 사용자가 id를 하나 더 씀
+    seed_demo_data(str(tmp_path / "test.db"))
+    after = ([t["id"] for t in client.get("/api/todos", params=demo).json()],
+             [s["id"] for s in client.get("/api/schedules", params=demo).json()])
+    assert after == before
+
+
+def test_처음_켜진_서버의_시연_id는_1부터(client):
+    todos = client.get("/api/todos", params={"user_id": "demo"}).json()
+    assert sorted(t["id"] for t in todos) == [1, 2, 3]
+    assert client.get("/api/schedules", params={"user_id": "demo"}).json()[0]["id"] == 1
+
