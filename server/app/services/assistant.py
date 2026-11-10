@@ -38,6 +38,18 @@ def _with_fallback(ai_call, rule_call, text: str) -> tuple[dict, str]:
     return rule_call(text), "rule"
 
 
+def _broken(classified: dict) -> bool:
+    """AI 출력 형식이 깨져서 질문 종류가 하나도 안 남고 기본 되묻기 문장이 된 경우."""
+    return not classified["intents"] and classified["question"] == llm.DEFAULT_CONFIRM_QUESTION
+
+
+def _classify(text: str, history: list[dict]) -> dict:
+    out = llm.classify_question(text, history=history)
+    if _broken(out):
+        raise ValueError("AI 질문 분류 형식이 맞지 않아요")
+    return out
+
+
 def understand_todo(text: str) -> dict:
     out, engine = _with_fallback(llm.parse_todo, rules.parse_todo, text)
     return {**out, "engine": engine}
@@ -214,9 +226,7 @@ def ask(user_id: str, text: str, use_demo: bool) -> dict:
     # demo는 부스에서 여러 사람이 함께 써서, 앞사람 질문이 섞이지 않게 기록도 이전 대화도 쓰지 않아요
     keep_history = user_id != DEMO_USER_ID
     history = repo.recent_messages(user_id) if keep_history else []
-    classified, engine = _with_fallback(
-        lambda t: llm.classify_question(t, history=history), rules.classify_question, text
-    )
+    classified, engine = _with_fallback(lambda t: _classify(t, history), rules.classify_question, text)
     classified = rules.ask_delay_if_unknown(classified, text)
     intents = classified["intents"]
     if keep_history:

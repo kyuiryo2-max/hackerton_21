@@ -2,6 +2,8 @@
 
 실행:  cd server && uv run uvicorn app.main:app --reload
 """
+import logging
+import sqlite3
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app import config
 from app.db.database import init_db, seed_demo_data
@@ -24,7 +27,30 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="틈길 API", version="0.1.0", lifespan=lifespan)
+log = logging.getLogger("app")
 
+
+def error_response(status: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+
+
+async def catch_unexpected(request, call_next):
+    """처리하지 못한 오류도 {"error": ...} 형식으로 답해요. 자세한 내용은 서버 로그에만 남겨요.
+
+    CORS 미들웨어보다 안쪽에 두어서 오류 응답에도 CORS 헤더가 붙어요 (Flutter 웹이 본문을 읽을 수 있게).
+    """
+    try:
+        return await call_next(request)
+    except sqlite3.OperationalError:
+        log.exception("DB 오류: %s %s", request.method, request.url.path)
+        return error_response(503, "db_busy", "잠시 뒤 다시 시도해 주세요")
+    except Exception:  # noqa: BLE001 - 어떤 오류든 앱이 읽을 수 있는 형식으로 답해요
+        log.exception("처리하지 못한 오류: %s %s", request.method, request.url.path)
+        return error_response(500, "server_error", "서버에서 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요")
+
+
+# 나중에 추가한 미들웨어가 바깥쪽이에요: CORS → 오류 처리 → 라우터 순서
+app.add_middleware(BaseHTTPMiddleware, dispatch=catch_unexpected)
 # Flutter 웹에서 호출할 수 있게 허용 (배포 후 실제 주소로 좁히기)
 app.add_middleware(
     CORSMiddleware,

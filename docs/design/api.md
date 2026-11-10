@@ -18,8 +18,8 @@
 | 사용자 | `user_id` (로그인 없음, 기기마다 하나). id로 조회·수정·삭제할 때는 `?user_id=` 필수, 다른 사용자 항목은 404 |
 | 시연 | `user_id=demo`. demo 데이터는 API로 바꿀 수 없음(403). 서버가 켜질 때마다 처음 상태로 돌아감 |
 | 시연 모드 | `demo=true` 면 시각·위치·도착 정보를 `data/demo/scenario.json` 고정값으로 |
-| 오류 | `{"error": {"code", "message"}}` 한 형식 → [errors.json](api-examples/errors.json) |
-| 위치 | 목적지 좌표는 저장, 사용자 현재 위치는 받지도 저장하지도 않음 |
+| 오류 | `{"error": {"code", "message"}}` 한 형식 → [errors.json](api-examples/errors.json). 코드: `invalid_request` 422, `not_found` 404, `no_route` 404, `demo_readonly` 403, `method_not_allowed` 405, `upstream_error` 502 (외부 API 실패), `not_configured` 503 (키 없음), `db_busy` 503 (잠시 뒤 다시), `server_error` 500 (예상 못 한 오류, 내용은 서버 로그에만). 오류 응답에도 CORS 헤더가 붙는다 |
+| 위치 | 목적지 좌표는 저장, 사용자 현재 위치는 받되 저장하지 않음 (실시간 계획 계산에만 씀) |
 | 키 | API 키는 서버에만. 앱은 카카오·서울시·LLM을 직접 부르지 않음 |
 
 ## API 목록
@@ -96,7 +96,7 @@
   - `time_left`: `minutes`, `leave_by` (차 도착에서 여유 2분을 뺀 시각)
   - `place_info`: `place`, `change_route`: `route`, `change_todo`: `todo_id`, `action`, `unsupported`: 없음
   - `demo=false`면 교통 계산이 필요한 질문은 `{"intent", "available": false}` 와 준비 중 안내
-- `engine`: `ai` 또는 `rule`. AI 키가 없거나 AI 호출이 실패하면 키워드 규칙(`services/rules.py`)으로 답한다. 규칙 정확도는 팀 테스트 문장 기준 의도 14/25, 장소 10/15라 AI보다 낮다
+- `engine`: `ai` 또는 `rule`. AI 키가 없거나, AI 호출이 실패하거나, AI 출력 형식이 맞지 않으면 키워드 규칙(`services/rules.py`)으로 답한다. 규칙 정확도는 팀 테스트 문장 기준 의도 14/25, 장소 10/15라 AI보다 낮다
 - 질문과 할 일 문장은 200자까지
 - `demo` 사용자는 부스에서 여럿이 함께 써서 질문 기록을 저장하지 않고 AI에 이전 대화도 보내지 않는다
 - `demo` 사용자의 들르기 판단은 시연 계획에서 이미 포함된 할 일(이어폰)과 함께 계산한다. 같은 장소는 다시 더하지 않는다
