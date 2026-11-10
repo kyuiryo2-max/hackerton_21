@@ -33,7 +33,7 @@
 | 있음 | `GET·PUT /api/settings/{user_id}` | 경로 선호 가중치 | [settings.json](api-examples/settings.json) | routers/storage.py |
 | 있음 | `POST·GET /api/choices` | 고른 경로 기록 (⑧) | [choices.json](api-examples/choices.json) | routers/storage.py |
 | 있음 | `GET /api/arrivals` | 도착 정보. 버스 `stop_id`, 지하철 `station`(+`line`). `demo=true`면 시연 고정값, 아니면 서울시 실시간 | [arrivals.json](api-examples/arrivals.json) | routers/transit.py |
-| 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로 | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
+| 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로. 지도용 `route.path`(버스 경로 선, `[경도, 위도]`), `route.stop_points`(정류장), `places`(들를 곳 좌표) | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
 | 있음 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | routers/assistant.py |
 | 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외. `demo=true`면 시연, 아니면 `origin`(현재 위치)으로 실시간 | [plan.json](api-examples/plan.json) | routers/plan.py |
 | 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 (계산은 `demo=true`만) | [ask.json](api-examples/ask.json) | routers/assistant.py |
