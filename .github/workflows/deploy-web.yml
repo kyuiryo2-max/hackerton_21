@@ -1,0 +1,57 @@
+# Flutter 웹을 GitHub Pages에 배포해요 (할 일 5번).
+# main에 앱 코드가 바뀌면 자동으로, 또는 Actions 탭에서 "Run workflow"로 직접 실행해요.
+# 배포 주소: https://kyuiryo2-max.github.io/hackerton_21/
+# 서버 주소는 저장소 Settings → Secrets and variables → Actions → Variables 의 API_BASE_URL 에 넣어요 (키가 아니라 주소라 Variables).
+name: deploy-web
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/deploy-web.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/Sync_ro_app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.35.7
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # 저장소 이름이 주소 경로에 들어가서 base-href 가 필요해요
+      - run: >
+          flutter build web --release
+          --base-href /${{ github.event.repository.name }}/
+          --dart-define=API_BASE_URL=${{ vars.API_BASE_URL }}
+          --dart-define=SYNC_RO_API_URL=${{ vars.API_BASE_URL }}
+          --dart-define=SYNC_RO_OFFLINE_DEMO=false
+          --dart-define=SYNC_RO_DEMO_MODE=true
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: app/Sync_ro_app/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
