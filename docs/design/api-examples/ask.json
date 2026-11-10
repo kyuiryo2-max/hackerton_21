@@ -1,0 +1,147 @@
+{
+  "_설명": "실제 서버 응답 (#38). 질문 1개와 답변 1개를 messages에 저장해요. intents·needs_confirm·question은 json-format.md 2번. result는 질문 종류마다 모양이 달라요(api.md). engine: ai 또는 rule",
+  "examples": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/ask",
+        "body": {
+          "user_id": "demo",
+          "text": "다음 버스 언제야?",
+          "demo": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "intents": [
+            {
+              "intent": "next_vehicle",
+              "place_types": [],
+              "delay_minutes": null
+            }
+          ],
+          "needs_confirm": false,
+          "question": null,
+          "result": {
+            "intent": "next_vehicle",
+            "route": "2115",
+            "minutes": 12,
+            "next_minutes": 20
+          },
+          "answer": "2115번이 12분 뒤에 와요. 그다음 차는 20분 뒤예요.",
+          "todo": null,
+          "engine": "ai"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/ask",
+        "body": {
+          "user_id": "demo",
+          "text": "아 이어폰 사야 돼",
+          "demo": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "intents": [
+            {
+              "intent": "stopover_check",
+              "place_types": [
+                "편의점"
+              ],
+              "delay_minutes": null
+            }
+          ],
+          "needs_confirm": false,
+          "question": null,
+          "result": {
+            "intent": "stopover_check",
+            "feasible": true,
+            "place": {
+              "name": "CU 안암센트럴점",
+              "address": "서울 성북구 고려대로28길 16"
+            },
+            "max_stay_min": 6,
+            "board_at": "2026-11-21T08:44:00+09:00"
+          },
+          "answer": "CU 안암센트럴점에 들를 수 있어요. 최대 6분 있을 수 있어요.",
+          "todo": {
+            "text": "이어폰 사기",
+            "place_types": [
+              "편의점"
+            ],
+            "importance": "필수",
+            "status": "포함",
+            "source": "질문"
+          },
+          "engine": "ai"
+        }
+      },
+      "note": "들르기 질문은 할 일로 저장 (source 질문 → importance 필수). 들를 수 있으면 status 포함"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/ask",
+        "body": {
+          "user_id": "u1",
+          "text": "거기 들러도 돼?"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "intents": [
+            {
+              "intent": "stopover_check",
+              "place_types": [],
+              "delay_minutes": null
+            }
+          ],
+          "needs_confirm": true,
+          "question": "어디를 들르고 싶은지 알려 줄래요?",
+          "result": null,
+          "answer": "어디를 들르고 싶은지 알려 줄래요?",
+          "todo": null,
+          "engine": "ai"
+        }
+      },
+      "note": "최근 대화(recent_messages)에도 장소가 없어서 되묻기 (#12 회의 5번). 앱은 question을 대화창에 보여 줌"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/ask",
+        "body": {
+          "user_id": "u1",
+          "text": "점심 뭐 먹지?"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "intents": [
+            {
+              "intent": "unsupported",
+              "place_types": [],
+              "delay_minutes": null
+            }
+          ],
+          "needs_confirm": false,
+          "question": null,
+          "result": {
+            "intent": "unsupported"
+          },
+          "answer": "이동과 할 일에 관한 질문만 도와드릴 수 있어요.",
+          "todo": null,
+          "engine": "ai"
+        }
+      }
+    }
+  ]
+}

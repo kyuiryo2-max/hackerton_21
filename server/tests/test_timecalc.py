@@ -1,8 +1,17 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
-from app.services.timecalc import max_stay_minutes, plan_departure
+from app.services.timecalc import (
+    estimate_vehicle_times,
+    max_stay_minutes,
+    pick_vehicle,
+    plan_by_vehicle,
+    plan_departure,
+    route_total_seconds,
+    travel_minutes_from_seconds,
+    wait_minutes_from_seconds,
+)
 
 
 def test_출발_준비_시각():
@@ -39,3 +48,149 @@ def test_최대로_쓸_수_있는_시간():
 
 def test_시간이_부족하면_0():
     assert max_stay_minutes(5, 3, 3, buffer_minutes=2) == 0
+
+
+def at(hour, minute):
+    return datetime(2026, 11, 21, hour, minute)
+
+
+def test_이동_시간은_올림():
+    assert travel_minutes_from_seconds(61) == 2
+    assert travel_minutes_from_seconds(120) == 2
+
+
+def test_남은_시간은_내림():
+    assert wait_minutes_from_seconds(119) == 1
+    assert wait_minutes_from_seconds(120) == 2
+
+
+def test_초가_음수면_오류():
+    with pytest.raises(ValueError):
+        travel_minutes_from_seconds(-1)
+    with pytest.raises(ValueError):
+        wait_minutes_from_seconds(-1)
+
+
+def test_배차_간격으로_교통편_추정():
+    assert estimate_vehicle_times(at(6, 0), at(7, 0), 30) == [at(6, 0), at(6, 30), at(7, 0)]
+
+
+def test_배차_간격이_0이면_오류():
+    with pytest.raises(ValueError):
+        estimate_vehicle_times(at(6, 0), at(7, 0), 0)
+
+
+def test_늦지_않는_가장_늦은_교통편():
+    times = [at(8, 30), at(7, 50), at(8, 10)]
+    assert pick_vehicle(times, ride_minutes=40, arrive_by=at(9, 0)) == at(8, 10)
+
+
+def test_딱_맞게_도착하는_교통편도_선택():
+    assert pick_vehicle([at(8, 20)], ride_minutes=40, arrive_by=at(9, 0)) == at(8, 20)
+
+
+def test_탈_수_있는_교통편이_없으면_None():
+    assert pick_vehicle([at(8, 30)], ride_minutes=40, arrive_by=at(9, 0)) is None
+    assert plan_by_vehicle(at(9, 0), [at(8, 30)], 40, 5, 30) is None
+
+
+def test_교통편에서_거꾸로_출발_시각_계산():
+    # 8:30 버스는 늦으므로 8:10 버스 → 여유 5분, 도보 10분 → 7:55 출발
+    plan = plan_by_vehicle(
+        arrive_by=at(9, 0),
+        vehicle_times=[at(7, 50), at(8, 10), at(8, 30)],
+        ride_minutes=40,
+        walk_to_stop_minutes=10,
+        prep_minutes=30,
+    )
+    assert plan.board_at == at(8, 10)
+    assert plan.depart_at == at(7, 55)
+    assert plan.prep_start_at == at(7, 25)
+
+
+def test_경유_체류_시간은_한_번만_빠짐():
+    plan = plan_by_vehicle(
+        arrive_by=at(9, 0),
+        vehicle_times=[at(8, 10)],
+        ride_minutes=40,
+        walk_to_stop_minutes=12,
+        prep_minutes=30,
+        stop_minutes=5,
+    )
+    assert plan.depart_at == at(7, 48)
+
+
+def test_이동_시간만_빼면_버스가_없는_시각이_나오는_경우():
+    # 배차 30분 노선: 단순 계산은 8:05 출발이지만 실제로는 8:00 버스를 타야 함
+    simple = plan_departure(at(9, 0), travel_minutes=50, prep_minutes=30)
+    plan = plan_by_vehicle(at(9, 0), [at(7, 30), at(8, 0), at(8, 30)], 40, 10, 30)
+    assert simple.depart_at == at(8, 5)
+    assert plan.depart_at == at(7, 45)
+
+
+def test_음수_도보_시간은_오류():
+    with pytest.raises(ValueError):
+        plan_by_vehicle(at(9, 0), [at(8, 10)], 40, -1, 30)
+
+
+def test_경로_총_시간():
+    assert route_total_seconds(797, 118, 119, 300) == 1334
+
+
+def test_경로_시간이_음수면_오류():
+    with pytest.raises(ValueError):
+        route_total_seconds(797, -1, 119, 300)
+
+
+# ---------- 초 단위 (#12 회의 6번: 서버 안은 초) ----------
+from app.services.timecalc import (  # noqa: E402
+    DEPART_BUFFER_SECONDS,
+    STOP_BUFFER_SECONDS,
+    plan_by_vehicle_seconds,
+    plan_departure_seconds,
+)
+
+
+def test_초_단위로_거꾸로_계산():
+    # 분 단위 예시(8:10 버스, 도보 10분, 준비 30분 → 7:55 출발)와 같은 결과
+    plan = plan_by_vehicle_seconds(
+        arrive_by=at(9, 0),
+        vehicle_times=[at(7, 50), at(8, 10), at(8, 30)],
+        ride_seconds=40 * 60,
+        walk_to_stop_seconds=600,
+        prep_seconds=30 * 60,
+    )
+    assert (plan.board_at, plan.depart_at, plan.prep_start_at) == (at(8, 10), at(7, 55), at(7, 25))
+
+
+def test_초_단위는_중간에_올리지_않음():
+    """도보 61초 + 경유 체류 61초를 분으로 먼저 올리면 4분, 초로 더하면 122초(2분 2초)"""
+    by_minutes = plan_by_vehicle(at(9, 0), [at(8, 10)], 40, travel_minutes_from_seconds(61), 30,
+                                 stop_minutes=travel_minutes_from_seconds(61))
+    by_seconds = plan_by_vehicle_seconds(at(9, 0), [at(8, 10)], 40 * 60, 61, 30 * 60, stop_seconds=61)
+    assert at(8, 10) - by_minutes.depart_at == timedelta(minutes=5 + 4)
+    assert at(8, 10) - by_seconds.depart_at == timedelta(seconds=300 + 122)
+
+
+def test_탑승_후_이동이_초_단위로_넘치면_앞차():
+    # 40분 1초 걸리면 8:20 버스는 9:00:01 도착 → 8:10 버스
+    assert plan_by_vehicle_seconds(at(9, 0), [at(8, 10), at(8, 20)], 40 * 60 + 1, 0, 0).board_at == at(8, 10)
+
+
+def test_초_단위_탈_차가_없거나_음수면():
+    assert plan_by_vehicle_seconds(at(9, 0), [at(8, 30)], 40 * 60, 0, 0) is None
+    with pytest.raises(ValueError):
+        plan_by_vehicle_seconds(at(9, 0), [at(8, 10)], 40 * 60, -1, 0)
+
+
+def test_초_단위_간단_계산():
+    plan = plan_departure_seconds(at(9, 0), travel_seconds=40 * 60 + 30, prep_seconds=30 * 60)
+    assert plan.depart_at == datetime(2026, 11, 21, 8, 14, 30)
+
+
+def test_여유_시간은_한_곳에서():
+    from app.services import stopover
+
+    assert (DEPART_BUFFER_SECONDS, STOP_BUFFER_SECONDS) == (300, 120)
+    assert stopover.DEFAULT_BUFFER_SECONDS == STOP_BUFFER_SECONDS
+    assert max_stay_minutes(12, 3, 3) == 4  # 기본 여유 2분 = STOP_BUFFER_SECONDS

@@ -1,0 +1,38 @@
+{
+  "_설명": "경로 선호 가중치. 저장된 값이 없으면 기본값",
+  "examples": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/settings/u1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "user_id": "u1",
+          "w_time": 0.6,
+          "w_transfer": 0.3,
+          "w_fare": 0.1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "PUT",
+        "path": "/api/settings/u1",
+        "body": {
+          "w_transfer": 0.5
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "user_id": "u1",
+          "w_time": 0.6,
+          "w_transfer": 0.5,
+          "w_fare": 0.1
+        }
+      }
+    }
+  ]
+}

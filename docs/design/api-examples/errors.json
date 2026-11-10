@@ -1,0 +1,156 @@
+{
+  "_설명": "오류는 모두 {\"error\": {\"code\", \"message\"}} 한 형식. 코드 목록은 api.md 공통 규칙",
+  "examples": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/schedules/9999",
+        "query": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": {
+            "code": "not_found",
+            "message": "일정 9999 없음"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/todos",
+        "body": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": {
+            "code": "invalid_request",
+            "message": "text: Field required"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/todos",
+        "body": {
+          "user_id": "u1",
+          "text": "x",
+          "status": "보류"
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": {
+            "code": "invalid_request",
+            "message": "status: Input should be '대기', '포함', '제외' or '완료'"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "path": "/api/todos/1",
+        "query": {
+          "user_id": "demo"
+        }
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": "demo_readonly",
+            "message": "시연용 demo 데이터는 바꿀 수 없어요"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "stop_id": "08301"
+        }
+      },
+      "response": {
+        "status": 502,
+        "body": {
+          "error": {
+            "code": "upstream_error",
+            "message": "서울시 버스 API 연결 실패: ConnectTimeout"
+          }
+        }
+      },
+      "note": "서울시·카카오 API가 실패하거나 응답이 이상할 때"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "stop_id": "08301"
+        }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "error": {
+            "code": "not_configured",
+            "message": "서버에 교통 API 키가 설정되지 않았어요"
+          }
+        }
+      },
+      "note": "서버에 키가 없을 때"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/todos",
+        "query": {
+          "user_id": "u1"
+        }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "error": {
+            "code": "db_busy",
+            "message": "잠시 뒤 다시 시도해 주세요"
+          }
+        }
+      },
+      "note": "DB가 잠깐 잠겼을 때. 앱은 잠시 뒤 다시 요청"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/arrivals",
+        "query": {
+          "stop_id": "08301",
+          "demo": "true"
+        }
+      },
+      "response": {
+        "status": 500,
+        "body": {
+          "error": {
+            "code": "server_error",
+            "message": "서버에서 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요"
+          }
+        }
+      },
+      "note": "예상 못 한 서버 오류. 자세한 내용은 서버 로그에만 남음"
+    }
+  ]
+}

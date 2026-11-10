@@ -1,14 +1,14 @@
-# push·PR마다 서버 테스트를 자동으로 돌려요.
-# LLM을 부르는 테스트는 넣지 않아요 (비용·키 노출 방지). AI 정답률은 ai/eval 에서 로컬로 측정.
-name: ci
+name: server-tests
 
 on:
   push:
     branches: [main]
+    paths: ["server/**", ".github/workflows/server-tests.yml"]
   pull_request:
+    paths: ["server/**", ".github/workflows/server-tests.yml"]
 
 jobs:
-  server-test:
+  unit:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv python install 3.12.16
+      - run: uv python install
       - run: uv sync --locked
       - run: uv run pytest -q
+

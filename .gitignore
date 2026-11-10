@@ -1,6 +1,6 @@
-# 비밀 키 — 절대 커밋하지 않기
+# 비밀 값
 .env
-.env.*
+*.env
 !.env.example
 
 # Python
@@ -9,31 +9,25 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
-*.egg-info/
 
-# SQLite DB 파일 (시연 데이터는 서버 시작 시 자동으로 다시 넣음)
-*.db
-*.sqlite
+# SQLite
 *.sqlite3
+*.db
 
-# Flutter / Dart
+# Flutter
 app/.dart_tool/
 app/build/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
 app/.packages
-app/**/Generated*
-app/android/.gradle/
-app/android/local.properties
-app/ios/Pods/
-app/ios/Flutter/Generated.xcconfig
+app/pubspec.lock.bak
 
-# 에디터·OS
-.vscode/*
-!.vscode/extensions.json
-.idea/
+# 설문 원본 (요약본만 docs/research/에)
+docs/research/raw/
+
+# OS / 에디터
 .DS_Store
 Thumbs.db
-
-# 개인정보가 담긴 원본 자료
-docs/research/raw/
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,51 @@
+{
+  "_설명": "실제 서버 응답 (#33). 저장은 안 해요. 앱이 사용자 확인 뒤 POST /api/todos 로 저장 (json-format.md 1번). engine: ai 또는 rule(AI 키가 없거나 실패해 키워드 규칙으로 처리)",
+  "examples": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/tasks/parse",
+        "body": {
+          "user_id": "u1",
+          "text": "엄마 생신 선물 사야 해"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "type": "todo",
+          "text": "엄마 생신 선물",
+          "place_types": [
+            "꽃집",
+            "케이크집"
+          ],
+          "importance": null,
+          "needs_confirm": false,
+          "engine": "ai"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/tasks/parse",
+        "body": {
+          "user_id": "u1",
+          "text": "그거 사야 됨"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "type": "todo",
+          "text": "그거 사야 됨",
+          "place_types": [],
+          "importance": null,
+          "needs_confirm": true,
+          "engine": "ai"
+        }
+      },
+      "note": "장소를 알 수 없음 → 화면에서 사용자가 장소 종류를 고름"
+    }
+  ]
+}
