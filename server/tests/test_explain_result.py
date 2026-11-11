@@ -154,8 +154,15 @@ def test_AI_문장은_안전한_질문_하나일_때만(intents, result, ok):
     assert assistant._ai_sentence_ok(intents, result) is ok
 
 
-def test_할_일_변경은_AI를_켜도_정해진_문장(monkeypatch):
+def test_할_일_변경은_AI를_켜도_정해진_문장(tmp_path, monkeypatch):
     """AI가 "삭제했습니다"처럼 하지 않은 일을 말하지 않게, 할 일 변경은 AI 문장을 쓰지 않아요."""
+    from app import config
+    from app.db import database
+
+    # 테스트마다 빈 임시 DB를 만들고 시연 데이터를 넣어요 (GitHub Actions처럼 깨끗한 환경에서도 돌게)
+    monkeypatch.setattr(config, "DATABASE_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    database.seed_demo_data()
     called = []
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
     monkeypatch.setattr(llm, "explain_result", lambda *a, **k: called.append(1) or "네, 삭제했습니다.")
