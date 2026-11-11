@@ -156,8 +156,36 @@ def normalize_question(out: dict) -> dict:
 _NUM = re.compile(r"\d+")
 
 
+# 서버 시각 문자열. 예: 2026-11-21T08:59:17+09:00
+_ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:[+-]\d{2}:\d{2}|Z)?")
+
+
+def _hour_minute_numbers(hh: int, mm: int) -> set[int]:
+    """시각에서 답변에 나올 수 있는 숫자: 시(24시간·12시간), 분. 연·월·일·초는 넣지 않아요."""
+    nums = {hh, mm}
+    if hh > 12:
+        nums.add(hh - 12)
+    if hh == 0:
+        nums.add(12)
+    return nums
+
+
+def short_times(val):
+    """계산 결과 속 시각 문자열을 "08:59"처럼 시·분만 남겨요. AI가 날짜·초를 문장에 쓰지 않게 해요."""
+    if isinstance(val, str):
+        return _ISO_TIME.sub(lambda m: f"{m.group(1)}:{m.group(2)}", val)
+    if isinstance(val, dict):
+        return {k: short_times(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [short_times(v) for v in val]
+    return val
+
+
 def extract_allowed_numbers(result: dict | None, base_answer: str = "") -> set[int]:
-    """계산 결과(result)와 기본 답변(base_answer)에서 허용된 모든 정수 집합을 추출합니다."""
+    """계산 결과(result)와 기본 답변(base_answer)에서 답변에 써도 되는 정수를 모아요.
+
+    시각 문자열은 시·분만 허용해요. 2026-11-21T08:59:17 → {8, 59} (2026, 11, 21, 17은 안 됨)
+    """
     allowed: set[int] = set()
     if base_answer:
         for n in _NUM.findall(base_answer):
@@ -167,9 +195,10 @@ def extract_allowed_numbers(result: dict | None, base_answer: str = "") -> set[i
         if isinstance(val, int) and not isinstance(val, bool):
             allowed.add(val)
         elif isinstance(val, str):
-            # 문자열 내 숫자 추출 (예: "2115", "2026-11-21T08:44:00+09:00" -> 8, 44 등)
-            for n in _NUM.findall(val):
-                # 연도나 일자 등 너무 큰 숫자는 제외하고 시각/분/노선 중심 추출
+            for m in _ISO_TIME.finditer(val):
+                allowed.update(_hour_minute_numbers(int(m.group(1)), int(m.group(2))))
+            # 시각을 뺀 나머지 글자 속 숫자 (노선 번호 "2115", 주소 등)
+            for n in _NUM.findall(_ISO_TIME.sub(" ", val)):
                 v = int(n)
                 if v < 10000:
                     allowed.add(v)
@@ -210,7 +239,7 @@ def explain_result(
         return base_answer
 
     allowed = extract_allowed_numbers(result, base_answer)
-    user_payload = json.dumps({"question": question, "result": result}, ensure_ascii=False)
+    user_payload = json.dumps({"question": question, "result": short_times(result)}, ensure_ascii=False)
 
     try:
         system_prompt = load_prompt("explain_result", version=version)

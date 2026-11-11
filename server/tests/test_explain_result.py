@@ -92,3 +92,43 @@ def test_live_explain_result_with_llm():
     allowed = llm.extract_allowed_numbers(result, base)
     # 실제 LLM이 생성한 문장 속 숫자가 모두 allowed 에 있어야 함
     assert llm.numbers_match(ai_answer, allowed) is True
+
+
+def test_시각은_시와_분만_허용():
+    """시각 문자열의 연·월·일·초는 답변에 쓰면 안 돼요 (11분, 17분 같은 지어낸 숫자를 막기 위해)."""
+    result = {
+        "intent": "running_late",
+        "delay_minutes": None,
+        "missed": True,
+        "board_at": "2026-11-21T08:52:00+09:00",
+        "arrive_at": "2026-11-21T09:07:17+09:00",
+    }
+    base = "지금 차를 놓쳤다면 8시 52분 차를 타고 9시 7분에 도착해요."
+    allowed = llm.extract_allowed_numbers(result, base)
+
+    assert {8, 52, 9, 7} <= allowed
+    assert not {2026, 11, 21, 17} & allowed
+    assert llm.numbers_match("8시 52분 버스를 타면 9시 7분에 도착해요.", allowed) is True
+    assert llm.numbers_match("다음 버스는 17분 뒤에 와요.", allowed) is False
+    assert llm.numbers_match("11분 늦게 도착해요.", allowed) is False
+
+
+def test_오후_시각은_12시간제도_허용():
+    allowed = llm.extract_allowed_numbers({"arrive_at": "2026-11-21T13:05:00+09:00"})
+    assert {13, 1, 5} <= allowed
+
+
+def test_AI에게는_시와_분만_보냄(monkeypatch):
+    """AI가 날짜나 초를 문장에 쓰지 않도록, 보내는 계산 결과에서 시각을 08:52 모양으로 줄여요."""
+    sent = {}
+
+    def fake_chat(system, user):
+        sent["user"] = user
+        return {"answer": "8시 52분 차를 타면 9시 7분에 도착해요."}
+
+    monkeypatch.setattr(llm, "_chat_json", fake_chat)
+    result = {"intent": "running_late", "board_at": "2026-11-21T08:52:00+09:00", "arrive_at": "2026-11-21T09:07:17+09:00"}
+    answer = llm.explain_result("버스 하나 놓쳤어", result, "지금 차를 놓쳤다면 8시 52분 차를 타고 9시 7분에 도착해요.")
+
+    assert answer == "8시 52분 차를 타면 9시 7분에 도착해요."
+    assert "2026" not in sent["user"] and "08:52" in sent["user"] and "09:07" in sent["user"]
