@@ -15,9 +15,17 @@ PLANNED: set[str] = set()
 
 def _routes() -> set[tuple[str, str]]:
     out = set()
-    for r in app.routes:
+
+    def _collect(r):
+        if hasattr(r, "original_router"):
+            for sub in r.original_router.routes:
+                _collect(sub)
+            return
         for m in getattr(r, "methods", set()) or set():
-            out.add((m, re.sub(r"\{[^}]+\}", "{}", r.path)))
+            out.add((m, re.sub(r"\{[^}]+\}", "{}", getattr(r, "path", ""))))
+
+    for r in app.routes:
+        _collect(r)
     return out
 
 

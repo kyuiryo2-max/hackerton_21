@@ -221,7 +221,7 @@ HANDLERS = {
 }
 
 
-def ask(user_id: str, text: str, use_demo: bool) -> dict:
+def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = None) -> dict:
     """질문을 분류하고 순서대로 계산해 답해요. 질문과 답변은 messages에 저장해요 (demo 제외)."""
     # demo는 부스에서 여러 사람이 함께 써서, 앞사람 질문이 섞이지 않게 기록도 이전 대화도 쓰지 않아요
     keep_history = user_id != DEMO_USER_ID
@@ -252,6 +252,12 @@ def ask(user_id: str, text: str, use_demo: bool) -> dict:
         saved = repo.add_todo(user_id, todo["text"], todo["place_types"], status=todo["status"], source="질문")
         todo = {**todo, "id": saved["id"]}
     answer = " ".join(dict.fromkeys(answers))
+
+    # #37: AI 답변 문장 생성 및 숫자 대조 검증 (기존 코드 안전망 유지)
+    should_explain = explain_with_ai if explain_with_ai is not None else config.EXPLAIN_WITH_AI
+    if should_explain and _ai_ready() and result and not classified["needs_confirm"]:
+        answer = llm.explain_result(text, result, answer)
+
     if keep_history:
         repo.add_message(user_id, "assistant", answer)
     return {

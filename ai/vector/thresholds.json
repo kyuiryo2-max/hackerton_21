@@ -1,0 +1,24 @@
+{
+  "model": "jhgan/ko-sroberta-multitask",
+  "model_revision": "main",
+  "preprocess_version": "v1",
+  "top_m": 2,
+  "tau_accept": {
+    "next_vehicle": 0.55,
+    "stopover_check": 0.50,
+    "running_late": 0.52,
+    "time_left": 0.50,
+    "change_todo": 0.55,
+    "place_info": 0.52,
+    "change_route": 0.55
+  },
+  "tau_multi": {
+    "next_vehicle": 0.65,
+    "stopover_check": 0.60,
+    "running_late": 0.62,
+    "time_left": 0.60,
+    "change_todo": 0.65,
+    "place_info": 0.62,
+    "change_route": 0.65
+  }
+}
