@@ -92,3 +92,91 @@ def test_live_explain_result_with_llm():
     allowed = llm.extract_allowed_numbers(result, base)
     # 실제 LLM이 생성한 문장 속 숫자가 모두 allowed 에 있어야 함
     assert llm.numbers_match(ai_answer, allowed) is True
+
+
+def test_시각은_시와_분만_허용():
+    """시각 문자열의 연·월·일·초는 답변에 쓰면 안 돼요 (11분, 17분 같은 지어낸 숫자를 막기 위해)."""
+    result = {
+        "intent": "running_late",
+        "delay_minutes": None,
+        "missed": True,
+        "board_at": "2026-11-21T08:52:00+09:00",
+        "arrive_at": "2026-11-21T09:07:17+09:00",
+    }
+    base = "지금 차를 놓쳤다면 8시 52분 차를 타고 9시 7분에 도착해요."
+    allowed = llm.extract_allowed_numbers(result, base)
+
+    assert {8, 52, 9, 7} <= allowed
+    assert not {2026, 11, 21, 17} & allowed
+    assert llm.numbers_match("8시 52분 버스를 타면 9시 7분에 도착해요.", allowed) is True
+    assert llm.numbers_match("다음 버스는 17분 뒤에 와요.", allowed) is False
+    assert llm.numbers_match("11분 늦게 도착해요.", allowed) is False
+
+
+def test_오후_시각은_12시간제도_허용():
+    allowed = llm.extract_allowed_numbers({"arrive_at": "2026-11-21T13:05:00+09:00"})
+    assert {13, 1, 5} <= allowed
+
+
+def test_AI에게는_시와_분만_보냄(monkeypatch):
+    """AI가 날짜나 초를 문장에 쓰지 않도록, 보내는 계산 결과에서 시각을 08:52 모양으로 줄여요."""
+    sent = {}
+
+    def fake_chat(system, user):
+        sent["user"] = user
+        return {"answer": "8시 52분 차를 타면 9시 7분에 도착해요."}
+
+    monkeypatch.setattr(llm, "_chat_json", fake_chat)
+    result = {"intent": "running_late", "board_at": "2026-11-21T08:52:00+09:00", "arrive_at": "2026-11-21T09:07:17+09:00"}
+    answer = llm.explain_result("버스 하나 놓쳤어", result, "지금 차를 놓쳤다면 8시 52분 차를 타고 9시 7분에 도착해요.")
+
+    assert answer == "8시 52분 차를 타면 9시 7분에 도착해요."
+    assert "2026" not in sent["user"] and "8시 52분" in sent["user"] and "9시 7분" in sent["user"]
+
+
+@pytest.mark.parametrize(
+    "intents, result, ok",
+    [
+        ([{"intent": "next_vehicle"}], {"intent": "next_vehicle"}, True),
+        ([{"intent": "stopover_check"}], {"intent": "stopover_check"}, True),
+        ([{"intent": "time_left"}], {"intent": "time_left"}, True),
+        # 하지 않은 일을 말할 수 있는 질문은 정해진 문장
+        ([{"intent": "change_todo"}], {"intent": "change_todo"}, False),
+        ([{"intent": "change_route"}], {"intent": "change_route"}, False),
+        ([{"intent": "place_info"}], {"intent": "place_info"}, False),
+        # "늦어요" 경고를 빼먹을 수 있어서 정해진 문장
+        ([{"intent": "running_late"}], {"intent": "running_late"}, False),
+        # 질문이 두 개면 앞 질문 답을 빠뜨려서 정해진 문장
+        ([{"intent": "running_late"}, {"intent": "next_vehicle"}], {"intent": "next_vehicle"}, False),
+    ],
+)
+def test_AI_문장은_안전한_질문_하나일_때만(intents, result, ok):
+    assert assistant._ai_sentence_ok(intents, result) is ok
+
+
+def test_할_일_변경은_AI를_켜도_정해진_문장(tmp_path, monkeypatch):
+    """AI가 "삭제했습니다"처럼 하지 않은 일을 말하지 않게, 할 일 변경은 AI 문장을 쓰지 않아요."""
+    from app import config
+    from app.db import database
+
+    # 테스트마다 빈 임시 DB를 만들고 시연 데이터를 넣어요 (GitHub Actions처럼 깨끗한 환경에서도 돌게)
+    monkeypatch.setattr(config, "DATABASE_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    database.seed_demo_data()
+    called = []
+    monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
+    monkeypatch.setattr(llm, "explain_result", lambda *a, **k: called.append(1) or "네, 삭제했습니다.")
+    monkeypatch.setattr(
+        assistant,
+        "_classify",
+        lambda text, history: {
+            "type": "question",
+            "intents": [{"intent": "change_todo", "todo_text": "커피", "action": "delete", "place_types": [], "delay_minutes": None}],
+            "needs_confirm": False,
+            "question": None,
+            "engine": "ai",
+        },
+    )
+    r = assistant.ask("demo", "커피는 안 사도 돼", use_demo=True, explain_with_ai=True)
+    assert not called
+    assert "삭제했습니다" not in r["answer"]
