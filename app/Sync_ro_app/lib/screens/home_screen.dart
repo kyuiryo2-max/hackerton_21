@@ -18,6 +18,7 @@ import '../services/departure_alert_service.dart';
 import '../services/server_plan_service.dart';
 import '../widgets/home/home_trip_map.dart';
 import '../widgets/home/stay_planner_card.dart';
+import '../widgets/open_on_phone.dart';
 import 'detail_screen.dart';
 import 'schedule_form_screen.dart';
 
@@ -683,6 +684,7 @@ class _TopBar extends StatelessWidget {
                 Text(sub, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
               ]),
             ),
+            const OpenOnPhoneButton(),
             Material(
               color: isDemo ? AppTheme.warnSoft : AppTheme.primarySoft,
               borderRadius: BorderRadius.circular(999),
