@@ -170,10 +170,14 @@ def _hour_minute_numbers(hh: int, mm: int) -> set[int]:
     return nums
 
 
+def _korean_time(hh: int, mm: int) -> str:
+    return f"{hh}시" if mm == 0 else f"{hh}시 {mm}분"
+
+
 def short_times(val):
-    """계산 결과 속 시각 문자열을 "08:59"처럼 시·분만 남겨요. AI가 날짜·초를 문장에 쓰지 않게 해요."""
+    """계산 결과 속 시각 문자열을 "8시 59분"처럼 시·분만 남겨요. AI가 날짜·초를 문장에 쓰지 않게 해요."""
     if isinstance(val, str):
-        return _ISO_TIME.sub(lambda m: f"{m.group(1)}:{m.group(2)}", val)
+        return _ISO_TIME.sub(lambda m: _korean_time(int(m.group(1)), int(m.group(2))), val)
     if isinstance(val, dict):
         return {k: short_times(v) for k, v in val.items()}
     if isinstance(val, (list, tuple)):

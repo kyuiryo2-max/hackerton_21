@@ -54,6 +54,7 @@ QUESTIONS = [
 def one(text: str) -> dict:
     """서버 계산(정해진 문장)을 먼저 받고, 같은 결과로 AI 문장을 받아 숫자를 대조해요."""
     base = assistant.ask("demo", text, use_demo=True, explain_with_ai=False)
+    intents = base.get("intents", [])
     row = {
         "question": text,
         "intents": "|".join(i["intent"] for i in base.get("intents", [])),
@@ -67,6 +68,9 @@ def one(text: str) -> dict:
     result = base.get("result")
     if base.get("needs_confirm") or not result:
         row["outcome"] = "건너뜀(되묻기·결과 없음)"
+        return row
+    if not assistant._ai_sentence_ok(intents, result):
+        row["outcome"] = "건너뜀(정해진 문장 쓰는 질문)"
         return row
 
     allowed = llm.extract_allowed_numbers(result, base["answer"])
@@ -98,6 +102,7 @@ def main() -> None:
     if not assistant._ai_ready():
         sys.exit(".env에 AI 키(OPENAI_API_KEY)가 없어요. 키가 있어야 AI 문장을 받을 수 있어요.")
     database.init_db()
+    database.seed_demo_data()  # 시연 데이터를 처음 상태로 (서버 켤 때와 같게)
 
     rows = []
     for run in range(1, args.runs + 1):

@@ -210,6 +210,19 @@ def _change_todo(item: dict, state: dict) -> tuple[dict, str]:
     return {"intent": "change_todo", "todo_id": todo["id"], "action": action}, f"{_josa(todo['text'], '은는')} {words.get(action, '바꿀게요')}."
 
 
+# AI 답변 문장(#37)은 계산 결과를 그대로 말로 풀면 되는 질문에만 써요.
+# 할 일 변경·경로 변경·장소 정보는 "삭제했어요", "바꿨어요"처럼 하지 않은 일을 말할 수 있어서 정해진 문장을 써요.
+AI_SENTENCE_INTENTS = {"next_vehicle", "stopover_check", "time_left"}
+
+
+def _ai_sentence_ok(intents: list[dict], result: dict) -> bool:
+    """질문 종류가 하나이고 AI_SENTENCE_INTENTS 안에 있을 때만 AI 문장을 써요.
+    질문이 두 개면 AI가 앞 질문의 답을 빠뜨려서 정해진 문장을 써요."""
+    if len(intents) != 1 or intents[0].get("intent") not in AI_SENTENCE_INTENTS:
+        return False
+    return result.get("intent") in AI_SENTENCE_INTENTS
+
+
 HANDLERS = {
     "next_vehicle": _next_vehicle,
     "stopover_check": _stopover_check,
@@ -255,7 +268,7 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
 
     # #37: AI 답변 문장 생성 및 숫자 대조 검증 (기존 코드 안전망 유지)
     should_explain = explain_with_ai if explain_with_ai is not None else config.EXPLAIN_WITH_AI
-    if should_explain and _ai_ready() and result and not classified["needs_confirm"]:
+    if should_explain and _ai_ready() and result and not classified["needs_confirm"] and _ai_sentence_ok(intents, result):
         answer = llm.explain_result(text, result, answer)
 
     if keep_history:

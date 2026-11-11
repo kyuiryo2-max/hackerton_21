@@ -131,4 +131,45 @@ def test_AI에게는_시와_분만_보냄(monkeypatch):
     answer = llm.explain_result("버스 하나 놓쳤어", result, "지금 차를 놓쳤다면 8시 52분 차를 타고 9시 7분에 도착해요.")
 
     assert answer == "8시 52분 차를 타면 9시 7분에 도착해요."
-    assert "2026" not in sent["user"] and "08:52" in sent["user"] and "09:07" in sent["user"]
+    assert "2026" not in sent["user"] and "8시 52분" in sent["user"] and "9시 7분" in sent["user"]
+
+
+@pytest.mark.parametrize(
+    "intents, result, ok",
+    [
+        ([{"intent": "next_vehicle"}], {"intent": "next_vehicle"}, True),
+        ([{"intent": "stopover_check"}], {"intent": "stopover_check"}, True),
+        ([{"intent": "time_left"}], {"intent": "time_left"}, True),
+        # 하지 않은 일을 말할 수 있는 질문은 정해진 문장
+        ([{"intent": "change_todo"}], {"intent": "change_todo"}, False),
+        ([{"intent": "change_route"}], {"intent": "change_route"}, False),
+        ([{"intent": "place_info"}], {"intent": "place_info"}, False),
+        # "늦어요" 경고를 빼먹을 수 있어서 정해진 문장
+        ([{"intent": "running_late"}], {"intent": "running_late"}, False),
+        # 질문이 두 개면 앞 질문 답을 빠뜨려서 정해진 문장
+        ([{"intent": "running_late"}, {"intent": "next_vehicle"}], {"intent": "next_vehicle"}, False),
+    ],
+)
+def test_AI_문장은_안전한_질문_하나일_때만(intents, result, ok):
+    assert assistant._ai_sentence_ok(intents, result) is ok
+
+
+def test_할_일_변경은_AI를_켜도_정해진_문장(monkeypatch):
+    """AI가 "삭제했습니다"처럼 하지 않은 일을 말하지 않게, 할 일 변경은 AI 문장을 쓰지 않아요."""
+    called = []
+    monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
+    monkeypatch.setattr(llm, "explain_result", lambda *a, **k: called.append(1) or "네, 삭제했습니다.")
+    monkeypatch.setattr(
+        assistant,
+        "_classify",
+        lambda text, history: {
+            "type": "question",
+            "intents": [{"intent": "change_todo", "todo_text": "커피", "action": "delete", "place_types": [], "delay_minutes": None}],
+            "needs_confirm": False,
+            "question": None,
+            "engine": "ai",
+        },
+    )
+    r = assistant.ask("demo", "커피는 안 사도 돼", use_demo=True, explain_with_ai=True)
+    assert not called
+    assert "삭제했습니다" not in r["answer"]
