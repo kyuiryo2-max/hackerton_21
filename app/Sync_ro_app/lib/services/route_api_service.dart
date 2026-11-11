@@ -42,6 +42,9 @@ class RouteApiService {
         (to.contains('청량리역') || to.contains('청량리'));
   }
 
+  /// 이동 탭 시연 비교용 (내장 카카오 샘플 경로)
+  List<RouteCandidate> demoRoutes() => _bundledDemoRoutes();
+
   List<RouteCandidate> _bundledDemoRoutes() {
     return [
       for (var i = 0; i < DemoRouteOptions.routes.length; i++)

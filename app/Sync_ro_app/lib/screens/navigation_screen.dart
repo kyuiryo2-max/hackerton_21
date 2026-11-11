@@ -1,3 +1,4 @@
+import '../config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -7,11 +8,13 @@ import '../models/route_request.dart';
 import '../models/schedule.dart';
 import '../models/todo_item.dart';
 import '../providers/schedule_controller.dart';
+import '../providers/todo_controller.dart';
 import '../services/route_api_service.dart';
+import '../services/server_plan_service.dart';
+import '../services/server_route_adapter.dart';
 import '../services/place_search_service.dart';
 import 'place_search_screen.dart';
 import 'search_route_results_panel.dart';
-import 'demo_route_panel.dart';
 import '../providers/active_route_controller.dart';
 
 class NavigationScreen extends StatefulWidget {
@@ -54,6 +57,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   bool _manualIsActive = false;
   bool _autoLocating = false;
   Schedule? _explicitSchedule;
+  late int _lastPlanRefreshRevision;
 
   void _handleRequestedSchedule() {
     final requested = widget.requestedSchedule;
@@ -75,7 +79,45 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     super.initState();
     _manualDestinationController.text = widget.initialDestination ?? '';
     _manualArrival = widget.initialArrivalTime;
+    _lastPlanRefreshRevision = activeRouteController.revision;
+    activeRouteController.addListener(_handlePlanRefresh);
     widget.requestedSchedule?.addListener(_handleRequestedSchedule);
+  }
+
+  // Plan refresh notifications must be observed even when the Navigation
+  // screen is kept alive offstage (e.g. the user edits a todo on another tab).
+  // The inner AnimatedBuilder alone does not rebuild this State's build().
+  void _handlePlanRefresh() {
+    final revision = activeRouteController.revision;
+    if (revision == _lastPlanRefreshRevision) return;
+    _lastPlanRefreshRevision = revision;
+    // Invalidate any in-flight calculation started before the edit.
+    _scheduleRequestSerial++;
+    _manualRequestSerial++;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Manual searches have no server schedule id, so do not fabricate a
+      // stopover plan; ask the user to run the search again.
+      if (_manualIsActive) {
+        setState(() {
+          _manualIsActive = false;
+          _manualExpanded = true;
+          _manualError = '할 일이 변경되었습니다. 실제 경유 할 일을 반영하려면 일정을 선택해 다시 추천받아 주세요.';
+        });
+        return;
+      }
+      final schedule = _explicitSchedule ??
+          _nextSchedule(ScheduleScope.of(context).schedules);
+      if (schedule == null) return;
+      if (_origin != null && _scheduleDestination != null) {
+        _loadScheduleRoutes(schedule);
+      } else if (_origin == null && schedule.originMode != 'place' && !_autoLocating) {
+        _autoLocating = true;
+        _useCurrentLocation().whenComplete(() { _autoLocating = false; });
+      } else if (_scheduleDestination == null) {
+        _resolveScheduleDestination(schedule);
+      }
+    });
   }
 
   Schedule? _nextSchedule(List<Schedule> schedules) {
@@ -184,19 +226,50 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Future<void> _loadScheduleRoutes(Schedule schedule) async {
     if (_origin == null || _scheduleDestination == null) return;
     final serial = ++_scheduleRequestSerial;
+    activeRouteController.clearSearch();
     setState(() { _loadingSchedule = true; _scheduleError = null; });
     try {
-      final result = await _routeApi.searchWithDetails(RouteRequest(
-        origin: _origin!.name, destination: schedule.location,
-        desiredArrivalTime: schedule.startTime, originPlace: _origin, destinationPlace: _scheduleDestination,
-      ));
-      if (!mounted || serial != _scheduleRequestSerial) return;
-      final routes = result.routes;
-      if (routes.isNotEmpty) {
-        activeRouteController.setSearch(ActiveRouteSelection(
-          routes: routes, selectedId: routes.first.id,
-          origin: _origin!.name, destination: schedule.location, arrival: schedule.startTime,
-          plan: result.plan, demoContext: result.demoContext));
+      if (!ApiConfig.demoMode) {
+        final service = ServerPlanService();
+        try {
+          // The explicit list is important: [] must mean no current tasks,
+          // not "reuse a cached server/demo set".
+          final activeTodoIds = TodoScope.of(context).todos
+              .where((todo) => !todo.isCompleted)
+              .map((todo) => todo.id).toList();
+          final plan = await service.fetch(
+            scheduleId: schedule.id,
+            todoIds: activeTodoIds,
+            originLat: _origin!.latitude,
+            originLng: _origin!.longitude,
+          );
+          if (!mounted || serial != _scheduleRequestSerial) return;
+          final routes = [
+            for (var i = 0; i < plan.routes.length; i++)
+              ServerRouteAdapter.fromPlan(plan.routes[i], i),
+          ];
+          if (routes.isEmpty) throw StateError('서버에서 추천 가능한 경로가 없습니다.');
+          activeRouteController.setSearch(ActiveRouteSelection(
+            routes: routes, selectedId: routes.first.id,
+            origin: _origin!.name, destination: schedule.location,
+            arrival: schedule.startTime, plan: plan,
+          ));
+        } finally {
+          service.dispose();
+        }
+      } else {
+        final result = await _routeApi.searchWithDetails(RouteRequest(
+          origin: _origin!.name, destination: schedule.location,
+          desiredArrivalTime: schedule.startTime, originPlace: _origin, destinationPlace: _scheduleDestination,
+        ));
+        if (!mounted || serial != _scheduleRequestSerial) return;
+        final routes = result.routes;
+        if (routes.isNotEmpty) {
+          activeRouteController.setSearch(ActiveRouteSelection(
+            routes: routes, selectedId: routes.first.id,
+            origin: _origin!.name, destination: schedule.location, arrival: schedule.startTime,
+            plan: result.plan, demoContext: result.demoContext));
+        }
       }
     } catch (e) {
       if (mounted && serial == _scheduleRequestSerial) {
@@ -381,6 +454,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             arrival: active.arrival, selection: active,
             origin: _manualIsActive ? _manualOrigin : _origin,
             destination: _manualIsActive ? _manualDestination : _scheduleDestination),
+        ] else if (schedule == null && !ApiConfig.demoMode) ...[
+          const Card(child: Padding(padding: EdgeInsets.all(18),
+            child: Text('등록된 미래 일정이 없습니다. 일정 탭에서 목적지와 도착 시간을 등록하면 실제 경로를 계산할 수 있어요.'))),
         ] else if (schedule == null) ...[
           Card(child: Padding(
             padding: const EdgeInsets.all(14),
@@ -402,7 +478,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             ]),
           )),
           const SizedBox(height: 10),
-          const DemoRoutePanel(),
+          const DemoRouteCompare(),
         ] else ...[
           Text('다음 일정 · 자동 경로', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
@@ -474,6 +550,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
 
   @override
   void dispose() {
+    activeRouteController.removeListener(_handlePlanRefresh);
     widget.requestedSchedule?.removeListener(_handleRequestedSchedule);
     _scheduleRequestSerial++;
     _destinationLookupSerial++;

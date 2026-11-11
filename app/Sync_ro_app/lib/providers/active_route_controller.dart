@@ -34,7 +34,13 @@ class ActiveRouteController extends ChangeNotifier {
     notifyListeners();
   }
   void clearSearch() { _active = null; notifyListeners(); }
-  void requestPlanRefresh() { _revision++; notifyListeners(); }
+  // Any task/schedule change invalidates a previous recommendation immediately.
+  // Do not display stopovers from a plan calculated using deleted tasks.
+  void requestPlanRefresh() {
+    _active = null;
+    _revision++;
+    notifyListeners();
+  }
 }
 
 final activeRouteController = ActiveRouteController();

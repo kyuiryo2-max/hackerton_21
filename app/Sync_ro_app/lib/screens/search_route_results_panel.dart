@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'package:latlong2/latlong.dart';
+
+import '../config/app_theme.dart';
 import '../data/demo_route_style.dart';
+import '../data/offline_demo_data.dart';
+import '../services/kst_time.dart';
+import '../services/route_api_service.dart';
+import '../widgets/route_compare_map.dart';
 import '../models/place.dart';
 import '../models/route_candidate.dart';
-import 'route_inline_map.dart';
 import '../services/server_plan_service.dart';
 import '../widgets/plan_details_panel.dart';
 
@@ -25,6 +31,8 @@ class SearchRouteResultsPanel extends StatefulWidget {
   final ServerPlan? plan;
   final bool loading;
   final String? error;
+  /// 카드 제목 (기본: 서버 시연 경로 / 이동 경로 검색 결과)
+  final String? title;
 
   const SearchRouteResultsPanel({
     super.key,
@@ -43,6 +51,7 @@ class SearchRouteResultsPanel extends StatefulWidget {
     this.plan,
     this.loading = false,
     this.error,
+    this.title,
   });
 
   @override
@@ -59,8 +68,6 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
     }
     return widget.routes.first;
   }
-
-  String _clock(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   String _mode(RouteSegment segment) => switch (segment.type) {
     RouteSegmentType.walking => 'WALKING',
@@ -118,43 +125,96 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
     );
   }
 
+  DateTime get _base => widget.referenceTime ?? DateTime.now();
+
+  /// 환승 횟수만큼 있어야 할 환승 대기 중, 데이터로 알 수 있는 것
+  ({int known, int transfers}) _transferWaits(RouteCandidate r) {
+    var rides = 0;
+    var known = 0;
+    RouteSegment? previous;
+    for (final s in r.segments) {
+      final ride = s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway;
+      if (ride) {
+        if (rides > 0 && previous?.type == RouteSegmentType.waiting) known++;
+        rides++;
+      }
+      previous = s;
+    }
+    return (known: known, transfers: rides > 0 ? rides - 1 : 0);
+  }
+
   Widget _card(RouteCandidate r, int index) {
     final active = _selected?.id == r.id;
+    final arrive = _base.add(Duration(minutes: r.totalMinutes));
+    final desired = widget.desiredArrival;
+    final margin = desired?.difference(arrive).inMinutes;
+    final waits = _transferWaits(r);
+    final fastest = widget.routes.map((x) => x.totalMinutes).reduce((a, b) => a < b ? a : b);
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: Material(
-        color: active ? const Color(0xFFF4F2FF) : Colors.white,
+        color: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(15),
-          side: BorderSide(color: active ? const Color(0xFF4936D8) : const Color(0xFFE5E5E8), width: active ? 1.7 : 1),
+          side: BorderSide(color: active ? AppTheme.primary : AppTheme.border, width: active ? 2 : 1),
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(15),
           onTap: () { widget.onSelect(r.id); setState(() => _expanded = false); },
-          child: Padding(padding: const EdgeInsets.all(14), child: Column(
+          child: Padding(padding: const EdgeInsets.all(14), child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(children: [
-                if (r.isRecommended || index == 0) ...[
-                  const Icon(Icons.stars_rounded, color: Color(0xFF4936D8), size: 17),
-                  const SizedBox(width: 5),
-                ],
-                Expanded(child: Text(r.title, maxLines: 2, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
-                Icon(active ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                    color: active ? const Color(0xFF4936D8) : Colors.grey),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                Text('${r.totalMinutes}분', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 24)),
-                const SizedBox(width: 8),
-                Expanded(child: Text('도보 ${r.walkingMinutes}분 · 대기 ${r.waitingMinutes}분 · 환승 ${r.transferCount}회',
-                    style: const TextStyle(fontSize: 11, color: Colors.black54))),
-              ]),
-              const SizedBox(height: 9),
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                for (final leg in r.segments.where((s) => s.type != RouteSegmentType.waiting)) _chip(leg),
-              ]),
+              Container(
+                width: 26, height: 26, alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: active ? AppTheme.primary : Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.primary, width: 2),
+                ),
+                child: Text('${index + 1}', style: TextStyle(
+                    color: active ? Colors.white : AppTheme.primary, fontWeight: FontWeight.w800, fontSize: 13)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(child: Text(r.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14))),
+                  if (r.totalMinutes == fastest)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(color: AppTheme.primarySoft, borderRadius: BorderRadius.circular(6)),
+                      child: const Text('최단', style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w800)),
+                    ),
+                ]),
+                const SizedBox(height: 4),
+                Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+                  Text('${r.totalMinutes}분', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.6)),
+                  const SizedBox(width: 8),
+                  Text('${KstTime.hm(arrive)} 도착', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  if (margin != null) ...[
+                    const SizedBox(width: 6),
+                    Text(margin >= 0 ? '여유 $margin분' : '${-margin}분 늦음',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                            color: margin >= 0 ? AppTheme.ok : AppTheme.danger)),
+                  ],
+                ]),
+                const SizedBox(height: 8),
+                RouteTimeStrip(route: r),
+                const SizedBox(height: 8),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  for (final leg in r.segments.where((s) => s.type != RouteSegmentType.waiting)) _chip(leg),
+                ]),
+                const SizedBox(height: 6),
+                Text(
+                  [
+                    '도보 ${r.walkingMinutes}분',
+                    if (r.waitingMinutes > 0) '대기 ${r.waitingMinutes}분',
+                    '환승 ${r.transferCount}회',
+                    if (waits.transfers > waits.known) '환승 대기 정보 없음',
+                  ].join(' · '),
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                ),
+              ])),
             ],
           )),
         ),
@@ -208,10 +268,26 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
   Widget build(BuildContext context) {
     final route = _selected;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (widget.routes.isNotEmpty) ...[
+      RouteCompareMap(
+        key: ValueKey('cmp-${widget.routes.map((r) => r.id).join(',')}-${widget.origin?.id}-${widget.destination?.id}'),
+        routes: widget.routes,
+        selectedId: route?.id,
+        onSelect: (id) { widget.onSelect(id); setState(() => _expanded = false); },
+        origin: widget.origin == null ? null : LatLng(widget.origin!.latitude, widget.origin!.longitude),
+        destination: widget.destination == null ? null : LatLng(widget.destination!.latitude, widget.destination!.longitude),
+        originName: widget.originName,
+        destinationName: widget.destinationName,
+      ),
+      const SizedBox(height: 5),
+      const Text('API가 준 경로 좌표만 그려요. 번호는 경로가 서로 갈라지는 지점에 표시돼요.',
+          style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+      const SizedBox(height: 14),
+      ],
       Container(padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(color: Colors.white, border: Border.all(color: const Color(0xFFEAE9EE)), borderRadius: BorderRadius.circular(17)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(widget.serverDemo ? '서버 시연 경로' : '이동 경로 검색 결과', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          Text(widget.title ?? (widget.serverDemo ? '서버 시연 경로' : '이동 경로 검색 결과'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
           const SizedBox(height: 12),
           Row(children: [const Icon(Icons.trip_origin, color: Color(0xFF4936D8), size: 19), const SizedBox(width: 9),
             Expanded(child: Text(widget.originName, style: const TextStyle(fontWeight: FontWeight.w600)))]),
@@ -220,9 +296,9 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
             Expanded(child: Text(widget.destinationName, style: const TextStyle(fontWeight: FontWeight.w600)))]),
           const Divider(height: 22),
           Wrap(spacing: 12, runSpacing: 6, children: [
-            Text('기준 ${_clock(widget.referenceTime ?? DateTime.now())}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+            Text('기준 ${KstTime.hm(widget.referenceTime ?? DateTime.now())}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             if (widget.desiredArrival != null)
-              Text('도착 희망 ${_clock(widget.desiredArrival!)}', style: const TextStyle(color: Color(0xFF4936D8), fontWeight: FontWeight.w700, fontSize: 12)),
+              Text('도착 희망 ${KstTime.hm(widget.desiredArrival!)}', style: const TextStyle(color: Color(0xFF4936D8), fontWeight: FontWeight.w700, fontSize: 12)),
           ]),
         ])),
       const SizedBox(height: 12),
@@ -230,22 +306,13 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
       if (widget.error != null)
         Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(widget.error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
       if (widget.routes.isNotEmpty) ...[
-        Text('추천 경로 ${widget.routes.length}개', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        Row(children: [
+          Expanded(child: Text('추천 경로 ${widget.routes.length}개', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+          Text('${KstTime.hm(_base)} 출발 기준', style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+        ]),
         const SizedBox(height: 8),
         for (var i = 0; i < widget.routes.length; i++) _card(widget.routes[i], i),
         if (route != null) ...[
-          const SizedBox(height: 8),
-          Text('선택 경로 · ${route.title}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 10),
-          SizedBox(height: 285, child: RouteInlineMap(
-            key: ValueKey('${route.id}-${widget.origin?.id}-${widget.destination?.id}'),
-            candidate: route, origin: widget.origin, destination: widget.destination,
-            routeStops: route.segments.any((s) => s.geometry.isNotEmpty) ? widget.routeStops : const [],
-            nearbyPlaces: route.segments.any((s) => s.geometry.isNotEmpty) ? widget.nearbyPlaces : const [],
-          )),
-          const SizedBox(height: 5),
-          const Text('서버에서 제공된 좌표만 지도에 표시합니다. 지도 배경에는 인터넷이 필요합니다.',
-              style: TextStyle(fontSize: 11, color: Colors.black54)),
           const SizedBox(height: 8),
           OutlinedButton.icon(onPressed: () => setState(() => _expanded = !_expanded),
             icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
@@ -257,5 +324,45 @@ class _SearchRouteResultsPanelState extends State<SearchRouteResultsPanel> {
       ] else if (!widget.loading && widget.error == null)
         const Padding(padding: EdgeInsets.all(12), child: Text('검색된 경로가 없습니다.')),
     ]);
+  }
+}
+
+
+/// 일정이 없을 때 이동 탭에 보여 주는 시연 경로 비교 (내장 카카오 샘플, 실시간 아님).
+class DemoRouteCompare extends StatefulWidget {
+  const DemoRouteCompare({super.key});
+
+  @override
+  State<DemoRouteCompare> createState() => _DemoRouteCompareState();
+}
+
+class _DemoRouteCompareState extends State<DemoRouteCompare> {
+  late final List<RouteCandidate> _routes = RouteApiService().demoRoutes();
+  String? _selected;
+
+  static Place? _place(dynamic raw, String id) {
+    if (raw is! Map || raw['lat'] is! num || raw['lng'] is! num) return null;
+    return Place(id: id, name: '${raw['name'] ?? ''}', address: '',
+        latitude: (raw['lat'] as num).toDouble(), longitude: (raw['lng'] as num).toDouble());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctx = OfflineDemoData.context;
+    final schedule = ctx['schedule'] is Map ? ctx['schedule'] as Map : const {};
+    final origin = _place(ctx['location'], 'demo_origin');
+    final destination = _place(schedule['destination'], 'demo_destination');
+    return SearchRouteResultsPanel(
+      routes: _routes,
+      selectedId: _selected ?? (_routes.isEmpty ? null : _routes.first.id),
+      onSelect: (id) => setState(() => _selected = id),
+      originName: origin?.name ?? '안암역3번출구',
+      destinationName: destination?.name ?? '청량리역',
+      origin: origin,
+      destination: destination,
+      desiredArrival: DateTime.tryParse('${schedule['arrive_by'] ?? ''}'),
+      referenceTime: DateTime.tryParse('${ctx['now'] ?? ''}'),
+      title: '시연 경로 비교 · 예시 데이터',
+    );
   }
 }

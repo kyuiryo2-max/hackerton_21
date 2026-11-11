@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../config/app_theme.dart';
 import '../services/approximate_location_service.dart';
 
 /// Current device time and GPS position. No demo coordinates are substituted.
@@ -92,52 +93,54 @@ class _HomeLiveStatusState extends State<HomeLiveStatus> {
   @override
   Widget build(BuildContext context) {
     final position = _position;
-    final time = '${_two(_now.hour)}:${_two(_now.minute)}:${_two(_now.second)}';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.access_time, size: 20),
-            const SizedBox(width: 9),
-            Text('현재 시각', style: Theme.of(context).textTheme.bodyMedium),
-            const Spacer(),
-            Text(time, style: Theme.of(context).textTheme.titleMedium),
-          ]),
-          const Divider(height: 20),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Icon(Icons.my_location, size: 20),
-            const SizedBox(width: 9),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('현재 위치'),
-              const SizedBox(height: 4),
-              if (_loading)
-                const Text('현재 지역을 확인하는 중…')
-              else if (position != null)
-                Text(_regionName ?? (_regionError ?? '지역명을 확인하는 중…'),
-                    style: Theme.of(context).textTheme.bodySmall)
-              else
-                Text(_positionError == null ? '위치를 아직 확인하지 못했어요.' :
-                     '현재 위치를 확인할 수 없습니다. 위치 권한을 확인해 주세요.',
-                     style: Theme.of(context).textTheme.bodySmall),
-              if (_positionError != null)
-                Text(_positionError!, style: TextStyle(fontSize: 11,
-                    color: Theme.of(context).colorScheme.error)),
-              if (_regionName != null)
-                const Text('지역 정보 © OpenStreetMap contributors',
-                    style: TextStyle(fontSize: 10, color: Colors.black54)),
-            ])),
-            IconButton(
-              onPressed: _loading ? null : _loadLocation,
-              tooltip: '현재 위치 새로고침',
-              icon: _loading
-                  ? const SizedBox(width: 18, height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.refresh),
-            ),
-          ]),
-        ]),
+    final time = '${_two(_now.hour)}:${_two(_now.minute)}';
+    final String locationText;
+    if (_loading) {
+      locationText = '현재 위치 확인 중…';
+    } else if (position != null) {
+      locationText = _regionName ?? (_regionError ?? '지역명을 확인하는 중…');
+    } else {
+      locationText = _positionError == null ? '위치를 아직 확인하지 못했어요' : '위치 권한을 확인해 주세요';
+    }
+    final hasError = position == null && _positionError != null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTheme.border),
       ),
+      child: Row(children: [
+        const Icon(Icons.access_time_rounded, size: 17, color: AppTheme.primary),
+        const SizedBox(width: 6),
+        Text(time, style: const TextStyle(fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
+        Container(width: 1, height: 14, margin: const EdgeInsets.symmetric(horizontal: 10), color: AppTheme.border),
+        Icon(Icons.near_me_rounded, size: 16, color: hasError ? Theme.of(context).colorScheme.error : AppTheme.primary),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Tooltip(
+            message: _positionError ?? (_regionName != null ? '지역 정보 © OpenStreetMap contributors' : ''),
+            child: Text(locationText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: hasError ? Theme.of(context).colorScheme.error : AppTheme.textStrong)),
+          ),
+        ),
+        SizedBox(
+          width: 34,
+          height: 34,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            onPressed: _loading ? null : _loadLocation,
+            tooltip: '현재 위치 새로고침',
+            icon: _loading
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded, size: 18),
+          ),
+        ),
+      ]),
     );
   }
 }

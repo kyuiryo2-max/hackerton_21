@@ -56,11 +56,28 @@ class ServerRouteAdapter {
     final rawLegs = route['segments'] ?? route['steps'];
     final legs = <RouteSegment>[];
     if (rawLegs is List && rawLegs.isNotEmpty) {
+      var rideCount = 0;
       for (final item in rawLegs) {
         final leg = _object(item);
         final type = _type('${leg['type'] ?? leg['mode'] ?? 'BUS'}');
         final start = leg['start_name'] ?? leg['origin_name'] ?? leg['start'];
         final end = leg['end_name'] ?? leg['destination_name'] ?? leg['end'];
+        // 탈것 구간 앞의 대기 (서버가 실시간 도착 정보로 계산해 주면 표시).
+        // wait_source: realtime(실시간) / interval(배차간격 추정)
+        final legWait = (leg['wait_min'] as num?)?.toInt();
+        final isRide = type == RouteSegmentType.bus || type == RouteSegmentType.subway;
+        if (isRide && legWait != null && legWait > 0) {
+          final estimated = '${leg['wait_source'] ?? ''}' == 'interval';
+          legs.add(RouteSegment(
+            type: RouteSegmentType.waiting,
+            description: '${rideCount == 0 ? '탑승 대기' : '환승 대기'}${estimated ? ' (배차간격 추정)' : ''}',
+            lineName: rideCount == 0 ? '탑승 대기' : '환승 대기',
+            durationMinutes: legWait,
+            startName: start is String ? start : null,
+            endName: start is String ? start : null,
+          ));
+        }
+        if (isRide) rideCount++;
         legs.add(RouteSegment(
           type: type,
           description: '${leg['guidance'] ?? leg['description'] ?? ''}',

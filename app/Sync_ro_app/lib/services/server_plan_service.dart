@@ -26,10 +26,11 @@ class ServerPlan {
 class ServerPlanService {
   ServerPlanService({http.Client? client}) : _client = client ?? http.Client();
   final http.Client _client;
-  Future<ServerPlan> fetch({List<int>? todoIds, double? originLat, double? originLng}) async {
+  Future<ServerPlan> fetch({int? scheduleId, List<int>? todoIds, double? originLat, double? originLng}) async {
     final body = <String, dynamic>{
       'user_id': ApiConfig.userId,
       'demo': ApiConfig.demoMode,
+      if (!ApiConfig.demoMode && scheduleId != null) 'schedule_id': scheduleId,
       if (todoIds != null) 'todo_ids': todoIds,
       if (!ApiConfig.demoMode && originLat != null && originLng != null)
         'origin': {'lat': originLat, 'lng': originLng},

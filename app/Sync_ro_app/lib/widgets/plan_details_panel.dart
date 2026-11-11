@@ -1,3 +1,4 @@
+import '../services/kst_time.dart';
 import 'package:flutter/material.dart';
 import '../models/route_candidate.dart';
 import '../services/server_plan_service.dart';
@@ -20,7 +21,7 @@ class _PlanDetailsPanelState extends State<PlanDetailsPanel> {
 
   String _format(DateTime? value) {
     if (value == null) return '정보 없음';
-    final d = value.toLocal();
+    final d = KstTime.toKst(value);
     return '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 

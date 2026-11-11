@@ -1,3 +1,4 @@
+import '../services/kst_time.dart';
 import 'package:flutter/material.dart';
 
 import '../config/api_config.dart';
@@ -111,8 +112,7 @@ class _ServerDepartureSummaryState extends State<ServerDepartureSummary> {
 
   String _format(DateTime? value) {
     if (value == null) return '정보 없음';
-    final local = value.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    return KstTime.hm(value);
   }
 
   @override

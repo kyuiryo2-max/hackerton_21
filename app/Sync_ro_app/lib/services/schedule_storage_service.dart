@@ -1,3 +1,4 @@
+import '../config/runtime_mode.dart';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,7 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/schedule.dart';
 
 class ScheduleStorageService {
-  static const _key = 'sync_ro_schedules_v1';
+  static String get _key => RuntimeMode.instance.isDemo
+      ? 'sync_ro_schedules_v1' : 'sync_ro_schedules_v2_${RuntimeMode.instance.storageNamespace}';
 
   Future<List<Schedule>?> load() async {
     final prefs = await SharedPreferences.getInstance();
