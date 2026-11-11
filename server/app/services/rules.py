@@ -3,28 +3,9 @@
 부스 시연 중 AI가 멈춰도 답할 수 있게 해요. 정확도는 AI보다 낮고, 응답에 engine="rule"로 표시해요.
 질문 키워드는 ai/eval/run.py 의 비교 기준선과 같아요. 출력 모양은 docs/design/json-format.md 를 따라요.
 """
-from functools import lru_cache
 import re
 
 from app.services.llm import DEFAULT_CONFIRM_QUESTION, place_types
-
-
-@lru_cache
-def _vector_classifier():
-    """벡터 분류기 인스턴스를 캐싱하여 가져옵니다."""
-    try:
-        import sys
-        from pathlib import Path
-
-        repo_root = str(Path(__file__).resolve().parents[3])
-        if repo_root not in sys.path:
-            sys.path.insert(0, repo_root)
-
-        from ai.vector.classifier import VectorIntentClassifier
-
-        return VectorIntentClassifier()
-    except Exception:
-        return None
 
 # 질문 종류 (ai/eval/run.py KEYWORDS 와 같게 유지)
 INTENT_WORDS = {
@@ -114,25 +95,6 @@ def classify_question(text: str) -> dict:
     # "몇 분 늦어"는 늦어짐이에요
     if "running_late" in names and "time_left" in names:
         names.remove("time_left")
-
-    # 키워드 매칭이 없으면 벡터 분류기(Top-m)로 의미 기반 판정
-    if not names:
-        clf = _vector_classifier()
-        if clf:
-            try:
-                vec_res = clf.classify(text)
-                if vec_res.get("status") == "accepted":
-                    names = [i["intent"] for i in vec_res.get("intents", [])]
-                elif vec_res.get("status") == "abstained:needs_context":
-                    return {
-                        "type": "question",
-                        "intents": [_intent("unsupported", text)],
-                        "needs_confirm": True,
-                        "question": DEFAULT_CONFIRM_QUESTION,
-                    }
-            except Exception:
-                pass
-
     intents = [_intent(n, text) for n in names] or [_intent("unsupported", text)]
     missing_place = any(i["intent"] in ("stopover_check", "place_info") and not i["place_types"] for i in intents)
     missing_delay = _delay_unknown(intents, text)

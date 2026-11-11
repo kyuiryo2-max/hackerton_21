@@ -34,11 +34,20 @@ def place_types() -> list[str]:
         return [row["place_type"] for row in csv.DictReader(f)]
 
 
+# AI가 응답하지 않을 때 기다리는 최대 시간(초). 넘으면 바로 키워드 규칙으로 넘어가요.
+LLM_TIMEOUT_SECONDS = 10
+
+
 @lru_cache
 def _client():
     from openai import OpenAI
 
-    return OpenAI(base_url=config.OPENAI_BASE_URL, api_key=config.OPENAI_API_KEY)
+    return OpenAI(
+        base_url=config.OPENAI_BASE_URL,
+        api_key=config.OPENAI_API_KEY,
+        timeout=LLM_TIMEOUT_SECONDS,
+        max_retries=0,
+    )
 
 
 def _parse_json_safe(content: str) -> dict:
@@ -70,7 +79,7 @@ def _chat_json(system: str, user: str) -> dict:
         }
         base_url = config.OPENAI_BASE_URL.rstrip("/")
         url = f"{base_url}/chat/completions"
-        resp = httpx.post(url, headers=headers, json=payload, timeout=60)
+        resp = httpx.post(url, headers=headers, json=payload, timeout=LLM_TIMEOUT_SECONDS)
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"] or "{}"
         return _parse_json_safe(content)
