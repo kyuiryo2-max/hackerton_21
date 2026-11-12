@@ -50,21 +50,34 @@ class ServerRouteAdapter {
     final stops = (route['stops'] is List ? route['stops'] as List :
         demo['stops'] is List ? demo['stops'] as List : const [])
         .map((s) => '$s').toList();
-    final wait = (route['wait_min'] as num?)?.toInt() ?? 0;
+    var wait = (route['wait_min'] as num?)?.toInt() ?? 0;
+    // 타임라인은 출발 시각부터 더해 가요. 서버 wait_min 은 "지금부터" 차가 올 때까지라서,
+    // 출발 시각(depart_at)이 있으면 그 기준으로 다시 계산해요: 탑승 − 출발 − 처음 도보 (11/13)
+    final departAt = DateTime.tryParse('${route['depart_at'] ?? ''}');
+    final boardAt = DateTime.tryParse('${route['board_at'] ?? ''}');
+    final firstWalk = (route['first_walk_min'] as num?)?.toInt() ?? 0;
+    if (departAt != null && boardAt != null) {
+      final m = boardAt.difference(departAt).inMinutes - firstWalk;
+      wait = m < 0 ? 0 : m;
+    }
     final moving = (route['moving_min'] as num?)?.toInt() ?? 0;
     final walk = (route['last_walk_min'] as num?)?.toInt() ?? 0;
-    final rawLegs = route['segments'] ?? route['steps'];
+    // 서버 /api/plan 은 11/13부터 routes[].legs (도보·버스·지하철 구간, from/to/minutes/points)를 줘요.
+    final serverLegs = route['legs'];
+    final rawLegs = serverLegs ?? route['segments'] ?? route['steps'];
     final legs = <RouteSegment>[];
     if (rawLegs is List && rawLegs.isNotEmpty) {
       var rideCount = 0;
       for (final item in rawLegs) {
         final leg = _object(item);
         final type = _type('${leg['type'] ?? leg['mode'] ?? 'BUS'}');
-        final start = leg['start_name'] ?? leg['origin_name'] ?? leg['start'];
-        final end = leg['end_name'] ?? leg['destination_name'] ?? leg['end'];
+        final start = leg['from'] ?? leg['start_name'] ?? leg['origin_name'] ?? leg['start'];
+        final end = leg['to'] ?? leg['destination_name'] ?? leg['end_name'] ?? leg['end'];
         // 탈것 구간 앞의 대기 (서버가 실시간 도착 정보로 계산해 주면 표시).
         // wait_source: realtime(실시간) / interval(배차간격 추정)
-        final legWait = (leg['wait_min'] as num?)?.toInt();
+        // legs 형식은 첫 탑승 대기를 경로 카드의 wait_min 으로 줘요.
+        final legWait = (leg['wait_min'] as num?)?.toInt() ??
+            (serverLegs != null && rideCount == 0 ? wait : null);
         final isRide = type == RouteSegmentType.bus || type == RouteSegmentType.subway;
         if (isRide && legWait != null && legWait > 0) {
           final estimated = '${leg['wait_source'] ?? ''}' == 'interval';
@@ -82,7 +95,8 @@ class ServerRouteAdapter {
           type: type,
           description: '${leg['guidance'] ?? leg['description'] ?? ''}',
           lineName: '${leg['line_name'] ?? leg['name'] ?? ''}',
-          durationMinutes: (leg['duration_min'] as num?)?.toInt() ??
+          durationMinutes: (leg['minutes'] as num?)?.toInt() ??
+              (leg['duration_min'] as num?)?.toInt() ??
               (leg['moving_min'] as num?)?.toInt() ?? 0,
           startName: start is String ? start : null,
           endName: end is String ? end : null,

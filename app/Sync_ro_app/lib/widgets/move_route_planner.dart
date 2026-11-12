@@ -105,10 +105,15 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final r = _planRouteFor(route);
     final plan = widget.plan;
     if (r == null || plan == null) return null;
-    // 탑승·도착 시각은 1순위 경로 기준이라 다른 순위에는 붙이지 않아요.
     final rank = (r['rank'] as num?)?.toInt() ?? 1;
     final data = Map<String, dynamic>.from(plan.data)..['routes'] = [r];
-    if (rank != 1) {
+    if (r['depart_at'] != null) {
+      // 11/13부터 서버가 경로마다 같은 기준으로 출발·탑승·도착 시각을 줘요.
+      for (final key in ['basis', 'depart_at', 'board_at', 'arrive_at']) {
+        data[key] = r[key];
+      }
+    } else if (rank != 1) {
+      // 예전 서버: 탑승·도착 시각은 1순위 경로 기준이라 다른 순위에는 붙이지 않아요.
       data.remove('board_at');
       data.remove('arrive_at');
     }
@@ -122,6 +127,13 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   }
 
   _RouteTimes _times(RouteCandidate route) {
+    final r = _planRouteFor(route);
+    final depart = DateTime.tryParse('${r?['depart_at'] ?? ''}');
+    final arrive = DateTime.tryParse('${r?['arrive_at'] ?? ''}');
+    if (depart != null && arrive != null) {
+      // 서버 계산 그대로. 도착 시각에서 거꾸로 계산한 값이면 "(역산)" 표시
+      return _RouteTimes(depart, arrive, r?['basis'] == 'arrive_by');
+    }
     final o = _overviewFor(route);
     if (o != null && o.departure != null && o.arriveAt != null) {
       return _RouteTimes(o.departure!, o.arriveAt!, false);
