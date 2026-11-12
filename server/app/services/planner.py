@@ -31,6 +31,20 @@ MAX_ROUTES = 3
 PLACE_RADIUS_M = 300
 # 할 일에 머물 시간(stay_minutes)이 없을 때 쓰는 기본값 (시연 대본의 편의점과 같은 4분)
 DEFAULT_STAY_SECONDS = 240
+# 장소 종류별 기본 머무는 시간(분) (11/13 팀 결정: 사용자가 매번 넣지 않게).
+# 할 일을 만들 때 stay_minutes 가 없으면 첫 번째 장소 종류의 값으로 저장해요. 화면에서 −/+ 로 바꿀 수 있어요.
+DEFAULT_STAY_MINUTES_BY_TYPE = {
+    "편의점": 4, "약국": 5, "카페": 5, "빵집": 5, "케이크집": 7, "꽃집": 10, "다이소": 10, "올리브영": 10,
+    "프린트": 10, "우체국": 10, "은행·ATM": 10, "안경점": 15, "마트": 15, "음식점": 30, "병원": 30,
+}
+
+
+def default_stay_minutes(place_types: list[str] | None) -> int | None:
+    """장소 종류로 정한 기본 머무는 시간(분). 종류가 없거나 표에 없으면 None."""
+    for place_type in place_types or []:
+        if place_type in DEFAULT_STAY_MINUTES_BY_TYPE:
+            return DEFAULT_STAY_MINUTES_BY_TYPE[place_type]
+    return None
 # 할 일 하나에 보여 줄 경유 후보 수 (#62). 장소 종류마다 이만큼 찾고, 합쳐서 가까운 순으로 이만큼만 도보 시간을 재요
 MAX_CANDIDATES = 3
 TRANSIT_TYPES = ("BUS", "SUBWAY")
@@ -75,10 +89,15 @@ def _todos(user_id: str, todo_ids: list[int] | None) -> list[dict]:
     return todos
 
 
-def stay_seconds(todo: dict, fallback: int = DEFAULT_STAY_SECONDS) -> int:
-    """할 일에 사용자가 정한 머물 시간이 있으면 그 값, 없으면 fallback (초)."""
+def stay_seconds(todo: dict, fallback: int | None = None) -> int:
+    """머무는 시간(초): 할 일에 정한 값 → fallback(시연 시나리오 값) → 장소 종류 기본값 → 4분."""
     minutes = todo.get("stay_minutes")
-    return minutes * 60 if minutes else fallback
+    if minutes:
+        return minutes * 60
+    if fallback is not None:
+        return fallback
+    by_type = default_stay_minutes(todo.get("place_types"))
+    return by_type * 60 if by_type else DEFAULT_STAY_SECONDS
 
 
 def _demo_place(todo: dict) -> dict | None:

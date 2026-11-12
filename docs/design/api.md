@@ -57,7 +57,7 @@
 | `source` | `입력` 할 일 화면에서 / `질문` 이동 중 질문(stopover_check)에서 | 저장할 때 한 번 |
 | `importance` | `필수` / `선택`. **`source=질문`이면 항상 필수** | 사용자, change_todo |
 | `done` | `status == 완료` 와 같음. 예전 앱 호환용으로만 남김 | – |
-| `stay_minutes` | 그곳에 머무를 시간(분, 1~120). 없으면(`null`) 계산할 때 4분 (11/12) | 사용자 |
+| `stay_minutes` | 그곳에 머무를 시간(분, 1~120). 만들 때 안 넣으면 첫 장소 종류의 기본값으로 저장 (편의점 4·약국 5·카페 5·은행 10·마트 15·병원 30분 …, `planner.DEFAULT_STAY_MINUTES_BY_TYPE`, 11/13). 장소가 없으면 `null`이고 계산할 때 4분 | 사용자 (화면 −/+) |
 
 계산 모듈(`stopover.decide_stops`)의 결과는 이렇게 바꿔 저장한다: `included` → 포함, `excluded` → 제외, `ask`(필수인데 시간 부족) → 대기 + 앱에 선택지.
 

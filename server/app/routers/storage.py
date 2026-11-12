@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
 from app.services.llm import place_types as allowed_place_types
+from app.services import planner
 
 router = APIRouter(prefix="/api", tags=["저장·조회"])
 
@@ -162,7 +163,11 @@ class Todo(BaseModel):
 def create_todo(body: TodoIn):
     if body.user_id == DEMO_USER_ID:
         return _demo_readonly()
-    return repo.add_todo(**body.model_dump())
+    fields = body.model_dump()
+    if fields.get("stay_minutes") is None:
+        # 머무는 시간을 안 넣으면 장소 종류로 정해요 (편의점 4분, 은행 10분 …). 화면에서 바꿀 수 있어요
+        fields["stay_minutes"] = planner.default_stay_minutes(fields.get("place_types"))
+    return repo.add_todo(**fields)
 
 
 @router.get("/todos", response_model=list[Todo])
