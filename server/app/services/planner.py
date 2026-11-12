@@ -9,12 +9,13 @@
 이동·도보는 올림, 교통편까지 남은 시간과 최대 체류 시간은 내림해요. (늦지 않는 쪽)
 """
 import logging
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
-from app.services import demo, kakao, places, seoul_bus, seoul_subway
+from app.services import demo, kakao, live, places, seoul_bus, seoul_subway
 from app.services.stopover import RouteTiming, StopCandidate, StopResult, decide_stops
 from app.services.timecalc import travel_minutes_from_seconds, wait_minutes_from_seconds
 
@@ -28,8 +29,10 @@ ACTIVE = ("대기", "포함", "제외")  # 완료한 할 일은 다시 계산하
 KST = timezone(timedelta(hours=9))
 MAX_ROUTES = 3
 PLACE_RADIUS_M = 300
-# 장소별 체류 시간 기본값이 정해지기 전 임시값 (시연 대본의 편의점과 같은 4분)
+# 할 일에 머물 시간(stay_minutes)이 없을 때 쓰는 기본값 (시연 대본의 편의점과 같은 4분)
 DEFAULT_STAY_SECONDS = 240
+# 할 일 하나에 보여 줄 경유 후보 수 (#62). 장소 종류마다 이만큼 찾고, 합쳐서 가까운 순으로 이만큼만 도보 시간을 재요
+MAX_CANDIDATES = 3
 TRANSIT_TYPES = ("BUS", "SUBWAY")
 LOOKAHEAD_SECONDS = 60 * 60       # 실시간은 앞 차 2~3대만 알려 줘서 배차 간격으로 1시간 뒤까지 이어 붙여요
 DEFAULT_SUBWAY_GAP_SECONDS = 300  # 지하철 차가 하나뿐이면 5분 간격으로 봐요
@@ -46,8 +49,10 @@ class RouteOption:
     """계산에 넣을 경로 하나와 카드에 보여 줄 정보."""
     timing: RouteTiming
     card: dict           # type, name, guidance, transfers, fare, stops
-    places: dict         # todo_id → 장소 (place_type, name, address, round_trip_walk_seconds, stay_seconds)
+    places: dict         # todo_id → 장소 (place_type, name, address, lng, lat, round_trip_walk_seconds,
+                         #              stay_seconds, candidates[])
     result: StopResult | None = None
+    leg: dict | None = field(default=None, repr=False)  # 실시간: 첫 탑승 구간 (질문 답변에서 다시 써요)
 
 
 def _todos(user_id: str, todo_ids: list[int] | None) -> list[dict]:
@@ -62,10 +67,19 @@ def _todos(user_id: str, todo_ids: list[int] | None) -> list[dict]:
     return todos
 
 
+def stay_seconds(todo: dict, fallback: int = DEFAULT_STAY_SECONDS) -> int:
+    """할 일에 사용자가 정한 머물 시간이 있으면 그 값, 없으면 fallback (초)."""
+    minutes = todo.get("stay_minutes")
+    return minutes * 60 if minutes else fallback
+
+
 def _demo_place(todo: dict) -> dict | None:
-    """할 일의 장소 종류 중 시연 지역에 있는 첫 장소."""
+    """할 일의 장소 종류 중 시연 지역에 있는 첫 장소. 머물 시간은 할 일에 정한 값이 먼저예요."""
     by_type = {p["place_type"]: p for p in demo.scenario()["places"]}
-    return next((by_type[t] for t in todo["place_types"] if t in by_type), None)
+    place = next((by_type[t] for t in todo["place_types"] if t in by_type), None)
+    if place is None:
+        return None
+    return {**place, "stay_seconds": stay_seconds(todo, place["stay_seconds"])}
 
 
 def _explanation(route_name: str, included: list[dict], arrive_at) -> str:
@@ -84,6 +98,10 @@ def _decide(option: RouteOption, todos: list[dict], deadline_seconds: int) -> St
         for t in todos if option.places.get(t["id"])
     ]
     return decide_stops(option.timing, candidates, deadline_seconds)
+
+
+def _place_out(place: dict) -> dict:
+    return {k: place.get(k) for k in ("place_type", "name", "address", "lng", "lat")}
 
 
 def _route_card(rank: int, option: RouteOption) -> dict:
@@ -122,8 +140,12 @@ def _response(user_id: str, todos: list[dict], options: list[RouteOption], now: 
             "text": todo["text"],
             "importance": todo["importance"],
             "status": status,
-            "place": place and {k: place[k] for k in ("place_type", "name", "address")},
+            "stay_min": travel_minutes_from_seconds(place["stay_seconds"] if place else stay_seconds(todo)),
+            "place": place and _place_out(place),
             "detour_min": travel_minutes_from_seconds(place["round_trip_walk_seconds"]) if place else None,
+            # 경유 후보 여러 곳 (#62). 첫 번째가 place와 같아요. 앱은 후보마다 머물 수 있는 시간을 비교해요
+            "candidates": [{**_place_out(c), "detour_min": travel_minutes_from_seconds(c["round_trip_walk_seconds"])}
+                           for c in (place.get("candidates") or [place])] if place else [],
             "reason": decision.reason if decision else missing_reason,
         }
         if decision and decision.status == "ask":
@@ -201,21 +223,52 @@ def _vehicle_seconds(leg: dict) -> list[int]:
         return []
 
 
+def _search_type(place_type: str, stop: kakao.Coord, cache: dict) -> list[dict]:
+    """정류장 근처에서 장소 종류 하나로 찾은 곳 (가까운 순). 같은 계획 안에서는 다시 부르지 않아요."""
+    key = ("search", place_type, stop)
+    if key not in cache:
+        found = places.search_by_place_type(place_type, stop, radius_m=PLACE_RADIUS_M, size=MAX_CANDIDATES)
+        cache[key] = [{**p, "place_type": place_type} for p in found]
+    return cache[key]
+
+
+def _round_trip(stop: kakao.Coord, p: dict, cache: dict) -> int | None:
+    """정류장 → 장소 → 정류장 도보(초)."""
+    key = ("walk", stop, p["name"], p["address"])
+    if key not in cache:
+        cache[key] = kakao.walk_seconds(stop, stop, via=[(p["lng"], p["lat"])])
+    return cache[key]
+
+
 def _near_place(todo: dict, stop: kakao.Coord, cache: dict) -> dict | None:
-    """탑승 정류장 근처에서 할 일 장소 종류의 가장 가까운 곳과 왕복 도보 시간."""
+    """탑승 정류장 근처의 경유 후보 (#62).
+
+    할 일의 장소 종류를 모두 찾아 합치고(예: 이어폰 → 편의점·다이소), 직선거리로 가까운 MAX_CANDIDATES곳만
+    도보 시간을 재요. 카카오 호출을 아끼려고 먼 곳은 도보 시간을 재지 않아요.
+    도보가 짧은 곳(= 가장 오래 머물 수 있는 곳)이 첫 번째이고, 계산은 첫 번째 후보로 해요.
+    """
+    found: dict[tuple, dict] = {}
     for place_type in todo["place_types"]:
-        key = (place_type, stop)
-        if key not in cache:
-            found = None
-            for p in places.search_by_place_type(place_type, stop, radius_m=PLACE_RADIUS_M, size=1):
-                walk = kakao.walk_seconds(stop, stop, via=[(p["lng"], p["lat"])])
-                if walk is not None:
-                    found = {"place_type": place_type, "name": p["name"], "address": p["address"],
-                             "round_trip_walk_seconds": walk, "stay_seconds": DEFAULT_STAY_SECONDS}
-            cache[key] = found
-        if cache[key]:
-            return cache[key]
-    return None
+        for p in _search_type(place_type, stop, cache):
+            found.setdefault((p["name"], p["address"]), p)  # 두 종류에 같은 가게가 나오면 한 번만
+    unknown = 10**9  # 거리를 모르면 맨 뒤로
+    nearest = sorted(found.values(), key=lambda p: unknown if p.get("distance_m") is None else p["distance_m"])
+    nearest = nearest[:MAX_CANDIDATES]
+    if not nearest:
+        return None
+    # 후보 도보 시간은 서로 상관없어서 동시에 물어봐요 (순서대로 부르면 후보 수만큼 느려져요)
+    with ThreadPoolExecutor(max_workers=MAX_CANDIDATES) as pool:
+        walks = list(pool.map(lambda p: _round_trip(stop, p, cache), nearest))
+    stay = stay_seconds(todo)
+    candidates = sorted(
+        ({"place_type": p["place_type"], "name": p["name"], "address": p["address"], "lng": p["lng"], "lat": p["lat"],
+          "round_trip_walk_seconds": walk, "stay_seconds": stay}
+         for p, walk in zip(nearest, walks) if walk is not None),
+        key=lambda c: c["round_trip_walk_seconds"],
+    )
+    if not candidates:
+        return None
+    return {**candidates[0], "candidates": candidates}
 
 
 def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
@@ -239,6 +292,7 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
               "guidance": first["guidance"], "transfers": route["transfers"], "fare": route["fare_min"],
               "stops": first["stops"]},
         places={t["id"]: _near_place(t, stop, place_cache) for t in todos},
+        leg=first,
     )
 
 
@@ -293,6 +347,15 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         option.result = _decide(option, todos, deadline)
     # 필수 할 일을 넣을 수 있는 경로 → 할 일을 많이 넣는 경로 → 빨리 도착하는 경로 순이에요
     options.sort(key=lambda o: (_missed(o, todos, "필수"), _missed(o, todos, None), o.result.total_seconds))
+    # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
+    best = options[0]
+    summary = [{"rank": i, "name": o.card["name"], "type": o.card["type"], "transfers": o.card["transfers"],
+                "fare": o.card.get("fare"),
+                "total_min": travel_minutes_from_seconds(o.result.total_seconds),
+                "arrive_at": (now + timedelta(seconds=o.result.total_seconds)).isoformat()}
+               for i, o in enumerate(options, 1)]
+    live.remember(user_id, live.LivePlan(planned_at=now, arrive_by=arrive_by, leg=best.leg,
+                                         timing=best.timing, places=dict(best.places), routes=summary))
     schedule_out = {
         "destination": {"name": schedule["destination"], "lng": destination[0], "lat": destination[1]},
         "arrive_by": arrive_by.isoformat(),

@@ -48,6 +48,10 @@ QUESTIONS = [
     "이어폰은 안 사도 돼",
     "늦을 것 같은데 편의점은 들를 수 있어?",
     "5분 늦게 나가는데 다음 버스 언제야?",
+    # 11/12: 모든 질문 종류로 AI 문장을 넓히면서 추가
+    "다른 경로 없어?",
+    "점심 뭐 먹지?",
+    "오늘 날씨 어때?",
 ]
 
 
@@ -70,27 +74,31 @@ def one(text: str) -> dict:
         row["outcome"] = "건너뜀(되묻기·결과 없음)"
         return row
     if not assistant._ai_sentence_ok(intents, result):
-        row["outcome"] = "건너뜀(정해진 문장 쓰는 질문)"
+        row["outcome"] = "건너뜀(계산 못 한 안내)"
         return row
 
+    # 질문이 두 개면 서버는 결과 목록을 주지만, 응답에는 마지막 결과만 있어서 여기서는 그 하나로 재요
     allowed = llm.extract_allowed_numbers(result, base["answer"])
     row["allowed"] = " ".join(str(n) for n in sorted(allowed))
-    payload = json.dumps({"question": text, "result": llm.short_times(result)}, ensure_ascii=False)
+    payload = json.dumps({"question": text, "result": llm.short_times(result), "draft": base["answer"]},
+                         ensure_ascii=False)
     start = time.perf_counter()
     try:
         out = llm._chat_json(llm.load_prompt("explain_result"), payload)
         ai = (out.get("answer") or "").strip()
-    except Exception as e:  # 실패·10초 초과
+    except Exception as e:  # 실패·시간 초과(5초)
         row.update(outcome=f"오류: {type(e).__name__}", seconds=f"{time.perf_counter() - start:.2f}")
         return row
     row["seconds"] = f"{time.perf_counter() - start:.2f}"
     row["ai_answer"] = ai
     if not ai:
         row["outcome"] = "오류: 빈 답변"
-    elif llm.numbers_match(ai, allowed):
-        row["outcome"] = "AI 문장 사용"
-    else:
+    elif not llm.numbers_match(ai, allowed):
         row["outcome"] = "거절(계산에 없는 숫자)"
+    elif not assistant._ai_content_ok(ai, [result]):
+        row["outcome"] = "거절(내용 검사)"
+    else:
+        row["outcome"] = "AI 문장 사용"
     return row
 
 
@@ -121,12 +129,13 @@ def main() -> None:
 
     tried = [r for r in rows if not r["outcome"].startswith("건너뜀")]
     used = sum(r["outcome"] == "AI 문장 사용" for r in tried)
-    rejected = sum(r["outcome"].startswith("거절") for r in tried)
+    rejected = sum(r["outcome"] == "거절(계산에 없는 숫자)" for r in tried)
+    content = sum(r["outcome"] == "거절(내용 검사)" for r in tried)
     errors = sum(r["outcome"].startswith("오류") for r in tried)
     secs = sorted(float(r["seconds"]) for r in tried if r["seconds"])
     print()
     print(f"AI 문장 시도 {len(tried)}번 (질문 {len(QUESTIONS)}개 × {args.runs}회, 되묻기 등 {len(rows) - len(tried)}번 건너뜀)")
-    print(f"  AI 문장 사용 {used} / 거절(지어낸 숫자) {rejected} / 오류 {errors}")
+    print(f"  AI 문장 사용 {used} / 거절(지어낸 숫자) {rejected} / 거절(경고 빠짐·하지 않은 일) {content} / 오류 {errors}")
     print("  화면에 나간 문장의 숫자 불일치: 0건 (거절된 문장은 정해진 문장으로 바뀌어요)")
     if secs:
         print(f"  AI 문장 응답 시간: 중간값 {secs[len(secs) // 2]:.2f}초, 가장 느린 것 {secs[-1]:.2f}초")

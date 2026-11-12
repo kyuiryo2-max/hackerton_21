@@ -168,10 +168,16 @@ def test_이미_넣은_할_일과_함께_판단(client, no_ai):
     assert ask(client, "커피 사야 돼", user_id="u1")["result"]["feasible"] is False
 
 
-def test_실시간_모드는_아직_안내만(client, no_ai):
+def test_실제_모드는_경로를_추천받기_전엔_안내만(client, no_ai):
+    """실제 모드 계산(#59)은 test_plan_live.py. 계획이 없으면 먼저 경로를 추천받으라고 안내해요."""
     body = ask(client, "다음 버스 언제야?", user_id="u1", demo=False)
     assert body["result"] == {"intent": "next_vehicle", "available": False}
-    assert body["answer"] == assistant.NOT_READY_ANSWER
+    assert body["answer"] == assistant.NO_PLAN_ANSWER
+
+
+@pytest.mark.parametrize("text", ["10분 늦을 것 같아", "편의점 어디야?", "환승 적은 걸로 없어?", "몇 분 남았어?"])
+def test_실제_모드_교통_질문은_모두_경로가_있어야_계산(client, no_ai, text):
+    assert ask(client, text, user_id="u1", demo=False)["answer"] == assistant.NO_PLAN_ANSWER
 
 
 # ---------- 입력 ----------
@@ -271,3 +277,28 @@ def test_demo는_질문_기록을_남기지_않고_이전_대화도_보내지_�
     ask(client, "다음 버스 언제야?")
     assert seen == [[], []]
     assert client.get("/api/messages", params={"user_id": "demo"}).json() == []
+
+
+# ---------- 한 질문에 들를 곳 두 군데 (11/12) ----------
+def _ai_two_stops(monkeypatch, *kinds):
+    monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
+    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+        "type": "question", "needs_confirm": False, "question": None, "engine": "ai",
+        "intents": [{"intent": "stopover_check", "place_types": [k], "delay_minutes": None} for k in kinds]})
+
+
+def test_두_곳_들르기는_앞_장소와_함께_판단하고_둘_다_저장(client, monkeypatch):
+    _ai_two_stops(monkeypatch, "편의점", "다이소")
+    body = ask(client, "편의점 들렀다가 다이소도 갈 수 있어?", user_id="u1")
+    assert [(t["text"], t["status"]) for t in body["todos"]] == [("편의점 들르기", "포함"), ("다이소 들르기", "대기")]
+    assert all(t["id"] for t in body["todos"]) and body["todo"] == body["todos"][-1]
+    # 두 곳을 함께 본 최종 판단 하나로 답해요 (장소마다 따로 답하면 숫자가 엇갈려 보여요)
+    assert body["answer"] == "CU 안암센트럴점에는 들를 수 있지만, 다이소 안암점까지 들르기엔 시간이 부족해요."
+    saved = {t["text"] for t in client.get("/api/todos", params={"user_id": "u1"}).json()}
+    assert {"편의점 들르기", "다이소 들르기"} <= saved
+
+
+def test_같은_장소를_두_번_말해도_한_번만_더함(client, monkeypatch):
+    _ai_two_stops(monkeypatch, "편의점", "편의점")
+    body = ask(client, "편의점 들르고 편의점도", user_id="u1")
+    assert body["result"]["feasible"] is True
