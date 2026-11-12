@@ -6,6 +6,7 @@ import 'home_screen.dart';
 import '../models/todo_item.dart';
 import '../models/schedule.dart';
 import 'planner_screen.dart';
+import '../models/place.dart';
 import 'navigation_screen.dart';
 import 'assistant_screen.dart';
 
@@ -25,6 +26,7 @@ class _MainScreenState extends State<MainScreen> {
   late final List<Widget> _screens;
   final ValueNotifier<TodoItem?> _waypoint = ValueNotifier<TodoItem?>(null);
   final ValueNotifier<Schedule?> _requestedSchedule = ValueNotifier<Schedule?>(null);
+  final ValueNotifier<Place?> _requestedDestination = ValueNotifier<Place?>(null);
 
   @override
   void initState() {
@@ -37,9 +39,16 @@ class _MainScreenState extends State<MainScreen> {
       onOpenTab: _onDestinationSelected,
       onOpenAssistant: _openAssistant,
       onChangeMode: _changeMode,
+      onSearchDestination: _searchDestination,
     ),
     // 탭: 0 홈(경유 판단·추천) / 1 길찾기(경로 비교) / 2 할 일·일정(시간표)
-    NavigationScreen(selectedWaypoint: _waypoint, requestedSchedule: _requestedSchedule),
+    NavigationScreen(
+      selectedWaypoint: _waypoint,
+      requestedSchedule: _requestedSchedule,
+      requestedDestination: _requestedDestination,
+      onOpenAssistant: _openAssistant,
+      onOpenPlanner: () => _onDestinationSelected(2),
+    ),
     PlannerScreen(onOpenScheduleRoutes: _openScheduleRoutes),
     ];
   }
@@ -68,6 +77,13 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _openRoutes() => _onDestinationSelected(1);
+
+  /// 홈 검색창: 일정 없이 목적지만으로 이동 탭에서 경로를 찾아요.
+  void _searchDestination(Place place) {
+    _requestedDestination.value = null;
+    _requestedDestination.value = place;
+    _onDestinationSelected(1);
+  }
 
   void _openAssistant([String? question]) => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => AssistantScreen(initialQuestion: question)),
@@ -110,6 +126,7 @@ class _MainScreenState extends State<MainScreen> {
     _pageController.dispose();
     _waypoint.dispose();
     _requestedSchedule.dispose();
+    _requestedDestination.dispose();
     super.dispose();
   }
 
@@ -119,6 +136,8 @@ class _MainScreenState extends State<MainScreen> {
       body: Stack(
         children: [
           PageView(
+            // 지도를 끌 때 탭이 넘어가지 않게 좌우 넘김은 끄고 하단 탭으로만 이동해요
+            physics: const NeverScrollableScrollPhysics(),
             controller: _pageController,
             onPageChanged: _onPageChanged,
             children: _screens,
@@ -198,7 +217,7 @@ class _MainScreenState extends State<MainScreen> {
           NavigationDestination(
             icon: Icon(Icons.alt_route_outlined),
             selectedIcon: Icon(Icons.alt_route),
-            label: '길찾기',
+            label: '이동',
           ),
           NavigationDestination(
             icon: Icon(Icons.calendar_month_outlined),

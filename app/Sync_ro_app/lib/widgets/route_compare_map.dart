@@ -22,7 +22,13 @@ class RouteCompareMap extends StatelessWidget {
     this.originName,
     this.destinationName,
     this.height = 300,
+    this.stopPoint,
+    this.stopLabel,
   });
+
+  /// 적용한 할 일의 경유지 (좌표가 있을 때만)
+  final LatLng? stopPoint;
+  final String? stopLabel;
 
   final List<RouteCandidate> routes;
   final String? selectedId;
@@ -174,6 +180,26 @@ class RouteCompareMap extends StatelessWidget {
       }
     }
 
+    if (stopPoint != null) {
+      points.add(stopPoint!);
+      markers.add(Marker(
+        point: stopPoint!,
+        width: 140,
+        height: 56,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(color: AppTheme.ok, borderRadius: BorderRadius.circular(7)),
+            child: Text(stopLabel ?? '경유지',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+          ),
+          const Icon(Icons.storefront_rounded, color: AppTheme.ok, size: 22),
+        ]),
+      ));
+    }
     if (origin != null) {
       points.add(origin!);
       markers.add(_endMarker(origin!, '${originName ?? '출발'} 출발', square: false));
