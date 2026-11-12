@@ -103,16 +103,103 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         _filterDay = null;
       });
 
-  Future<void> _editRoutine(Routine? existing, {int? weekday, int? startMinutes}) async {
-    final result = await showDialog<_RoutineResult>(
-      context: context,
-      builder: (_) => _RoutineDialog(existing: existing, weekday: weekday, startMinutes: startMinutes),
+  // ---------- 반복 일정 (시간표) ----------
+
+  /// 시간표 빈 칸: 그 요일·시각으로 "매주 반복" 일정 추가
+  Future<void> _addRoutineAt(int weekday, int minutes) async {
+    final probe = Routine(id: 0, title: '', weekdays: [weekday], startMinutes: minutes, endMinutes: minutes + 60);
+    final start = probe.nextStart(DateTime.now());
+    final saved = await Navigator.push<Schedule>(
+      context,
+      MaterialPageRoute(builder: (_) => ScheduleFormScreen(
+        startRepeating: true,
+        initial: Schedule(id: 0, title: '', location: '', startTime: start, endTime: start.add(const Duration(hours: 1))),
+      )),
     );
-    if (result == null) return;
-    if (result.delete && existing != null) {
-      await store.deleteRoutine(existing.id);
-    } else if (result.routine != null) {
-      await store.upsertRoutine(result.routine!);
+    if (saved != null && mounted) widget.onOpenScheduleRoutes?.call(saved);
+  }
+
+  Future<void> _editRoutine(Routine r) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => ScheduleFormScreen(routine: r)));
+  }
+
+  String _routineDays(Routine r) =>
+      [for (var d = 1; d <= 7; d++) if (r.weekdays.contains(d)) _weekdayNames[d - 1]].join('·');
+
+  /// 반복 일정의 다음 회차로 경로 보기. 그 회차 일정이 서버에 없으면 지금 만들어요.
+  Future<void> _routeRoutine(Routine r) async {
+    if (!r.canRoute) {
+      _snack('이 반복 일정은 장소가 정해지지 않았어요. 장소를 고르고 저장하면 경로를 볼 수 있어요.');
+      return _editRoutine(r);
+    }
+    final controller = ScheduleScope.of(context);
+    final next = r.occurrence(r.nextStart(DateTime.now()));
+    Schedule? found;
+    for (final s in controller.schedules) {
+      if (s.title == next.title && s.startTime == next.startTime && s.location == next.location) found = s;
+    }
+    try {
+      found ??= await controller.addSchedule(
+        title: next.title,
+        location: next.location,
+        destinationPlaceId: next.destinationPlaceId,
+        destinationAddress: next.destinationAddress,
+        destinationLatitude: next.destinationLatitude,
+        destinationLongitude: next.destinationLongitude,
+        originMode: next.originMode,
+        originPlaceId: next.originPlaceId,
+        originName: next.originName,
+        originAddress: next.originAddress,
+        originLatitude: next.originLatitude,
+        originLongitude: next.originLongitude,
+        startTime: next.startTime,
+        endTime: next.endTime,
+        preparationMinutes: next.preparationMinutes,
+      );
+    } catch (e) {
+      _snack('일정 저장 실패: $e');
+      return;
+    }
+    if (mounted) widget.onOpenScheduleRoutes?.call(found!);
+  }
+
+  Future<void> _openRoutine(Routine r) async {
+    final next = r.nextStart(DateTime.now());
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            title: Text(r.title, style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: Text('매주 ${_routineDays(r)} ${_hmMinutes(r.startMinutes)}까지'
+                '${r.location.isEmpty ? '' : ' · ${r.location}'}'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.route_rounded, color: AppTheme.primary),
+            title: Text(r.canRoute ? '다음 회차 경로 보기' : '장소 정하고 경로 보기'),
+            subtitle: Text('${_dayLabel(next, DateTime.now())} ${_hm(next)}까지 도착'),
+            onTap: () => Navigator.pop(sheet, 'route'),
+          ),
+          ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('수정'), onTap: () => Navigator.pop(sheet, 'edit')),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+            title: const Text('반복 그만하기 (시간표에서 삭제)', style: TextStyle(color: AppTheme.danger)),
+            onTap: () => Navigator.pop(sheet, 'delete'),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'route':
+        await _routeRoutine(r);
+      case 'edit':
+        await _editRoutine(r);
+      case 'delete':
+        await store.deleteRoutine(r.id);
     }
   }
 
@@ -327,24 +414,22 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
       // 시간표: 매주 반복 (장우 님 화면 그대로)
       const SizedBox(height: 26),
-      _SectionHeader(
+      const _SectionHeader(
         title: '시간표',
-        subtitle: '매주 반복되는 일정',
-        actionLabel: '반복 추가',
-        onAction: () => _editRoutine(null, weekday: _dateOnly(_now).weekday),
+        subtitle: '매주 반복 일정 · "일정 추가"에서 "매주 반복"을 고르면 여기에 들어가요',
       ),
       _Timetable(
         weekStart: _weekStart,
         now: _now,
         routines: store.routines,
         schedules: const [],
-        onTapRoutine: (r) => _editRoutine(r),
+        onTapRoutine: _openRoutine,
         onTapSchedule: (s) => widget.onOpenScheduleRoutes?.call(s),
-        onTapEmpty: (weekday, minutes) => _editRoutine(null, weekday: weekday, startMinutes: minutes),
+        onTapEmpty: _addRoutineAt,
       ),
       const SizedBox(height: 6),
       Text(
-        '빈 칸을 누르면 그 요일·시간에 반복 일정을 넣고, 블록을 누르면 고쳐요. 이 기기에만 저장돼요.'
+        '빈 칸을 누르면 그 요일·시각으로 반복 일정을 넣고, 블록을 누르면 다음 회차 경로를 볼 수 있어요. 이 기기에만 저장돼요.'
         '${RuntimeMode.instance.isDemo ? ' (시연 모드 예시 시간표)' : ''}',
         style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
       ),
@@ -1133,164 +1218,5 @@ class _WeekStrip extends StatelessWidget {
           }),
         ),
     ]);
-  }
-}
-
-
-class _RoutineResult {
-  const _RoutineResult({this.routine, this.delete = false});
-  final Routine? routine;
-  final bool delete;
-}
-
-class _RoutineDialog extends StatefulWidget {
-  const _RoutineDialog({this.existing, this.weekday, this.startMinutes});
-  final Routine? existing;
-  final int? weekday;
-  final int? startMinutes;
-
-  @override
-  State<_RoutineDialog> createState() => _RoutineDialogState();
-}
-
-class _RoutineDialogState extends State<_RoutineDialog> {
-  late final TextEditingController _title = TextEditingController(text: widget.existing?.title ?? '');
-  late final TextEditingController _location = TextEditingController(text: widget.existing?.location ?? '');
-  late final Set<int> _days = {...?widget.existing?.weekdays, if (widget.existing == null) widget.weekday ?? DateTime.now().weekday};
-  late int _start = widget.existing?.startMinutes ?? widget.startMinutes ?? 9 * 60;
-  late int _end = widget.existing?.endMinutes ?? (_start + 60).clamp(0, 24 * 60 - 1).toInt();
-  late int _color = widget.existing?.colorIndex ?? 0;
-  late bool _isTodo = widget.existing?.isTodo ?? false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _title.dispose();
-    _location.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pick(bool start) async {
-    final current = start ? _start : _end;
-    final t = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(hour: current ~/ 60, minute: current % 60),
-    );
-    if (t == null) return;
-    setState(() {
-      final m = t.hour * 60 + t.minute;
-      if (start) {
-        final length = _end - _start;
-        _start = m;
-        _end = (m + (length > 0 ? length : 60)).clamp(0, 24 * 60 - 1).toInt();
-      } else {
-        _end = m;
-      }
-    });
-  }
-
-  void _save() {
-    final title = _title.text.trim();
-    if (title.isEmpty) return setState(() => _error = '이름을 입력해 주세요.');
-    if (_days.isEmpty) return setState(() => _error = '요일을 하나 이상 골라 주세요.');
-    if (_end <= _start) return setState(() => _error = '끝나는 시간이 시작보다 늦어야 해요.');
-    Navigator.pop(
-      context,
-      _RoutineResult(
-        routine: Routine(
-          id: widget.existing?.id ?? PlannerStore.instance.newRoutineId(),
-          title: title,
-          location: _location.text.trim(),
-          weekdays: (_days.toList()..sort()),
-          startMinutes: _start,
-          endMinutes: _end,
-          colorIndex: _color,
-          isTodo: _isTodo,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? '매주 반복' : '반복 수정'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('일정'), icon: Icon(Icons.event_repeat_rounded)),
-                ButtonSegment(value: true, label: Text('할 일'), icon: Icon(Icons.task_alt_rounded)),
-              ],
-              selected: {_isTodo},
-              onSelectionChanged: (v) => setState(() => _isTodo = v.first),
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _title,
-            decoration: InputDecoration(labelText: _isTodo ? '할 일 (예: 분리수거, 빨래)' : '이름 (예: 전공 수업, 헬스)'),
-          ),
-          const SizedBox(height: 10),
-          TextField(controller: _location, decoration: const InputDecoration(labelText: '장소 (선택)')),
-          const SizedBox(height: 14),
-          const Text('요일', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            for (var d = 1; d <= 7; d++)
-              FilterChip(
-                showCheckmark: false,
-                label: Text(_weekdayNames[d - 1]),
-                selected: _days.contains(d),
-                selectedColor: AppTheme.primarySoft,
-                onSelected: (on) => setState(() => on ? _days.add(d) : _days.remove(d)),
-              ),
-          ]),
-          const SizedBox(height: 6),
-          Wrap(spacing: 6, children: [
-            ActionChip(label: const Text('평일'), onPressed: () => setState(() => _days..clear()..addAll([1, 2, 3, 4, 5]))),
-            ActionChip(label: const Text('매일'), onPressed: () => setState(() => _days..clear()..addAll([1, 2, 3, 4, 5, 6, 7]))),
-          ]),
-          const SizedBox(height: 14),
-          Row(children: [
-            Expanded(child: OutlinedButton(onPressed: () => _pick(true), child: Text('시작 ${_hmMinutes(_start)}'))),
-            const SizedBox(width: 8),
-            Expanded(child: OutlinedButton(onPressed: () => _pick(false), child: Text('끝 ${_hmMinutes(_end)}'))),
-          ]),
-          const SizedBox(height: 14),
-          Row(children: [
-            for (var i = 0; i < _palette.length; i++)
-              GestureDetector(
-                onTap: () => setState(() => _color = i),
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(
-                    color: _palette[i].$1,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: _palette[i].$2, width: _color == i ? 3 : 1),
-                  ),
-                ),
-              ),
-          ]),
-          if (_error != null) ...[
-            const SizedBox(height: 10),
-            Text(_error!, style: const TextStyle(color: AppTheme.danger, fontSize: 13)),
-          ],
-        ]),
-      ),
-      actions: [
-        if (widget.existing != null)
-          TextButton(
-            onPressed: () => Navigator.pop(context, const _RoutineResult(delete: true)),
-            child: const Text('삭제', style: TextStyle(color: AppTheme.danger)),
-          ),
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
-        FilledButton(onPressed: _save, child: const Text('저장')),
-      ],
-    );
   }
 }

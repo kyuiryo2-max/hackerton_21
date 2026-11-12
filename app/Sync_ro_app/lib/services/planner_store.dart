@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/runtime_mode.dart';
+import '../models/schedule.dart';
 
 /// 매주 반복되는 일정·할 일 (수업, 출근, 운동, 분리수거 …). 지금은 이 기기에만 저장해요.
 /// 서버 일정 API에 반복 필드가 생기면 그쪽으로 옮겨요.
@@ -17,7 +18,65 @@ class Routine {
     this.location = '',
     this.colorIndex = 0,
     this.isTodo = false,
+    this.trip,
   });
+
+  /// 경로에 필요한 값 (목적지·출발지 좌표, 준비 시간). "일정 추가 → 매주 반복"으로 만들면 채워져요.
+  /// 없으면(예전 시간표·시연 예시) 경로를 보기 전에 장소를 한 번 골라야 해요.
+  final Map<String, dynamic>? trip;
+
+  bool get canRoute => trip != null && trip!['lat'] is num && trip!['lng'] is num;
+
+  /// now 뒤에 오는 가장 가까운 회차의 도착 시각
+  DateTime nextStart(DateTime now) {
+    final days = weekdays.isEmpty ? [now.weekday] : weekdays;
+    for (var i = 0; i < 8; i++) {
+      final d = DateTime(now.year, now.month, now.day + i, startMinutes ~/ 60, startMinutes % 60);
+      if (days.contains(d.weekday) && d.isAfter(now)) return d;
+    }
+    return DateTime(now.year, now.month, now.day + 7, startMinutes ~/ 60, startMinutes % 60);
+  }
+
+  /// 이 반복 일정의 한 회차를 일정 모양으로 (id 0 = 아직 서버에 없음)
+  Schedule occurrence(DateTime start) {
+    final t = trip ?? const {};
+    double? num_(String k) => (t[k] as num?)?.toDouble();
+    String? str(String k) => t[k] is String && (t[k] as String).isNotEmpty ? t[k] as String : null;
+    final length = endMinutes > startMinutes ? endMinutes - startMinutes : 60;
+    return Schedule(
+      id: 0,
+      title: title,
+      location: location,
+      destinationPlaceId: str('place_id'),
+      destinationAddress: str('address'),
+      destinationLatitude: num_('lat'),
+      destinationLongitude: num_('lng'),
+      originMode: t['origin_mode'] == 'place' ? 'place' : 'current',
+      originPlaceId: str('origin_place_id'),
+      originName: str('origin_name'),
+      originAddress: str('origin_address'),
+      originLatitude: num_('origin_lat'),
+      originLongitude: num_('origin_lng'),
+      startTime: start,
+      endTime: start.add(Duration(minutes: length)),
+      preparationMinutes: (t['prep'] as num?)?.toInt() ?? 30,
+    );
+  }
+
+  /// 일정 값에서 경로에 필요한 값만 뽑아요
+  static Map<String, dynamic> tripOf(Schedule s) => {
+        'place_id': s.destinationPlaceId,
+        'address': s.destinationAddress,
+        'lat': s.destinationLatitude,
+        'lng': s.destinationLongitude,
+        'origin_mode': s.originMode,
+        'origin_place_id': s.originPlaceId,
+        'origin_name': s.originName,
+        'origin_address': s.originAddress,
+        'origin_lat': s.originLatitude,
+        'origin_lng': s.originLongitude,
+        'prep': s.preparationMinutes,
+      };
 
   /// true 면 반복 할 일 (예: 매주 화요일 분리수거), false 면 반복 일정
   final bool isTodo;
@@ -40,6 +99,7 @@ class Routine {
     int? endMinutes,
     int? colorIndex,
     bool? isTodo,
+    Map<String, dynamic>? trip,
   }) =>
       Routine(
         id: id,
@@ -50,6 +110,7 @@ class Routine {
         endMinutes: endMinutes ?? this.endMinutes,
         colorIndex: colorIndex ?? this.colorIndex,
         isTodo: isTodo ?? this.isTodo,
+        trip: trip ?? this.trip,
       );
 
   Map<String, dynamic> toJson() => {
@@ -61,6 +122,7 @@ class Routine {
         'end': endMinutes,
         'color': colorIndex,
         'todo': isTodo,
+        if (trip != null) 'trip': trip,
       };
 
   static Routine? fromJson(dynamic raw) {
@@ -76,6 +138,7 @@ class Routine {
       endMinutes: (raw['end'] as num).toInt(),
       colorIndex: (raw['color'] as num?)?.toInt() ?? 0,
       isTodo: raw['todo'] == true,
+      trip: raw['trip'] is Map ? Map<String, dynamic>.from(raw['trip'] as Map) : null,
     );
   }
 }
