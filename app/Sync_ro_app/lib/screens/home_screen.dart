@@ -519,6 +519,8 @@ class _ModePill extends StatelessWidget {
             Icon(isDemo ? Icons.science_outlined : Icons.person_outline, size: 15, color: tone),
             const SizedBox(width: 4),
             Text(isDemo ? '시연 모드' : '실제 모드', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tone)),
+            // 눌러서 바꿀 수 있다는 표시
+            Icon(Icons.swap_horiz_rounded, size: 15, color: tone),
           ]),
         ),
       ),
