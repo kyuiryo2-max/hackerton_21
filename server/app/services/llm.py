@@ -35,7 +35,8 @@ def place_types() -> list[str]:
 
 
 # AI가 응답하지 않을 때 기다리는 최대 시간(초). 넘으면 바로 키워드 규칙으로 넘어가요.
-LLM_TIMEOUT_SECONDS = 10
+# 멘토링(11/11): 10초는 사용자에게 너무 김. 측정값은 보통 1~2초, 가장 느린 것 4.5초라 5초로 줄였어요 (할 일 63번).
+LLM_TIMEOUT_SECONDS = 5
 
 
 @lru_cache

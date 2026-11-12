@@ -85,8 +85,12 @@ def search_places(
     category: str | None = None,
     radius_m: int = 500,
     size: int = 5,
+    sort: str = "distance",
 ) -> list[dict]:
-    """주변 장소를 가까운 순으로 찾아요. keyword나 category 중 하나는 있어야 해요."""
+    """주변 장소를 찾아요. keyword나 category 중 하나는 있어야 해요.
+
+    sort: "distance"(가까운 순, 기본) 또는 "accuracy"(검색어와 잘 맞는 순, keyword 검색에서만)
+    """
     if bool(keyword) == bool(category):
         raise ValueError("keyword와 category 중 하나만 주세요")
     params: dict = {
@@ -94,7 +98,7 @@ def search_places(
         "y": center[1],
         "radius": radius_m,
         "size": size,
-        "sort": "distance",
+        "sort": sort,
     }
     if keyword:
         path = "/v2/local/search/keyword.json"
