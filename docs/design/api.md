@@ -95,6 +95,7 @@
 - `intents`, `needs_confirm`, `question`: json-format.md 2번 그대로
 - `needs_confirm: true` 면 `result: null`, 앱은 `question`을 대화창에 보여 준다
 - `todo`: 들르기 질문으로 저장된 할 일 (`source: 질문`, `importance: 필수`). 아니면 `null`
+- `todos`: 이번 질문으로 저장된 할 일 전부 (11/12). "편의점 들렀다가 약국도 갈 수 있어?"처럼 들를 곳이 두 군데면 AI가 들르기를 장소마다 따로 뽑고, 서버는 뒤 장소를 앞 장소와 **함께** 들를 수 있는지로 판단한다. `todo`는 그중 마지막 것 (예전 앱 호환)
 - `result`: 코드 계산 결과. 질문이 여러 종류면 마지막 계산 결과이고, `answer`는 순서대로 이어 붙인다. #12 회의 8번은 아직 미정이라 아래는 지금 서버 모양이다
   - `next_vehicle`: `route`, `minutes`, `next_minutes`
   - `stopover_check`: `feasible`, `place{name, address}`, `max_stay_min`, `board_at`

@@ -116,23 +116,57 @@ def _included(user_id: str) -> list[tuple[StopCandidate, dict]]:
     return rows
 
 
+def _stop_text(item: dict, state: dict) -> str:
+    """들르기로 저장할 할 일 이름. 한 질문에 들를 곳이 여러 개면 장소 종류로 나눠 이름 붙여요."""
+    if item.get("todo_text"):
+        return item["todo_text"]
+    if state.get("stopovers", 1) > 1 and item["place_types"]:
+        return f"{item['place_types'][0]} 들르기"
+    # AI 출력에는 들르기 할 일 이름이 없어서 문장에서 다듬어요 ("아 이어폰 사야 돼" → "이어폰 사기")
+    return rules.todo_text(state["text"])
+
+
+def _judge_stop(timing, included: list, place: dict, state: dict, deadline: int):
+    """이미 넣은 할 일 + 이 질문에서 앞서 물은 들를 곳 + 새 장소를 함께 판단해요.
+
+    "편의점 들렀다가 약국도 갈 수 있어?" → 편의점을 먼저 넣고, 약국은 편의점과 함께 되는지 봐요.
+    """
+    earlier = state.setdefault("new_stops", [])
+    known = included + earlier
+    same = [c.todo_id for c, p in known if p["name"] == place["name"]]
+    new = StopCandidate(-(len(earlier) + 1), "필수", place["round_trip_walk_seconds"], place["stay_seconds"])
+    result = decide_stops(timing, [c for c, _ in known] + ([] if same else [new]), deadline)
+    if not same:
+        earlier.append((new, place))
+    target = same[0] if same else new.todo_id
+    decision = next(d for d in result.decisions if d.todo_id == target)
+    return result, decision
+
+
+def _short_answer(place: dict, state: dict) -> str:
+    """들를 시간이 없을 때. 한 질문에 들를 곳이 여러 개면 어느 곳인지 이름을 넣어요."""
+    if state.get("stopovers", 1) > 1:
+        return f"{place['name']}까지 들르기엔 시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+    return "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+
+
+def _remember_todo(state: dict, item: dict, decision) -> None:
+    todo = {"text": _stop_text(item, state), "place_types": item["place_types"], "importance": "필수",
+            "status": STATUS[decision.status], "source": "질문"}
+    state["todo"] = todo
+    state.setdefault("todos", []).append(todo)
+
+
 def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     places = {p["place_type"]: p for p in demo.scenario()["places"]}
     place = next((places[t] for t in item["place_types"] if t in places), None)
-    # AI 출력에는 들르기 할 일 이름이 없어서 문장에서 다듬어요 ("아 이어폰 사야 돼" → "이어폰 사기")
-    text = item.get("todo_text") or rules.todo_text(state["text"])
     if place is None:
         kind = item["place_types"][0]
         return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None, "board_at": None},
                 f"시연 지역에서는 {_josa(kind, '을를')} 찾지 못했어요.")
-    included = _included(state["user_id"])
     # 이미 들르기로 한 장소면 다시 더하지 않아요 (이어폰을 넣은 뒤 "편의점 들러도 돼?")
-    same = [c.todo_id for c, p in included if p["name"] == place["name"]]
-    new = StopCandidate(-1, "필수", place["round_trip_walk_seconds"], place["stay_seconds"])
-    candidates = [c for c, _ in included] + ([] if same else [new])
-    result = decide_stops(demo.route_timing(state["elapsed"]), candidates, demo.deadline_seconds(state["elapsed"]))
-    target = same[0] if same else -1
-    decision = next(d for d in result.decisions if d.todo_id == target)
+    result, decision = _judge_stop(demo.route_timing(state["elapsed"]), _included(state["user_id"]), place, state,
+                                   demo.deadline_seconds(state["elapsed"]))
     feasible = decision.status == "included"
     now = demo.current_time(state["elapsed"])
     out = {
@@ -142,11 +176,10 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         "max_stay_min": wait_minutes_from_seconds(result.max_stay_seconds) if feasible and result.max_stay_seconds is not None else None,
         "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
     }
-    state["todo"] = {"text": text, "place_types": item["place_types"], "importance": "필수",
-                     "status": STATUS[decision.status], "source": "질문"}
+    _remember_todo(state, item, decision)
     if feasible:
         return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
-    return out, "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+    return out, _short_answer(place, state)
 
 
 def _late_answer(delay, board_at, arrive_at, on_time: bool) -> str:
@@ -340,22 +373,16 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     if ctx is None:
         return _no_plan("stopover_check")
     plan, now, elapsed, vehicles = ctx
-    text = item.get("todo_text") or rules.todo_text(state["text"])
     stop = tuple(plan.leg["start"])
     place = planner._near_place({"place_types": item["place_types"]}, stop, {}) if item["place_types"] else None
     if place is None:
         kind = item["place_types"][0] if item["place_types"] else "들를 곳"
         return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None, "board_at": None},
                 f"정류장 근처에서 {_josa(kind, '을를')} 찾지 못했어요.")
-    included = _live_included(plan, state["user_id"])
-    same = [c.todo_id for c, p in included if p["name"] == place["name"]]
-    new = StopCandidate(-1, "필수", place["round_trip_walk_seconds"], place["stay_seconds"])
     timing = replace(plan.timing, first_walk_seconds=max(plan.timing.first_walk_seconds - elapsed, 0),
                      vehicle_seconds=vehicles)
     deadline = int((plan.arrive_by - now).total_seconds())
-    result = decide_stops(timing, [c for c, _ in included] + ([] if same else [new]), deadline)
-    target = same[0] if same else -1
-    decision = next(d for d in result.decisions if d.todo_id == target)
+    result, decision = _judge_stop(timing, _live_included(plan, state["user_id"]), place, state, deadline)
     feasible = decision.status == "included"
     out = {
         "intent": "stopover_check",
@@ -364,13 +391,12 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         "max_stay_min": wait_minutes_from_seconds(result.max_stay_seconds) if feasible and result.max_stay_seconds is not None else None,
         "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
     }
-    state["todo"] = {"text": text, "place_types": item["place_types"], "importance": "필수",
-                     "status": STATUS[decision.status], "source": "질문"}
+    _remember_todo(state, item, decision)
     if feasible:
         if out["max_stay_min"] is None:
             return out, f"{place['name']}에 들를 수 있어요."
         return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
-    return out, "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+    return out, _short_answer(place, state)
 
 
 def _live_running_late(item: dict, state: dict) -> tuple[dict, str]:
@@ -494,7 +520,8 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
         repo.add_message(user_id, "user", text, intents)
 
     result, results, answers = None, [], []
-    state = {"user_id": user_id, "text": text, "elapsed": 0, "todo": None}
+    state = {"user_id": user_id, "text": text, "elapsed": 0, "todo": None, "todos": [],
+             "stopovers": sum(i["intent"] == "stopover_check" for i in intents)}
     if classified["needs_confirm"]:
         answers.append(classified["question"])
     else:
@@ -512,10 +539,12 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
             results.append(result)
             answers.append(answer)
 
-    todo = state["todo"]
-    if todo and user_id != DEMO_USER_ID:
-        saved = repo.add_todo(user_id, todo["text"], todo["place_types"], status=todo["status"], source="질문")
-        todo = {**todo, "id": saved["id"]}
+    # 들르기 질문으로 생긴 할 일 저장. 한 질문에 두 곳이면 둘 다 (todo는 마지막 것, 예전 앱 호환)
+    todos = state["todos"]
+    if user_id != DEMO_USER_ID:
+        todos = [{**t, "id": repo.add_todo(user_id, t["text"], t["place_types"], status=t["status"],
+                                           source="질문")["id"]} for t in todos]
+    todo = todos[-1] if todos else None
     answer = " ".join(dict.fromkeys(answers))
 
     # #37: AI 답변 문장 생성 및 숫자 대조 검증 (기존 코드 안전망 유지)
@@ -534,5 +563,6 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
         "result": None if classified["needs_confirm"] else result,
         "answer": answer,
         "todo": todo,
+        "todos": todos,
         "engine": engine,
     }

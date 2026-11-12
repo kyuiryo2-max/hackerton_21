@@ -277,3 +277,28 @@ def test_demo는_질문_기록을_남기지_않고_이전_대화도_보내지_�
     ask(client, "다음 버스 언제야?")
     assert seen == [[], []]
     assert client.get("/api/messages", params={"user_id": "demo"}).json() == []
+
+
+# ---------- 한 질문에 들를 곳 두 군데 (11/12) ----------
+def _ai_two_stops(monkeypatch, *kinds):
+    monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
+    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+        "type": "question", "needs_confirm": False, "question": None, "engine": "ai",
+        "intents": [{"intent": "stopover_check", "place_types": [k], "delay_minutes": None} for k in kinds]})
+
+
+def test_두_곳_들르기는_앞_장소와_함께_판단하고_둘_다_저장(client, monkeypatch):
+    _ai_two_stops(monkeypatch, "편의점", "다이소")
+    body = ask(client, "편의점 들렀다가 다이소도 갈 수 있어?", user_id="u1")
+    assert [(t["text"], t["status"]) for t in body["todos"]] == [("편의점 들르기", "포함"), ("다이소 들르기", "대기")]
+    assert all(t["id"] for t in body["todos"]) and body["todo"] == body["todos"][-1]
+    assert body["answer"] == ("CU 안암센트럴점에 들를 수 있어요. 최대 6분 있을 수 있어요. "
+                              "다이소 안암점까지 들르기엔 시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요.")
+    saved = {t["text"] for t in client.get("/api/todos", params={"user_id": "u1"}).json()}
+    assert {"편의점 들르기", "다이소 들르기"} <= saved
+
+
+def test_같은_장소를_두_번_말해도_한_번만_더함(client, monkeypatch):
+    _ai_two_stops(monkeypatch, "편의점", "편의점")
+    body = ask(client, "편의점 들르고 편의점도", user_id="u1")
+    assert body["result"]["feasible"] is True

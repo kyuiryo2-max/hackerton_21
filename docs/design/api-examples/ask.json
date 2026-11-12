@@ -31,6 +31,7 @@
           },
           "answer": "2115번이 12분 뒤에 와요. 그다음 차는 20분 뒤예요.",
           "todo": null,
+          "todos": [],
           "engine": "ai"
         }
       }
@@ -79,6 +80,17 @@
             "status": "포함",
             "source": "질문"
           },
+          "todos": [
+            {
+              "text": "이어폰 사기",
+              "place_types": [
+                "편의점"
+              ],
+              "importance": "필수",
+              "status": "포함",
+              "source": "질문"
+            }
+          ],
           "engine": "ai"
         }
       },
@@ -108,6 +120,7 @@
           "result": null,
           "answer": "어디를 들르고 싶은지 알려 줄래요?",
           "todo": null,
+          "todos": [],
           "engine": "ai"
         }
       },
@@ -139,6 +152,7 @@
           },
           "answer": "이동과 할 일에 관한 질문만 도와드릴 수 있어요.",
           "todo": null,
+          "todos": [],
           "engine": "ai"
         }
       }

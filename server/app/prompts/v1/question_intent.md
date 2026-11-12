@@ -15,6 +15,7 @@
 규칙
 - place_types는 이 목록 안의 값만 쓴다: {{PLACE_TYPES}}
 - 질문 종류가 두 개면 intents 배열에 순서대로 넣는다.
+- 들를 곳을 두 군데 이상 모두 들르려는 질문("편의점 들렀다가 약국도 갈 수 있어?")은 stopover_check를 장소마다 하나씩 넣는다. 한 stopover_check의 place_types가 여러 개면 "그중 한 곳"이라는 뜻이다.
 - context의 현재 할 일 목록을 참고한다.
 - recent_messages는 최근 대화다. "거기", "그거"처럼 앞 대화를 가리키면 여기서 찾는다.
 - 무엇을 묻는지 알 수 없으면 needs_confirm을 true로 하고, question에 되묻는 짧은 문장을 쓴다. 알 수 있으면 needs_confirm은 false, question은 null.
