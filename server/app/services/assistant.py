@@ -4,23 +4,27 @@
 - ask: 질문 분류 → 질문 종류별 계산 → 답변 (/api/ask)
 
 AI 키가 없거나 AI 호출이 실패하면 키워드 규칙(rules.py)으로 처리하고 engine="rule"로 알려요.
-계산은 시연 모드(demo=true)만 해요. 실시간은 출발 위치가 정해진 뒤 연결해요.
+시연 모드(demo=true)는 시나리오 고정값으로, 실제 모드는 마지막 실시간 계획(live.py)의 경로로 계산해요.
+실제 모드는 다음 차·들르기·남은 시간(#59)만 계산하고, 나머지 교통 질문은 아직 준비 중이라고 안내해요.
 답변 문장의 숫자는 모두 코드가 계산한 값이에요.
 """
 import logging
-from datetime import timedelta
+from dataclasses import replace
+from datetime import datetime, timedelta
 
 from app import config
 from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
-from app.services import demo, llm, rules
-from app.services.planner import ACTIVE, STATUS, _demo_place
+from app.services import demo, live, llm, planner, rules
+from app.services.planner import ACTIVE, KST, STATUS, _demo_place
 from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, decide_stops
 from app.services.timecalc import wait_minutes_from_seconds
 
 log = logging.getLogger(__name__)
 
 NOT_READY_ANSWER = "실시간 계산은 아직 준비 중이에요. 시연 모드에서 확인해 주세요."
+NO_PLAN_ANSWER = "먼저 길찾기에서 경로를 추천받아 주세요. 그 경로로 계산해 드릴게요."
+NO_ARRIVAL_ANSWER = "지금은 실시간 도착 정보를 찾지 못했어요."
 UNSUPPORTED_ANSWER = "이동과 할 일에 관한 질문만 도와드릴 수 있어요."
 NEEDS_TRANSIT = {"next_vehicle", "stopover_check", "running_late", "time_left", "place_info", "change_route"}
 
@@ -220,7 +224,119 @@ def _ai_sentence_ok(intents: list[dict], result: dict) -> bool:
     질문이 두 개면 AI가 앞 질문의 답을 빠뜨려서 정해진 문장을 써요."""
     if len(intents) != 1 or intents[0].get("intent") not in AI_SENTENCE_INTENTS:
         return False
+    if result.get("available") is False:  # 계산을 못 한 안내 문장은 그대로 써요 (실제 모드 계획 없음 등)
+        return False
     return result.get("intent") in AI_SENTENCE_INTENTS
+
+
+# ---------- 질문 종류별 계산 (실제 모드, #59) ----------
+def _now() -> datetime:
+    return datetime.now(KST).replace(microsecond=0)
+
+
+def _live_context(state: dict):
+    """(계획, 지금, 계획 뒤 지난 초, 실시간 차 도착 초). 계획이 없으면 None."""
+    now = _now()
+    plan = live.recall(state["user_id"], now)
+    if plan is None:
+        return None
+    elapsed = int((now - plan.planned_at).total_seconds())
+    return plan, now, elapsed, planner._vehicle_seconds(plan.leg)
+
+
+def _route_label(leg: dict) -> tuple[str, str]:
+    """(결과에 넣을 노선 이름, 답변에 쓸 이름). 버스 "2115" → "2115번", 지하철 "6호선" → "6호선"."""
+    name = (leg.get("vehicles") or [""])[0] or leg.get("guidance", "")
+    return name, f"{name}번" if leg["type"] == "BUS" and not name.endswith("번") else name
+
+
+def _no_plan(name: str) -> tuple[dict, str]:
+    return {"intent": name, "available": False}, NO_PLAN_ANSWER
+
+
+def _live_next_vehicle(item: dict, state: dict) -> tuple[dict, str]:
+    ctx = _live_context(state)
+    if ctx is None:
+        return _no_plan("next_vehicle")
+    plan, _, _, vehicles = ctx
+    route, label = _route_label(plan.leg)
+    # 실시간 값 뒤로 배차 간격으로 추정한 차가 붙어 있어서, 두 번째 차는 추정일 수 있어요
+    first = wait_minutes_from_seconds(vehicles[0]) if vehicles else None
+    second = wait_minutes_from_seconds(vehicles[1]) if len(vehicles) > 1 else None
+    result = {"intent": "next_vehicle", "route": route, "minutes": first, "next_minutes": second}
+    if first is None:
+        return result, NO_ARRIVAL_ANSWER
+    answer = f"{_josa(label, '이가')} {first}분 뒤에 와요."
+    if second is not None:
+        answer += f" 그다음 차는 {second}분 뒤예요."
+    return result, answer
+
+
+def _live_time_left(item: dict, state: dict) -> tuple[dict, str]:
+    ctx = _live_context(state)
+    if ctx is None:
+        return _no_plan("time_left")
+    plan, now, _, vehicles = ctx
+    _, label = _route_label(plan.leg)
+    if not vehicles:
+        return {"intent": "time_left", "minutes": None, "leave_by": None}, NO_ARRIVAL_ANSWER
+    # 시연 모드와 같이, 여유를 두고 정류장에 있어야 하는 시각을 알려요
+    seconds_left = max(vehicles[0] - DEFAULT_BUFFER_SECONDS, 0)
+    leave_by = now + timedelta(seconds=seconds_left)
+    return ({"intent": "time_left", "minutes": wait_minutes_from_seconds(seconds_left), "leave_by": leave_by.isoformat()},
+            f"{_josa(label, '이가')} {wait_minutes_from_seconds(vehicles[0])}분 뒤에 와요. "
+            f"{_hhmm(leave_by)}까지 정류장에 있으면 돼요.")
+
+
+def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
+    """계획한 경로의 탑승 정류장 근처에서 장소를 찾아, 이미 넣은 할 일과 함께 지금 시각 기준으로 다시 판단해요.
+
+    계획 뒤에 지난 시간만큼 정류장까지 걸어갔다고 보고 처음 도보를 줄여요 (현재 위치를 다시 받지 않아서 추정이에요).
+    """
+    ctx = _live_context(state)
+    if ctx is None:
+        return _no_plan("stopover_check")
+    plan, now, elapsed, vehicles = ctx
+    text = item.get("todo_text") or rules.todo_text(state["text"])
+    stop = tuple(plan.leg["start"])
+    place = planner._near_place({"place_types": item["place_types"]}, stop, {}) if item["place_types"] else None
+    if place is None:
+        kind = item["place_types"][0] if item["place_types"] else "들를 곳"
+        return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None, "board_at": None},
+                f"정류장 근처에서 {_josa(kind, '을를')} 찾지 못했어요.")
+    included_ids = {t["id"] for t in repo.list_todos(state["user_id"], status="포함")}
+    included = [(StopCandidate(tid, "필수", p["round_trip_walk_seconds"], p["stay_seconds"]), p)
+                for tid, p in plan.places.items() if p and tid in included_ids]
+    same = [c.todo_id for c, p in included if p["name"] == place["name"]]
+    new = StopCandidate(-1, "필수", place["round_trip_walk_seconds"], place["stay_seconds"])
+    timing = replace(plan.timing, first_walk_seconds=max(plan.timing.first_walk_seconds - elapsed, 0),
+                     vehicle_seconds=vehicles)
+    deadline = int((plan.arrive_by - now).total_seconds())
+    result = decide_stops(timing, [c for c, _ in included] + ([] if same else [new]), deadline)
+    target = same[0] if same else -1
+    decision = next(d for d in result.decisions if d.todo_id == target)
+    feasible = decision.status == "included"
+    out = {
+        "intent": "stopover_check",
+        "feasible": feasible,
+        "place": {"name": place["name"], "address": place["address"]},
+        "max_stay_min": wait_minutes_from_seconds(result.max_stay_seconds) if feasible and result.max_stay_seconds is not None else None,
+        "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
+    }
+    state["todo"] = {"text": text, "place_types": item["place_types"], "importance": "필수",
+                     "status": STATUS[decision.status], "source": "질문"}
+    if feasible:
+        if out["max_stay_min"] is None:
+            return out, f"{place['name']}에 들를 수 있어요."
+        return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
+    return out, "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+
+
+LIVE_HANDLERS = {
+    "next_vehicle": _live_next_vehicle,
+    "stopover_check": _live_stopover_check,
+    "time_left": _live_time_left,
+}
 
 
 HANDLERS = {
@@ -255,7 +371,10 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
             if name == "unsupported":
                 result, answer = {"intent": "unsupported"}, UNSUPPORTED_ANSWER
             elif name in NEEDS_TRANSIT and not use_demo:
-                result, answer = {"intent": name, "available": False}, NOT_READY_ANSWER
+                if name in LIVE_HANDLERS:
+                    result, answer = LIVE_HANDLERS[name](item, state)
+                else:
+                    result, answer = {"intent": name, "available": False}, NOT_READY_ANSWER
             else:
                 result, answer = HANDLERS[name](item, state)
             answers.append(answer)

@@ -180,3 +180,10 @@ def test_할_일_변경은_AI를_켜도_정해진_문장(tmp_path, monkeypatch):
     r = assistant.ask("demo", "커피는 안 사도 돼", use_demo=True, explain_with_ai=True)
     assert not called
     assert "삭제했습니다" not in r["answer"]
+
+
+def test_계산을_못_한_안내는_AI_문장으로_바꾸지_않음():
+    from app.services import assistant
+    intents = [{"intent": "next_vehicle"}]
+    assert assistant._ai_sentence_ok(intents, {"intent": "next_vehicle", "available": False}) is False
+    assert assistant._ai_sentence_ok(intents, {"intent": "next_vehicle", "minutes": 10}) is True

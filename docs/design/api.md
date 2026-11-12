@@ -36,7 +36,8 @@
 | 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로. 지도용 `route.path`(버스 경로 선, `[경도, 위도]`), `route.stop_points`(정류장), `places`(들를 곳 좌표) | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
 | 있음 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | routers/assistant.py |
 | 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외. `demo=true`면 시연, 아니면 `origin`(현재 위치)으로 실시간 | [plan.json](api-examples/plan.json) | routers/plan.py |
-| 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변 (계산은 `demo=true`만) | [ask.json](api-examples/ask.json) | routers/assistant.py |
+| 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변. 실제 모드는 다음 차·들르기·남은 시간만 계산 (#59) | [ask.json](api-examples/ask.json) | routers/assistant.py |
+| 있음 | `GET /api/places/search?query=` | 목적지 장소 검색 (카카오 키워드, 서울 전체·정확도순 최대 10곳, `lat`·`lng`를 주면 그 근처). 응답 `[{name, address, lat, lng}]` (#61) | – | routers/places.py |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
 
@@ -56,6 +57,7 @@
 | `source` | `입력` 할 일 화면에서 / `질문` 이동 중 질문(stopover_check)에서 | 저장할 때 한 번 |
 | `importance` | `필수` / `선택`. **`source=질문`이면 항상 필수** | 사용자, change_todo |
 | `done` | `status == 완료` 와 같음. 예전 앱 호환용으로만 남김 | – |
+| `stay_minutes` | 그곳에 머무를 시간(분, 1~120). 없으면(`null`) 계산할 때 4분 (11/12) | 사용자 |
 
 계산 모듈(`stopover.decide_stops`)의 결과는 이렇게 바꿔 저장한다: `included` → 포함, `excluded` → 제외, `ask`(필수인데 시간 부족) → 대기 + 앱에 선택지.
 
@@ -74,15 +76,19 @@
 - demo가 아닌 사용자는 계산한 `status`가 할 일에 저장됨 (부스 관객이 자기 할 일로 시연)
 - **실시간 계획** (`demo=false`): `origin: {"lat", "lng"}` 필수(한국 범위). 현재 위치는 계산에만 쓰고 저장·기록하지 않는다 (11/9 팀 결정). 현재 위치가 들어간 카카오 호출은 메모리 캐시에도 남기지 않는다. `schedule_id`가 없으면 지금 이후 가장 가까운 일정 (지난 일정만 있으면 404 "다가오는 일정이 없어요")
   - 카카오 경로 최대 3개. 처음·마지막 도보는 카카오 도보, 첫 탑승 구간은 서울시 버스·지하철 실시간. 실시간 뒤로는 배차 간격으로 1시간까지 이어 붙여 계산
-  - 들를 곳은 탑승 정류장 300m 안에서 장소 종류별 가장 가까운 곳. 체류 시간은 임시로 4분 (장소별 기본값 미정)
+  - 들를 곳은 탑승 정류장 300m 안에서 찾는다. 할 일의 장소 종류를 **모두** 찾아 합치고(예: 이어폰 → 편의점·다이소), 직선거리로 가까운 3곳만 도보 시간을 재서 `candidates`로 보여 준다 (#62, 11/12). 계산은 도보가 가장 짧은 첫 번째 후보로 한다. 후보 도보 시간은 동시에 묻는다
+  - 머무는 시간은 할 일의 `stay_minutes`, 없으면 4분
   - 경로 순서: 필수 할 일을 넣는 경로 → 할 일을 많이 넣는 경로 → 빨리 도착하는 경로. 할 일 상태는 1번 경로 기준
   - 실시간을 못 찾으면 대기 0으로 계산하고 `has_realtime: false`. 근처에 장소가 없으면 시연과 같이 필수 `대기`·선택 `제외`, 저장 안 함
   - 오류: `origin` 없음 422, 일정 없음 404 `not_found`, 경로 없음 404 `no_route`, 키 없음 503, 카카오 실패 502
-  - 외부 호출은 한 번에 약 30번(카카오 도보가 가장 많음), 같은 구간을 다시 계산하면 저장값으로 약 10번
+  - 외부 호출은 한 번에 약 30번(카카오 도보가 가장 많음), 같은 구간을 다시 계산하면 저장값으로 약 10번. 후보 3곳(#62)으로 할 일 하나당 도보가 최대 3번까지 늘어난다
+  - 1번 경로를 사용자별로 1시간 동안 메모리에 기억해서 이동 중 질문(#59)에 쓴다. 현재 좌표는 넣지 않는다
 - 경로 카드의 `first_walk_min`: 현재 위치 → 탑승 정류장 도보(분). 시연은 정류장에 서 있는 장면이라 0
 - `board_at`, `arrive_at`: 탈 차 도착 시각, 목적지 도착 예정
 - `routes[]`: 경로 카드 2~3개. `total_min`, `wait_min`, `moving_min`, `transfers`, `fare`, `max_stay_min`(경유지에서 쓸 수 있는 최대 시간, 0이면 경유 불가)
-- `todos[]`: 할 일마다 `status`(포함/제외/대기)와 들를 장소. 대기면 `options`를 버튼으로 보여 준다
+- `todos[]`: 할 일마다 `status`(포함/제외/대기)와 들를 장소(`place`, 좌표 `lng`·`lat` 포함). 대기면 `options`를 버튼으로 보여 준다
+  - `stay_min`: 머무는 시간(분). 할 일의 `stay_minutes`, 없으면 4분 (시연은 시나리오 값)
+  - `candidates[]`: 경유 후보 최대 3곳 (`place_type`, `name`, `address`, `lng`, `lat`, `detour_min`). 첫 번째가 `place`와 같다
 - `explanation`: 지금은 계산값으로 만든 정해진 문장. AI 문장(#36)이 붙으면 숫자가 계산과 다를 때 이 문장으로 바뀐다 (`llm.numbers_match`)
 
 **`/api/ask`** ([ask.json](api-examples/ask.json))
@@ -95,7 +101,10 @@
   - `running_late`: `delay_minutes`, `missed`, `on_time`, `board_at`, `arrive_at` (뒤 질문도 늦어진 시각으로 계산). 분이 없고 "놓쳤어"면 지금 차를 놓친 것으로 보고 다음 차 기준(`missed: true`), 그 밖에는 "몇 분 늦을 것 같아요?"로 되물음
   - `time_left`: `minutes`, `leave_by` (차 도착에서 여유 2분을 뺀 시각)
   - `place_info`: `place`, `change_route`: `route`, `change_todo`: `todo_id`, `action`, `unsupported`: 없음
-  - `demo=false`면 교통 계산이 필요한 질문은 `{"intent", "available": false}` 와 준비 중 안내
+  - `demo=false`(실제 모드, #59): `next_vehicle`, `stopover_check`, `time_left`는 마지막 실시간 계획(`/api/plan`, 1시간 안)의 1번 경로로 실시간 도착을 다시 물어 계산한다. 들르기는 그 경로의 탑승 정류장 근처에서 찾고, 계획 뒤 지난 시간만큼 정류장으로 걸어갔다고 보고 판단한다(추정)
+    - 계획이 없거나 1시간이 지났으면 `{"intent", "available": false}` 와 "먼저 길찾기에서 경로를 추천받아 주세요"
+    - 나머지 교통 질문(`running_late`, `place_info`, `change_route`)은 아직 `{"intent", "available": false}` 와 준비 중 안내
+    - `available: false` 결과는 AI 답변 문장으로 바꾸지 않는다
 - `engine`: `ai` 또는 `rule`. AI 키가 없거나, AI 호출이 실패하거나, AI 출력 형식이 맞지 않으면 키워드 규칙(`services/rules.py`)으로 답한다. 규칙 정확도는 팀 테스트 문장 기준 의도 14/25, 장소 10/15라 AI보다 낮다
 - 질문과 할 일 문장은 200자까지
 - `demo` 사용자는 부스에서 여럿이 함께 써서 질문 기록을 저장하지 않고 AI에 이전 대화도 보내지 않는다

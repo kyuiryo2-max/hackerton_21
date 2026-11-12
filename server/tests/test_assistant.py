@@ -168,9 +168,15 @@ def test_이미_넣은_할_일과_함께_판단(client, no_ai):
     assert ask(client, "커피 사야 돼", user_id="u1")["result"]["feasible"] is False
 
 
-def test_실시간_모드는_아직_안내만(client, no_ai):
+def test_실제_모드는_경로를_추천받기_전엔_안내만(client, no_ai):
+    """실제 모드 계산(#59)은 test_plan_live.py. 계획이 없으면 먼저 경로를 추천받으라고 안내해요."""
     body = ask(client, "다음 버스 언제야?", user_id="u1", demo=False)
     assert body["result"] == {"intent": "next_vehicle", "available": False}
+    assert body["answer"] == assistant.NO_PLAN_ANSWER
+
+
+def test_실제_모드_늦어짐은_아직_준비_중(client, no_ai):
+    body = ask(client, "10분 늦을 것 같아", user_id="u1", demo=False)
     assert body["answer"] == assistant.NOT_READY_ANSWER
 
 

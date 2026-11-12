@@ -356,3 +356,18 @@ def test_처음_켜진_서버의_시연_id는_1부터(client):
     assert sorted(t["id"] for t in todos) == [1, 2, 3]
     assert client.get("/api/schedules", params={"user_id": "demo"}).json()[0]["id"] == 1
 
+
+
+def test_할_일_머물_시간_저장과_변경(client):
+    todo = client.post("/api/todos", json={"user_id": "u1", "text": "꽃 사기", "place_types": ["꽃집"],
+                                           "stay_minutes": 15}).json()
+    assert todo["stay_minutes"] == 15
+    todo = client.patch(f"/api/todos/{todo['id']}", params={"user_id": "u1"}, json={"stay_minutes": 20}).json()
+    assert todo["stay_minutes"] == 20
+    other = client.post("/api/todos", json={"user_id": "u1", "text": "우유 사기"}).json()
+    assert other["stay_minutes"] is None  # 없으면 계산할 때 기본 4분
+
+
+def test_머물_시간은_1분에서_120분(client):
+    res = client.post("/api/todos", json={"user_id": "u1", "text": "꽃 사기", "stay_minutes": 0})
+    assert res.status_code == 422

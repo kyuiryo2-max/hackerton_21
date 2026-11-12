@@ -1,5 +1,5 @@
 {
-  "_설명": "실제 서버 응답 (#33, 시연 모드). 경로가 여러 개면 routes에 2~3개 (#45). explanation은 AI 문장(#36) 전까지 정해진 문장",
+  "_설명": "실제 서버 응답 (#33, 시연 모드). 경로가 여러 개면 routes에 2~3개 (#45). explanation은 AI 문장(#36) 전까지 정해진 문장. todos[].stay_min(머물 시간), candidates(경유 후보 여러 곳, #62)는 11/12 추가",
   "examples": [
     {
       "request": {
@@ -62,12 +62,25 @@
               "text": "이어폰 사기",
               "importance": "필수",
               "status": "포함",
+              "stay_min": 4,
               "place": {
                 "place_type": "편의점",
                 "name": "CU 안암센트럴점",
-                "address": "서울 성북구 고려대로28길 16"
+                "address": "서울 성북구 고려대로28길 16",
+                "lng": 127.03062345,
+                "lat": 37.58555384
               },
               "detour_min": 4,
+              "candidates": [
+                {
+                  "place_type": "편의점",
+                  "name": "CU 안암센트럴점",
+                  "address": "서울 성북구 고려대로28길 16",
+                  "lng": 127.03062345,
+                  "lat": 37.58555384,
+                  "detour_min": 4
+                }
+              ],
               "reason": ""
             },
             {
@@ -75,12 +88,25 @@
               "text": "다이소 들르기",
               "importance": "필수",
               "status": "대기",
+              "stay_min": 5,
               "place": {
                 "place_type": "다이소",
                 "name": "다이소 안암점",
-                "address": "서울 성북구 고려대로24길 51"
+                "address": "서울 성북구 고려대로24길 51",
+                "lng": 127.02968875,
+                "lat": 37.58392147
               },
               "detour_min": 12,
+              "candidates": [
+                {
+                  "place_type": "다이소",
+                  "name": "다이소 안암점",
+                  "address": "서울 성북구 고려대로24길 51",
+                  "lng": 127.02968875,
+                  "lat": 37.58392147,
+                  "detour_min": 12
+                }
+              ],
               "reason": "시간이 부족해요",
               "options": [
                 "이번엔 빼기",
@@ -92,12 +118,25 @@
               "text": "커피 사기",
               "importance": "선택",
               "status": "제외",
+              "stay_min": 5,
               "place": {
                 "place_type": "카페",
                 "name": "스타벅스 안암역점",
-                "address": "서울 성북구 고려대로 102-2"
+                "address": "서울 성북구 고려대로 102-2",
+                "lng": 127.0307686,
+                "lat": 37.58610881
               },
               "detour_min": 2,
+              "candidates": [
+                {
+                  "place_type": "카페",
+                  "name": "스타벅스 안암역점",
+                  "address": "서울 성북구 고려대로 102-2",
+                  "lng": 127.0307686,
+                  "lat": 37.58610881,
+                  "detour_min": 2
+                }
+              ],
               "reason": "시간이 부족해요"
             }
           ],
