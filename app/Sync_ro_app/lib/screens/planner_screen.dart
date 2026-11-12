@@ -116,7 +116,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         initial: Schedule(id: 0, title: '', location: '', startTime: start, endTime: start.add(const Duration(hours: 1))),
       )),
     );
-    if (saved != null && mounted) widget.onOpenScheduleRoutes?.call(saved);
+    _afterSave(saved);
   }
 
   Future<void> _editRoutine(Routine r) async {
@@ -126,14 +126,14 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   String _routineDays(Routine r) =>
       [for (var d = 1; d <= 7; d++) if (r.weekdays.contains(d)) _weekdayNames[d - 1]].join('·');
 
-  /// 반복 일정의 다음 회차로 경로 보기. 그 회차 일정이 서버에 없으면 지금 만들어요.
-  Future<void> _routeRoutine(Routine r) async {
+  /// 반복 일정의 한 회차(기본: 다음 회차)로 경로 보기. 그 회차 일정이 서버에 없으면 지금 만들어요.
+  Future<void> _routeRoutine(Routine r, {DateTime? at}) async {
     if (!r.canRoute) {
       _snack('이 반복 일정은 장소가 정해지지 않았어요. 장소를 고르고 저장하면 경로를 볼 수 있어요.');
       return _editRoutine(r);
     }
     final controller = ScheduleScope.of(context);
-    final next = r.occurrence(r.nextStart(DateTime.now()));
+    final next = r.occurrence(at ?? r.nextStart(DateTime.now()));
     Schedule? found;
     for (final s in controller.schedules) {
       if (s.title == next.title && s.startTime == next.startTime && s.location == next.location) found = s;
@@ -223,8 +223,73 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       context,
       MaterialPageRoute(builder: (_) => const ScheduleFormScreen()),
     );
-    // "일정 저장하고 경로 준비": 저장하면 바로 이동 탭에서 경로를 보여 줘요
-    if (saved != null && mounted) widget.onOpenScheduleRoutes?.call(saved);
+    _afterSave(saved);
+  }
+
+  /// 저장하면 이 화면에 그대로 있고, 저장한 일정이 있는 주를 보여 줘요. 경로는 원할 때 [경로 보기]로.
+  void _afterSave(Schedule? saved) {
+    if (saved == null || !mounted) return;
+    setState(() {
+      _weekStart = _mondayOf(saved.startTime);
+      _filterDay = null;
+    });
+    final repeating = saved.id == 0;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(repeating
+          ? '「${saved.title}」 매주 반복 일정을 저장했어요. 목록과 시간표에서 볼 수 있어요.'
+          : '「${saved.title}」 일정을 저장했어요.'),
+      action: repeating
+          ? null
+          : SnackBarAction(label: '경로 보기', onPressed: () => widget.onOpenScheduleRoutes?.call(saved)),
+    ));
+  }
+
+  /// 시간표의 한 번만 있는 일정 블록을 눌렀을 때
+  Future<void> _openScheduleSheet(Schedule s) async {
+    final upcoming = !s.isCompleted && s.startTime.isAfter(DateTime.now());
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            title: Text(s.title, style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: Text('${_dayLabel(s.startTime, DateTime.now())} ${_hm(s.startTime)}까지 도착 · ${s.location}'),
+          ),
+          const Divider(height: 1),
+          if (upcoming)
+            ListTile(
+              leading: const Icon(Icons.route_rounded, color: AppTheme.primary),
+              title: const Text('경로 보기'),
+              onTap: () => Navigator.pop(sheet, 'route'),
+            ),
+          ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('수정'), onTap: () => Navigator.pop(sheet, 'edit')),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+            title: const Text('삭제', style: TextStyle(color: AppTheme.danger)),
+            onTap: () => Navigator.pop(sheet, 'delete'),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'route') {
+      widget.onOpenScheduleRoutes?.call(s);
+    } else {
+      await _scheduleMenu(s, action);
+    }
+  }
+
+  /// 서버 일정이 반복 일정의 한 회차인지 (같은 이름·장소·요일·시각)
+  Routine? _routineOf(Schedule s) {
+    for (final r in store.routines) {
+      if (r.title == s.title && r.location == s.location && r.weekdays.contains(s.startTime.weekday) &&
+          r.startMinutes == s.startTime.hour * 60 + s.startTime.minute) {
+        return r;
+      }
+    }
+    return null;
   }
 
   Future<void> _scheduleMenu(Schedule s, String action) async {
@@ -337,16 +402,29 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   List<Widget> _scheduleTab() {
     final controller = ScheduleScope.of(context);
     final weekEnd = _weekStart.add(const Duration(days: 7));
-    final week = controller.schedules
+    final serverWeek = controller.schedules
         .where((s) => !s.startTime.isBefore(_weekStart) && s.startTime.isBefore(weekEnd))
-        .toList()
-      ..sort((a, b) => a.startTime.compareTo(b.startTime));
-    final filterDay = _filterDay;
-    final shown = filterDay == null ? week : week.where((s) => _dateOnly(s.startTime) == filterDay).toList();
+        .toList();
 
-    final groups = <String, List<Schedule>>{};
-    for (final s in shown) {
-      groups.putIfAbsent(_dayLabel(s.startTime, _now), () => []).add(s);
+    // 이번 주 목록 = 서버 일정 + 반복 일정의 이번 주 회차 (시간표와 같은 내용)
+    final items = <(Schedule, Routine?)>[for (final s in serverWeek) (s, _routineOf(s))];
+    for (final r in store.routines) {
+      if (r.isTodo) continue;
+      for (final wd in r.weekdays) {
+        final d = _weekStart.add(Duration(days: wd - 1));
+        final start = DateTime(d.year, d.month, d.day, r.startMinutes ~/ 60, r.startMinutes % 60);
+        final saved = serverWeek.any((s) => s.title == r.title && s.location == r.location && s.startTime == start);
+        if (!saved) items.add((r.occurrence(start), r));
+      }
+    }
+    items.sort((a, b) => a.$1.startTime.compareTo(b.$1.startTime));
+
+    final filterDay = _filterDay;
+    final shown = filterDay == null ? items : items.where((e) => _dateOnly(e.$1.startTime) == filterDay).toList();
+
+    final groups = <String, List<(Schedule, Routine?)>>{};
+    for (final e in shown) {
+      groups.putIfAbsent(_dayLabel(e.$1.startTime, _now), () => []).add(e);
     }
     final lastDay = weekEnd.subtract(const Duration(days: 1));
 
@@ -381,7 +459,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         today: _dateOnly(_now),
         counts: {
           for (var i = 0; i < 7; i++)
-            i: week.where((s) => _dateOnly(s.startTime) == _weekStart.add(Duration(days: i))).length,
+            i: items.where((e) => _dateOnly(e.$1.startTime) == _weekStart.add(Duration(days: i))).length,
         },
         onSelect: (d) => setState(() => _filterDay = _filterDay == d ? null : d),
       ),
@@ -400,36 +478,51 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
             padding: const EdgeInsets.only(top: 4, bottom: 8),
             child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textMuted)),
           ),
-          for (final s in entry.value)
-            if (!s.isCompleted && s.startTime.isAfter(_now))
-              _ScheduleCard(
-                schedule: s,
-                onRoute: () => widget.onOpenScheduleRoutes?.call(s),
-                onMenu: (action) => _scheduleMenu(s, action),
-              )
-            else
+          for (final (s, r) in entry.value)
+            Opacity(
               // 지난 일정은 흐리게, 경로 보기 없이
-              Opacity(opacity: 0.55, child: _ScheduleCard(schedule: s, onMenu: (action) => _scheduleMenu(s, action))),
+              opacity: !s.isCompleted && s.startTime.isAfter(_now) ? 1 : 0.55,
+              child: _ScheduleCard(
+                schedule: s,
+                repeating: r != null,
+                onRoute: !s.isCompleted && s.startTime.isAfter(_now)
+                    ? () => s.id == 0 && r != null
+                        ? _routeRoutine(r, at: s.startTime)
+                        : widget.onOpenScheduleRoutes?.call(s)
+                    : null,
+                onMenu: (action) {
+                  // 반복 일정 회차: 수정·삭제는 반복 일정 전체에
+                  if (r != null && s.id == 0) {
+                    if (action == 'edit') _editRoutine(r);
+                    if (action == 'delete') store.deleteRoutine(r.id);
+                    if (action == 'detail') _openRoutine(r);
+                  } else {
+                    _scheduleMenu(s, action);
+                  }
+                },
+              ),
+            ),
         ],
 
       // 시간표: 매주 반복 (장우 님 화면 그대로)
       const SizedBox(height: 26),
       const _SectionHeader(
         title: '시간표',
-        subtitle: '매주 반복 일정 · "일정 추가"에서 "매주 반복"을 고르면 여기에 들어가요',
+        subtitle: '위 목록과 같은 일정이에요 · 색 블록 = 매주 반복, 검은 블록 = 한 번만',
       ),
       _Timetable(
         weekStart: _weekStart,
         now: _now,
         routines: store.routines,
-        schedules: const [],
+        // 한 번만 있는 일정도 시간표에 같이 (반복 일정 회차는 반복 블록으로 이미 보여요)
+        schedules: [for (final (s, r) in items) if (r == null) s],
         onTapRoutine: _openRoutine,
-        onTapSchedule: (s) => widget.onOpenScheduleRoutes?.call(s),
+        onTapSchedule: _openScheduleSheet,
         onTapEmpty: _addRoutineAt,
       ),
       const SizedBox(height: 6),
       Text(
-        '빈 칸을 누르면 그 요일·시각으로 반복 일정을 넣고, 블록을 누르면 다음 회차 경로를 볼 수 있어요. 이 기기에만 저장돼요.'
+        '빈 칸을 누르면 그 요일·시각으로 매주 반복 일정을 넣어요. 반복 일정은 이 기기에만 저장돼요.'
         '${RuntimeMode.instance.isDemo ? ' (시연 모드 예시 시간표)' : ''}',
         style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
       ),
@@ -610,8 +703,9 @@ class _Empty extends StatelessWidget {
 }
 
 class _ScheduleCard extends StatelessWidget {
-  const _ScheduleCard({required this.schedule, required this.onMenu, this.onRoute});
+  const _ScheduleCard({required this.schedule, required this.onMenu, this.onRoute, this.repeating = false});
   final Schedule schedule;
+  final bool repeating;
   final VoidCallback? onRoute;
   final ValueChanged<String> onMenu;
 
@@ -635,7 +729,15 @@ class _ScheduleCard extends StatelessWidget {
             decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(2))),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(s.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+            Row(children: [
+              Flexible(child: Text(s.title, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+              if (repeating) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.repeat, size: 14, color: AppTheme.primary),
+                const Text(' 매주', style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w700)),
+              ],
+            ]),
             const SizedBox(height: 2),
             Row(children: [
               const Icon(Icons.place_outlined, size: 14, color: AppTheme.textMuted),
@@ -655,11 +757,16 @@ class _ScheduleCard extends StatelessWidget {
           ),
         PopupMenuButton<String>(
           onSelected: onMenu,
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'detail', child: Text('상세 보기')),
-            PopupMenuItem(value: 'edit', child: Text('수정')),
-            PopupMenuItem(value: 'delete', child: Text('삭제', style: TextStyle(color: AppTheme.danger))),
-          ],
+          itemBuilder: (_) => repeating && schedule.id == 0
+              ? const [
+                  PopupMenuItem(value: 'edit', child: Text('반복 일정 수정')),
+                  PopupMenuItem(value: 'delete', child: Text('반복 그만하기', style: TextStyle(color: AppTheme.danger))),
+                ]
+              : const [
+                  PopupMenuItem(value: 'detail', child: Text('상세 보기')),
+                  PopupMenuItem(value: 'edit', child: Text('수정')),
+                  PopupMenuItem(value: 'delete', child: Text('삭제', style: TextStyle(color: AppTheme.danger))),
+                ],
         ),
       ]),
     );

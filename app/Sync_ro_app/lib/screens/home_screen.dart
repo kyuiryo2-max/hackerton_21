@@ -204,7 +204,16 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
       context,
       MaterialPageRoute(builder: (_) => const ScheduleFormScreen()),
     );
-    if (saved != null && mounted) widget.onOpenScheduleRoutes?.call(saved);
+    if (saved == null || !mounted) return;
+    // 저장만 하고 홈에 그대로 있어요. 경로는 원할 때 [경로 보기]로.
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(saved.id == 0
+          ? '「${saved.title}」 매주 반복 일정을 저장했어요. 할 일·일정 탭에서 볼 수 있어요.'
+          : '「${saved.title}」 일정을 저장했어요.'),
+      action: saved.id == 0
+          ? null
+          : SnackBarAction(label: '경로 보기', onPressed: () => widget.onOpenScheduleRoutes?.call(saved)),
+    ));
   }
 
   Future<void> _searchDestination() async {

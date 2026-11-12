@@ -243,8 +243,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     final controller = ScheduleScope.of(context);
     final prep = int.parse(_preparationController.text.trim());
 
-    // 반복 일정: 시간표(이 기기)에 저장. 서버 일정은 회차마다 "경로 보기"를 누를 때 만들어요.
-    Routine? routineToSave;
+    // 반복 일정: 시간표(이 기기)에만 저장하고 끝. 서버 일정은 회차마다 "경로 보기"를 누를 때 만들어요.
     if (_repeat) {
       final store = PlannerStore.instance;
       final draft = Schedule(
@@ -266,7 +265,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         preparationMinutes: prep,
       );
       final base = widget.routine;
-      routineToSave = Routine(
+      final routineToSave = Routine(
         id: base?.id ?? store.newRoutineId(),
         title: draft.title,
         location: draft.location,
@@ -276,11 +275,10 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         colorIndex: base?.colorIndex ?? store.routines.length,
         trip: Routine.tripOf(draft),
       );
-    }
-    if (_editingRoutine) {
       try {
-        await PlannerStore.instance.upsertRoutine(routineToSave!);
-        if (mounted) Navigator.pop(context);
+        await store.upsertRoutine(routineToSave);
+        // id 0 = 서버 일정이 아니라 반복 일정이라는 표시 (부르는 쪽에서 "매주 반복 일정을 저장했어요")
+        if (mounted) Navigator.pop(context, draft);
       } catch (error) {
         if (!mounted) return;
         setState(() => _saving = false);
@@ -330,8 +328,6 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         );
       await controller.updateSchedule(saved);
     }
-    // 첫 회차는 서버 일정으로 저장했고, 반복은 시간표에 넣어요
-    if (routineToSave != null) await PlannerStore.instance.upsertRoutine(routineToSave);
 
     if (!mounted) return;
 

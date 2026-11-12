@@ -24,7 +24,12 @@ class ScheduleScreen extends StatelessWidget {
             MaterialPageRoute(builder: (_) => const ScheduleFormScreen()),
           );
           if (saved != null && context.mounted) {
-            onOpenScheduleRoutes?.call(saved);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('「${saved.title}」 일정을 저장했어요.'),
+              action: saved.id == 0
+                  ? null
+                  : SnackBarAction(label: '경로 보기', onPressed: () => onOpenScheduleRoutes?.call(saved)),
+            ));
           }
         },
         icon: const Icon(Icons.add),
