@@ -71,6 +71,8 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   /// 이번 주 일정을 한 날로 좁혀 볼 때 (null = 이번 주 전체)
   DateTime? _filterDay;
   bool _showDone = false;
+  /// 새 할 일을 넣을 날 (null = 언제든)
+  DateTime? _newTodoDay;
   bool _adding = false;
   final _todoInput = TextEditingController();
   Timer? _ticker;
@@ -325,6 +327,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       // 장소 종류는 AI가, 머무는 시간은 서버가 장소 종류로 정해요
       final saved = await TodoScope.of(context).addTodo(title: text);
       _todoInput.clear();
+      if (_newTodoDay != null) await store.setTodoDay(saved.id, _newTodoDay);
       if (saved.placeTypes.isEmpty) {
         _snack('"${saved.title}"에 들를 장소를 찾지 못했어요. 장소 칩을 눌러 골라 주세요.');
       }
@@ -346,10 +349,86 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   Future<void> _deleteTodo(TodoItem todo) async {
     try {
       await TodoScope.of(context).deleteTodo(todo.id);
+      await store.setTodoDay(todo.id, null);
     } catch (e) {
       _snack('할 일 삭제 실패: $e');
     }
   }
+
+  // ---------- 할 일 날짜 (달력과 연결) ----------
+
+  /// 할 일을 할 날. null = 언제든. 시간표처럼 이 기기에만 저장돼요 (장우 님 PlannerStore).
+  DateTime? _todoDay(TodoItem t) {
+    final key = store.dayOf(t.id);
+    return key == null ? null : DateTime.tryParse(key);
+  }
+
+  String _todoDayLabel(DateTime? d) => d == null ? '언제든' : _dayLabel(d, _now);
+
+  /// (골랐는지, 고른 날). 언제든을 고르면 (true, null)
+  Future<(bool, DateTime?)> _pickTodoDay(DateTime? current) async {
+    final today = _dateOnly(DateTime.now());
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('언제 할까요?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            const Text('날을 정하면 일정 탭 달력의 그날에 같이 보여요.',
+                style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+            const SizedBox(height: 12),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              ChoiceChip(
+                label: const Text('언제든'),
+                selected: current == null,
+                onSelected: (_) => Navigator.pop(sheet, 'none'),
+              ),
+              for (var i = 0; i < 7; i++)
+                Builder(builder: (_) {
+                  final d = today.add(Duration(days: i));
+                  return ChoiceChip(
+                    label: Text(i < 2 ? _dayLabel(d, today) : '${d.month}/${d.day} (${_weekdayNames[d.weekday - 1]})'),
+                    selected: current == d,
+                    onSelected: (_) => Navigator.pop(sheet, PlannerStore.dayKey(d)),
+                  );
+                }),
+              ActionChip(
+                avatar: const Icon(Icons.calendar_month, size: 16),
+                label: const Text('다른 날짜'),
+                onPressed: () => Navigator.pop(sheet, 'pick'),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return (false, null);
+    if (choice == 'none') return (true, null);
+    if (choice == 'pick') {
+      final picked = await showDatePicker(
+        context: context,
+        initialDate: current ?? today,
+        firstDate: today.subtract(const Duration(days: 365)),
+        lastDate: today.add(const Duration(days: 730)),
+      );
+      return picked == null ? (false, null) : (true, _dateOnly(picked));
+    }
+    return (true, DateTime.parse(choice));
+  }
+
+  Future<void> _changeTodoDay(TodoItem t) async {
+    final (picked, day) = await _pickTodoDay(_todoDay(t));
+    if (picked) await store.setTodoDay(t.id, day);
+  }
+
+  /// 일정 탭 달력의 어느 날에서 "+ 할 일"을 누르면, 그날로 할 일 탭을 열어요
+  void _addTodoOn(DateTime day) => setState(() {
+        _newTodoDay = day;
+        _tab = 1;
+      });
 
   /// 장소 종류·머무는 시간·꼭 여부를 한 창에서 고쳐요
   Future<void> _editTodo(TodoItem todo) async {
@@ -419,12 +498,19 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
     }
     items.sort((a, b) => a.$1.startTime.compareTo(b.$1.startTime));
 
-    final filterDay = _filterDay;
-    final shown = filterDay == null ? items : items.where((e) => _dateOnly(e.$1.startTime) == filterDay).toList();
+    // 날을 정한 할 일도 그날에 같이
+    final todos = TodoScope.of(context).todos;
+    List<TodoItem> todosOn(DateTime day) =>
+        todos.where((t) => store.dayOf(t.id) == PlannerStore.dayKey(day)).toList();
 
-    final groups = <String, List<(Schedule, Routine?)>>{};
-    for (final e in shown) {
-      groups.putIfAbsent(_dayLabel(e.$1.startTime, _now), () => []).add(e);
+    final filterDay = _filterDay;
+    final days = <(DateTime, List<(Schedule, Routine?)>, List<TodoItem>)>[];
+    for (var i = 0; i < 7; i++) {
+      final day = _weekStart.add(Duration(days: i));
+      if (filterDay != null && day != filterDay) continue;
+      final ev = items.where((e) => _dateOnly(e.$1.startTime) == day).toList();
+      final td = todosOn(day);
+      if (ev.isNotEmpty || td.isNotEmpty) days.add((day, ev, td));
     }
     final lastDay = weekEnd.subtract(const Duration(days: 1));
 
@@ -459,7 +545,8 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         today: _dateOnly(_now),
         counts: {
           for (var i = 0; i < 7; i++)
-            i: items.where((e) => _dateOnly(e.$1.startTime) == _weekStart.add(Duration(days: i))).length,
+            i: items.where((e) => _dateOnly(e.$1.startTime) == _weekStart.add(Duration(days: i))).length +
+                todosOn(_weekStart.add(Duration(days: i))).where((t) => !t.isCompleted).length,
         },
         onSelect: (d) => setState(() => _filterDay = _filterDay == d ? null : d),
       ),
@@ -467,18 +554,43 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
       if (controller.isLoading)
         const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
-      else if (shown.isEmpty) ...[
+      else if (days.isEmpty) ...[
         _Empty(icon: Icons.event_available,
-            text: filterDay != null ? '이 날은 잡힌 일정이 없어요.' : '이번 주에 잡힌 일정이 없어요.\n위의 "일정 추가"로 가야 할 곳을 넣어 보세요.'),
+            text: filterDay != null ? '이 날은 일정도 할 일도 없어요.' : '이번 주에 잡힌 일정이 없어요.\n위의 "일정 추가"로 가야 할 곳을 넣어 보세요.'),
         if (filterDay != null)
-          Center(child: TextButton(onPressed: () => setState(() => _filterDay = null), child: const Text('이번 주 전체 보기'))),
-      ] else
-        for (final entry in groups.entries) ...[
-          Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 8),
-            child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textMuted)),
+          Center(
+            child: Wrap(spacing: 8, children: [
+              TextButton(onPressed: () => setState(() => _filterDay = null), child: const Text('이번 주 전체 보기')),
+              TextButton.icon(
+                onPressed: () => _addTodoOn(filterDay),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('이 날 할 일'),
+              ),
+            ]),
           ),
-          for (final (s, r) in entry.value)
+      ] else
+        for (final (day, ev, td) in days) ...[
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 4),
+            child: Row(children: [
+              Expanded(
+                child: Text(_dayLabel(day, _now),
+                    style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textMuted)),
+              ),
+              TextButton.icon(
+                onPressed: () => _addTodoOn(day),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('할 일', style: TextStyle(fontSize: 12)),
+              ),
+            ]),
+          ),
+          for (final t in td)
+            _CalendarTodoRow(
+              todo: t,
+              onToggle: () => _save(t.copyWith(isCompleted: !t.isCompleted)),
+              onTap: () => setState(() => _tab = 1),
+            ),
+          for (final (s, r) in ev)
             Opacity(
               // 지난 일정은 흐리게, 경로 보기 없이
               opacity: !s.isCompleted && s.startTime.isAfter(_now) ? 1 : 0.55,
@@ -522,7 +634,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       ),
       const SizedBox(height: 6),
       Text(
-        '빈 칸을 누르면 그 요일·시각으로 매주 반복 일정을 넣어요. 반복 일정은 이 기기에만 저장돼요.'
+        '빈 칸에 마우스를 올리면 들어갈 요일·시각이 까맣게 보이고, 누르면 그 시각으로 매주 반복 일정을 넣어요. 반복 일정은 이 기기에만 저장돼요.'
         '${RuntimeMode.instance.isDemo ? ' (시연 모드 예시 시간표)' : ''}',
         style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
       ),
@@ -531,8 +643,13 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
   List<Widget> _todoTab() {
     final controller = TodoScope.of(context);
+    // 날을 정한 것부터 날짜 순, 그다음 언제든. 같은 날 안에서는 '꼭'이 먼저
+    final far = DateTime(9999);
     final open = controller.todos.where((t) => !t.isCompleted).toList()
-      ..sort((a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0));
+      ..sort((a, b) {
+        final byDay = (_todoDay(a) ?? far).compareTo(_todoDay(b) ?? far);
+        return byDay != 0 ? byDay : (b.important ? 1 : 0) - (a.important ? 1 : 0);
+      });
     final done = controller.todos.where((t) => t.isCompleted).toList();
 
     return [
@@ -563,6 +680,18 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
             child: _adding
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('추가'),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          const Text('언제: ', style: TextStyle(fontSize: 13, color: AppTheme.textMuted)),
+          ActionChip(
+            avatar: const Icon(Icons.event, size: 16),
+            label: Text(_todoDayLabel(_newTodoDay)),
+            onPressed: () async {
+              final (picked, day) = await _pickTodoDay(_newTodoDay);
+              if (picked && mounted) setState(() => _newTodoDay = day);
+            },
           ),
         ]),
         if (_adding)
@@ -602,6 +731,8 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
             todo: t,
             onToggle: () => _save(t.copyWith(isCompleted: true)),
             onEdit: () => _editTodo(t),
+            dayLabel: _todoDayLabel(_todoDay(t)),
+            onDay: () => _changeTodoDay(t),
             onStar: () => _save(t.copyWith(important: !t.important)),
             onDelete: () => _deleteTodo(t),
           ),
@@ -617,6 +748,8 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
               todo: t,
               onToggle: () => _save(t.copyWith(isCompleted: false)),
               onEdit: () => _editTodo(t),
+              dayLabel: _todoDayLabel(_todoDay(t)),
+              onDay: () => _changeTodoDay(t),
               onStar: () => _save(t.copyWith(important: !t.important)),
               onDelete: () => _deleteTodo(t),
             ),
@@ -773,17 +906,71 @@ class _ScheduleCard extends StatelessWidget {
   }
 }
 
+/// 일정 탭 달력의 그날 할 일 (작게)
+class _CalendarTodoRow extends StatelessWidget {
+  const _CalendarTodoRow({required this.todo, required this.onToggle, required this.onTap});
+  final TodoItem todo;
+  final VoidCallback onToggle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = todo;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Row(children: [
+          Checkbox(value: t.isCompleted, onChanged: (_) => onToggle()),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(text: t.title, style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  decoration: t.isCompleted ? TextDecoration.lineThrough : null,
+                  color: t.isCompleted ? AppTheme.textMuted : AppTheme.textStrong,
+                )),
+                if (t.placeTypes.isNotEmpty)
+                  TextSpan(text: '  ${t.placeTypes.join('·')}',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+              ]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(color: AppTheme.okSoft, borderRadius: BorderRadius.circular(8)),
+            child: const Text('할 일', style: TextStyle(fontSize: 11, color: AppTheme.ok, fontWeight: FontWeight.w700)),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 class _TodoRow extends StatelessWidget {
   const _TodoRow({
     required this.todo,
     required this.onToggle,
     required this.onEdit,
+    required this.dayLabel,
+    required this.onDay,
     required this.onStar,
     required this.onDelete,
   });
   final TodoItem todo;
   final VoidCallback onToggle;
   final VoidCallback onEdit;
+  final String dayLabel;
+  final VoidCallback onDay;
   final VoidCallback onStar;
   final VoidCallback onDelete;
 
@@ -814,6 +1001,14 @@ class _TodoRow extends StatelessWidget {
               )),
               const SizedBox(height: 8),
               Wrap(spacing: 6, runSpacing: 6, children: [
+                ActionChip(
+                  avatar: const Icon(Icons.event, size: 16),
+                  label: Text(dayLabel),
+                  labelStyle: const TextStyle(fontSize: 12),
+                  backgroundColor: AppTheme.background,
+                  side: BorderSide.none,
+                  onPressed: onDay,
+                ),
                 if (t.placeTypes.isEmpty)
                   ActionChip(
                     avatar: const Icon(Icons.add_location_alt_outlined, size: 16, color: AppTheme.warn),
@@ -991,7 +1186,8 @@ class _Block {
   int lanes = 1;
 }
 
-class _Timetable extends StatelessWidget {
+/// 마우스를 올린 빈 칸(요일·30분 칸)을 기억하는 겉 상자. 그리기는 _TimetableView 가 해요.
+class _Timetable extends StatefulWidget {
   const _Timetable({
     required this.weekStart,
     required this.now,
@@ -1001,6 +1197,53 @@ class _Timetable extends StatelessWidget {
     required this.onTapSchedule,
     required this.onTapEmpty,
   });
+
+  final DateTime weekStart;
+  final DateTime now;
+  final List<Routine> routines;
+  final List<Schedule> schedules;
+  final ValueChanged<Routine> onTapRoutine;
+  final ValueChanged<Schedule> onTapSchedule;
+  final void Function(int weekday, int minutes) onTapEmpty;
+
+  @override
+  State<_Timetable> createState() => _TimetableState();
+}
+
+class _TimetableState extends State<_Timetable> {
+  (int, int)? _hover; // (요일 1~7, 자정부터 분)
+
+  @override
+  Widget build(BuildContext context) => _TimetableView(
+        weekStart: widget.weekStart,
+        now: widget.now,
+        routines: widget.routines,
+        schedules: widget.schedules,
+        onTapRoutine: widget.onTapRoutine,
+        onTapSchedule: widget.onTapSchedule,
+        onTapEmpty: widget.onTapEmpty,
+        hover: _hover,
+        onHover: (slot) {
+          if (slot != _hover) setState(() => _hover = slot);
+        },
+      );
+}
+
+class _TimetableView extends StatelessWidget {
+  const _TimetableView({
+    required this.weekStart,
+    required this.now,
+    required this.routines,
+    required this.schedules,
+    required this.onTapRoutine,
+    required this.onTapSchedule,
+    required this.onTapEmpty,
+    required this.hover,
+    required this.onHover,
+  });
+
+  final (int, int)? hover;
+  final ValueChanged<(int, int)?> onHover;
 
   final DateTime weekStart;
   final DateTime now;
@@ -1171,19 +1414,50 @@ class _Timetable extends StatelessWidget {
                   bottom: 0,
                   child: Container(width: 1, color: AppTheme.border.withValues(alpha: 0.6)),
                 ),
-              // 빈 칸 누르기
+              // 빈 칸: 마우스를 올리면 그 요일·30분 칸이 어둡게 보이고, 누르면 그 시각으로 반복 일정 추가
               for (var i = 0; i < 7; i++)
                 Positioned(
                   left: timeColumn + colWidth * i,
                   top: 0,
                   width: colWidth,
                   height: bodyHeight,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTapUp: (d) {
-                      final minutes = startHour * 60 + (d.localPosition.dy / hourHeight * 60).floor();
-                      onTapEmpty(i + 1, (minutes ~/ 30) * 30);
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    onHover: (e) {
+                      final minutes = startHour * 60 + (e.localPosition.dy / hourHeight * 60).floor();
+                      onHover((i + 1, (minutes ~/ 30) * 30));
                     },
+                    onExit: (_) => onHover(null),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTapUp: (d) {
+                        final minutes = startHour * 60 + (d.localPosition.dy / hourHeight * 60).floor();
+                        onHover(null);
+                        onTapEmpty(i + 1, (minutes ~/ 30) * 30);
+                      },
+                    ),
+                  ),
+                ),
+              // 마우스가 가리키는 칸 (누르면 들어갈 요일·시각)
+              if (hover != null)
+                Positioned(
+                  left: timeColumn + colWidth * (hover!.$1 - 1) + 1.5,
+                  width: colWidth - 3,
+                  top: (hover!.$2 - startHour * 60) / 60 * hourHeight + 1,
+                  height: hourHeight / 2 - 2,
+                  child: IgnorePointer(
+                    child: Container(
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppTheme.textStrong.withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('+ ${_weekdayNames[hover!.$1 - 1]} ${_hmMinutes(hover!.$2)}',
+                            style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
                   ),
                 ),
               // 블록
