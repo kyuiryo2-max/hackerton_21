@@ -25,6 +25,10 @@ class LivePlan:
     timing: RouteTiming  # 계획할 때의 도보·이동 시간(초)
     places: dict         # todo_id → 그 할 일에 고른 장소 (경로에 넣었는지는 DB의 할 일 상태로 봐요)
     routes: list = field(default_factory=list)  # 추천한 경로 요약 (rank, name, total_min, transfers, arrive_at). "다른 경로" 질문용
+    basis: str = "realtime"          # arrive_by(도착 시각에서 거꾸로) / realtime / now (planner 참고)
+    depart_at: datetime | None = None  # 1번 경로로 늦어도 출발해야 하는 시각
+    total_seconds: int = 0           # 1번 경로로 출발부터 도착까지 (경유 포함)
+    has_target: bool = True          # 도착 희망 시각이 있는지 (홈 검색창으로 찾으면 없음)
 
 
 _plans: dict[str, LivePlan] = {}

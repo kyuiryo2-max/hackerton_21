@@ -35,6 +35,13 @@ DEFAULT_STAY_SECONDS = 240
 MAX_CANDIDATES = 3
 TRANSIT_TYPES = ("BUS", "SUBWAY")
 LOOKAHEAD_SECONDS = 60 * 60       # 실시간은 앞 차 2~3대만 알려 줘서 배차 간격으로 1시간 뒤까지 이어 붙여요
+# 출발 기준 (11/13 팀 결정)
+#   일정으로 찾기: 도착 희망 시각에서 거꾸로 "몇 시에 출발"을 계산해요 (basis "arrive_by").
+#     출발까지 REALTIME_WINDOW_SECONDS 안으로 다가오면 실시간 버스 도착을 붙여 탈 차를 정해요 (basis "realtime").
+#   목적지로 바로 찾기(홈 검색창): 지금 출발 기준 (basis "now")
+REALTIME_WINDOW_SECONDS = 30 * 60
+ARRIVE_MARGIN_SECONDS = 5 * 60    # 거꾸로 계산할 때 도착 희망 시각보다 이만큼 일찍 도착하게 잡아요
+NOW_TRIP_DEADLINE_SECONDS = 6 * 60 * 60  # 지금 출발에는 도착 목표가 없어서, 계산용으로만 넉넉히 둬요
 DEFAULT_SUBWAY_GAP_SECONDS = 300  # 지하철 차가 하나뿐이면 5분 간격으로 봐요
 
 
@@ -53,6 +60,7 @@ class RouteOption:
                          #              stay_seconds, candidates[])
     result: StopResult | None = None
     leg: dict | None = field(default=None, repr=False)  # 실시간: 첫 탑승 구간 (질문 답변에서 다시 써요)
+    times: dict = field(default_factory=dict)           # basis, depart_at, board_at, arrive_at (datetime)
 
 
 def _todos(user_id: str, todo_ids: list[int] | None) -> list[dict]:
@@ -118,7 +126,56 @@ def _route_card(rank: int, option: RouteOption) -> dict:
         **{k: option.card[k] for k in ("transfers", "fare", "stops")},
         "max_stay_min": None if result.max_stay_seconds is None else wait_minutes_from_seconds(result.max_stay_seconds),
         "has_realtime": result.has_realtime,
+        # 경로마다 같은 기준으로 계산한 시각 (11/13). 앱은 순위와 상관없이 이 값을 그대로 보여 주면 돼요
+        **_iso_times(option.times),
+        # 구간 목록 (걷기·버스·지하철, 분, 타는 곳 → 내리는 곳, 지도에 그릴 좌표)
+        "legs": option.card.get("legs", []),
     }
+
+
+def _iso_times(times: dict) -> dict:
+    out = {"basis": times.get("basis")}
+    for key in ("depart_at", "board_at", "arrive_at"):
+        out[key] = times[key].isoformat() if times.get(key) else None
+    return out
+
+
+def _ready_seconds(option: RouteOption) -> int:
+    """정류장에서 차를 탈 준비가 될 때까지: 처음 도보 + 넣은 경유지 왕복 도보 + 머무는 시간."""
+    included = {d.todo_id for d in option.result.decisions if d.status == "included"}
+    extra = sum(p["round_trip_walk_seconds"] + p["stay_seconds"]
+                for tid, p in option.places.items() if p and tid in included)
+    return option.timing.first_walk_seconds + extra
+
+
+def _set_times(option: RouteOption, now: datetime, arrive_by: datetime | None) -> None:
+    """경로 하나의 출발·탑승·도착 시각.
+
+    - 실시간 차가 있으면(realtime·시연): 탈 차에 맞춰 늦어도 언제 나가야 하는지
+    - 일정인데 실시간이 없으면(arrive_by): 도착 희망 5분 전에 닿도록 거꾸로
+    - 지금 출발(now): 지금 나가요
+    """
+    result = option.result
+    ready = _ready_seconds(option)
+    if result.board_seconds is not None:
+        slack = max(result.board_seconds - ready - _stop_buffer(option), 0)
+        depart = now + timedelta(seconds=slack)
+        option.times = {"basis": "realtime" if arrive_by else "now", "depart_at": depart,
+                        "board_at": now + timedelta(seconds=result.board_seconds),
+                        "arrive_at": now + timedelta(seconds=result.total_seconds)}
+        return
+    if arrive_by is not None:
+        depart = max(now, arrive_by - timedelta(seconds=ARRIVE_MARGIN_SECONDS + result.total_seconds))
+        basis = "arrive_by"
+    else:
+        depart, basis = now, "now"
+    option.times = {"basis": basis, "depart_at": depart, "board_at": depart + timedelta(seconds=ready),
+                    "arrive_at": depart + timedelta(seconds=result.total_seconds)}
+
+
+def _stop_buffer(option: RouteOption) -> int:
+    from app.services.stopover import buffer_seconds
+    return buffer_seconds(option.timing)
 
 
 def _response(user_id: str, todos: list[dict], options: list[RouteOption], now: datetime,
@@ -154,13 +211,18 @@ def _response(user_id: str, todos: list[dict], options: list[RouteOption], now: 
         if decision and user_id != DEMO_USER_ID:
             repo.update_todo(todo_id, user_id, status=status)
 
-    arrive_at = now + timedelta(seconds=result.total_seconds)
+    times = best.times
+    arrive_at = times["arrive_at"]
     included = [by_id[d.todo_id] for d in result.decisions if d.status == "included"]
     return {
         "now": now.isoformat(),
         "schedule": schedule,
-        "board_at": None if result.board_seconds is None
-        else (now + timedelta(seconds=result.board_seconds)).isoformat(),
+        # basis: arrive_by(도착 시각에서 거꾸로) / realtime(실시간 차) / now(지금 출발)
+        "basis": times["basis"],
+        "depart_at": times["depart_at"].isoformat(),
+        # 실시간 차가 없으면 board_at은 정류장에 닿는 예상 시각이에요 (has_realtime=false)
+        "board_at": times["board_at"].isoformat() if result.board_seconds is not None or times["basis"] != "realtime"
+        else None,
         "arrive_at": arrive_at.isoformat(),
         "routes": [_route_card(i, o) for i, o in enumerate(options, 1)],
         "todos": todo_rows,
@@ -183,8 +245,55 @@ def plan_demo(user_id: str, todo_ids: list[int] | None = None) -> dict:
               "transfers": route["transfers"], "fare": route["fare_min"], "stops": route["stops"]},
         places={t["id"]: _demo_place(t) for t in todos},
     )
+    option.card["legs"] = _demo_legs(route, option.timing)
     option.result = _decide(option, todos, demo.deadline_seconds())
+    _set_times(option, demo.current_time(), _arrive_by(data["schedule"]))
     return _response(user_id, todos, [option], demo.current_time(), data["schedule"], "시연 지역에 없는 장소예요")
+
+
+def _demo_legs(route: dict, timing: RouteTiming) -> list[dict]:
+    # 시나리오의 실제 경로 좌표(path)를 쓰고, 없으면 정류장 좌표를 이어요
+    points = kakao._thin(route.get("path") or [[p["lng"], p["lat"]] for p in route.get("stop_points", []) if "lng" in p])
+    stops = route.get("stops", [])
+    return [
+        _walk_leg(timing.first_walk_seconds, "출발지", stops[0] if stops else "", None),
+        {"type": route["type"], "name": route["name"], "guidance": route.get("guidance", ""),
+         "from": stops[0] if stops else "", "to": stops[-1] if stops else "", "stop_count": max(len(stops) - 1, 0),
+         "minutes": travel_minutes_from_seconds(timing.moving_seconds), "points": points},
+        _walk_leg(timing.last_walk_seconds, stops[-1] if stops else "", "도착지", None),
+    ]
+
+
+def _walk_leg(seconds: int, frm: str, to: str, points: list | None) -> dict:
+    return {"type": "WALK", "name": "도보", "from": frm, "to": to,
+            "minutes": travel_minutes_from_seconds(seconds), "points": points or []}
+
+
+def _live_legs(route: dict, origin: kakao.Coord, destination: kakao.Coord,
+               first_walk: int, last_walk: int) -> list[dict]:
+    """카카오 구간 전체를 앱이 그리기 쉬운 목록으로 (처음·마지막 도보 포함).
+
+    카카오 legs에는 처음·마지막 도보가 없어서 직접 앞뒤에 붙여요.
+    """
+    out, prev_stop = [], "출발지"
+    transit = [leg for leg in route["legs"] if leg["type"] in TRANSIT_TYPES]
+    first, last = transit[0], transit[-1]
+    out.append(_walk_leg(first_walk, "출발지", (first["stops"] or [""])[0],
+                         [list(origin), list(first["start"])] if first["start"] else []))
+    for leg in route["legs"]:
+        if leg["type"] in TRANSIT_TYPES:
+            stops = leg["stops"]
+            out.append({"type": leg["type"], "name": "·".join(leg["vehicles"][:3]) or leg["guidance"],
+                        "guidance": leg["guidance"], "from": stops[0] if stops else "",
+                        "to": stops[-1] if stops else "", "stop_count": max(len(stops) - 1, 0),
+                        "minutes": travel_minutes_from_seconds(leg["seconds"]), "points": leg.get("points", [])})
+            prev_stop = stops[-1] if stops else prev_stop
+        elif leg["seconds"]:
+            out.append({**_walk_leg(leg["seconds"], prev_stop, "환승", leg.get("points")), "name": "환승 도보"})
+    end = last["end"] or last["start"]
+    out.append(_walk_leg(last_walk, (last["stops"] or [""])[-1], "도착지",
+                         [list(end), list(destination)] if end else []))
+    return out
 
 
 # ---------- 실시간 ----------
@@ -272,7 +381,9 @@ def _near_place(todo: dict, stop: kakao.Coord, cache: dict) -> dict | None:
 
 
 def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
-                 todos: list[dict], place_cache: dict) -> RouteOption | None:
+                 todos: list[dict], place_cache: dict, deadline: int | None = None) -> RouteOption | None:
+    """deadline(도착 희망까지 남은 초)이 있고 출발까지 여유가 REALTIME_WINDOW_SECONDS보다 많으면
+    실시간 도착을 부르지 않아요. 지금 오는 차는 그때 탈 차가 아니라서요 (호출 한도도 아껴요)."""
     legs = [leg for leg in route["legs"] if leg["type"] in TRANSIT_TYPES and leg["start"]]
     if not legs:
         return None
@@ -285,12 +396,14 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
         spare = max((route["kakao_total_seconds"] or 0) - route["moving_seconds"], 0)
         first_walk, last_walk = (first_walk if first_walk is not None else spare), (last_walk or 0)
     stop = tuple(first["start"])
+    plain = first_walk + route["moving_seconds"] + last_walk
+    far = deadline is not None and deadline - plain > REALTIME_WINDOW_SECONDS
     return RouteOption(
-        timing=RouteTiming(route["moving_seconds"], first_walk, last_walk, _vehicle_seconds(first),
+        timing=RouteTiming(route["moving_seconds"], first_walk, last_walk, [] if far else _vehicle_seconds(first),
                            is_subway=first["type"] == "SUBWAY"),
         card={"type": route["type"], "name": "·".join(first["vehicles"][:3]) or first["guidance"],
               "guidance": first["guidance"], "transfers": route["transfers"], "fare": route["fare_min"],
-              "stops": first["stops"]},
+              "stops": first["stops"], "legs": _live_legs(route, origin, destination, first_walk, last_walk)},
         places={t["id"]: _near_place(t, stop, place_cache) for t in todos},
         leg=first,
     )
@@ -321,23 +434,39 @@ def _pick_schedule(user_id: str, schedule_id: int | None, now: datetime) -> dict
 
 
 def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
-              todo_ids: list[int] | None = None, now: datetime | None = None) -> dict:
+              todo_ids: list[int] | None = None, now: datetime | None = None,
+              destination: dict | None = None) -> dict:
     """실시간 계획. origin은 (경도, 위도)이고 저장하지 않아요.
+
+    destination({name, lng, lat})이 있으면 일정 없이 지금 출발 기준으로 계산해요 (홈 검색창).
+    이때 할 일은 todo_ids로 고른 것만 넣어요 (없으면 할 일 없이 길만 찾아요).
+    없으면 일정(schedule_id, 없으면 가장 가까운 일정)의 도착 희망 시각에서 거꾸로 계산해요.
 
     카카오 경로 최대 3개를 계산하고 할 일을 잘 넣는 경로부터 보여 줘요. 할 일 상태는 첫 번째 경로 기준이에요.
     """
     now = now or datetime.now(KST).replace(microsecond=0)
-    schedule = _pick_schedule(user_id, schedule_id, now)
-    destination = (schedule["destination_lng"], schedule["destination_lat"])
-    arrive_by = _arrive_by(schedule)
-    deadline = int((arrive_by - now).total_seconds())
+    if destination is not None:
+        dest = (destination["lng"], destination["lat"])
+        arrive_by = None
+        deadline = NOW_TRIP_DEADLINE_SECONDS
+        todo_ids = todo_ids or []
+        schedule_out = {"destination": {"name": destination.get("name") or "목적지", "lng": dest[0], "lat": dest[1]},
+                        "arrive_by": None, "prep_minutes": 0}
+    else:
+        schedule = _pick_schedule(user_id, schedule_id, now)
+        dest = (schedule["destination_lng"], schedule["destination_lat"])
+        arrive_by = _arrive_by(schedule)
+        deadline = int((arrive_by - now).total_seconds())
+        schedule_out = {"destination": {"name": schedule["destination"], "lng": dest[0], "lat": dest[1]},
+                        "arrive_by": arrive_by.isoformat(), "prep_minutes": schedule["prep_minutes"]}
 
     todos = [t for t in _todos(user_id, todo_ids) if t["place_types"]]
     try:
-        routes = kakao.transit_routes(origin, destination, use_cache=False)
+        routes = kakao.transit_routes(origin, dest, use_cache=False)
         place_cache: dict = {}
         options = [o for r in routes[:MAX_ROUTES]
-                   if (o := _live_option(r, origin, destination, todos, place_cache))]
+                   if (o := _live_option(r, origin, dest, todos, place_cache,
+                                         deadline if arrive_by else None))]
     except kakao.KakaoError as e:
         raise PlanError(502, "upstream_error", str(e)) from None
     if not options:
@@ -345,6 +474,7 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
 
     for option in options:
         option.result = _decide(option, todos, deadline)
+        _set_times(option, now, arrive_by)
     # 필수 할 일을 넣을 수 있는 경로 → 할 일을 많이 넣는 경로 → 빨리 도착하는 경로 순이에요
     options.sort(key=lambda o: (_missed(o, todos, "필수"), _missed(o, todos, None), o.result.total_seconds))
     # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
@@ -352,13 +482,12 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
     summary = [{"rank": i, "name": o.card["name"], "type": o.card["type"], "transfers": o.card["transfers"],
                 "fare": o.card.get("fare"),
                 "total_min": travel_minutes_from_seconds(o.result.total_seconds),
-                "arrive_at": (now + timedelta(seconds=o.result.total_seconds)).isoformat()}
+                "depart_at": o.times["depart_at"].isoformat(),
+                "arrive_at": o.times["arrive_at"].isoformat()}
                for i, o in enumerate(options, 1)]
-    live.remember(user_id, live.LivePlan(planned_at=now, arrive_by=arrive_by, leg=best.leg,
-                                         timing=best.timing, places=dict(best.places), routes=summary))
-    schedule_out = {
-        "destination": {"name": schedule["destination"], "lng": destination[0], "lat": destination[1]},
-        "arrive_by": arrive_by.isoformat(),
-        "prep_minutes": schedule["prep_minutes"],
-    }
+    live.remember(user_id, live.LivePlan(
+        planned_at=now, arrive_by=arrive_by or now + timedelta(seconds=NOW_TRIP_DEADLINE_SECONDS),
+        leg=best.leg, timing=best.timing, places=dict(best.places), routes=summary,
+        basis=best.times["basis"], depart_at=best.times["depart_at"], total_seconds=best.result.total_seconds,
+        has_target=arrive_by is not None))
     return _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요")

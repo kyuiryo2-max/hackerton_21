@@ -40,7 +40,8 @@ def world(monkeypatch):
     return w
 
 
-def setup_user(client, hours=2, todos=(("우유 사기", ["편의점"], "필수"),)):
+# 기본 일정은 40분 뒤 도착: 출발이 임박해서 실시간 차로 계산해요 (멀면 도착 시각에서 거꾸로)
+def setup_user(client, hours=40 / 60, todos=(("우유 사기", ["편의점"], "필수"),)):
     arrive_by = (datetime.now(planner.KST) + timedelta(hours=hours)).isoformat(timespec="seconds")
     client.post("/api/schedules", json={
         "user_id": "u1", "destination": "청량리역", "destination_lat": 37.58029,
@@ -371,7 +372,7 @@ def test_할_일_완료(client, live_ask, monkeypatch):
 
 def test_실제_모드_두_곳_모두_들를_수_있으면_하나로_답함(client, live_ask, world, monkeypatch):
     world["places"] = {"편의점": [CU], "약국": [{**GS, "name": "대학약국", "address": "서울 성북구 고려대로 89"}]}
-    setup_user(client, todos=())
+    setup_user(client, hours=47 / 60, todos=())  # 실시간 범위 안에서 가장 넉넉하게
     plan(client)
     monkeypatch.setattr(planner, "_vehicle_seconds", lambda leg: [600, 1200, 1800])  # 두 곳을 들르면 30분 차
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
@@ -383,3 +384,121 @@ def test_실제_모드_두_곳_모두_들를_수_있으면_하나로_답함(clie
     assert "차를 타면 되고" in body["answer"]
     assert [t["status"] for t in body["todos"]] == ["포함", "포함"]
     assert body["result"]["feasible"] is True and body["result"]["board_at"]
+
+
+
+# ---------- 출발 기준 (11/13): 일정은 거꾸로, 홈 검색은 지금 출발 ----------
+def test_일정이_멀면_도착_시각에서_거꾸로_출발_시각을_계산(client, world, monkeypatch):
+    called = []
+    monkeypatch.setattr(planner, "_vehicle_seconds", lambda leg: called.append(leg) or [600, 1200])
+    setup_user(client, hours=5)
+    body = plan(client).json()
+    arrive_by = datetime.fromisoformat(body["schedule"]["arrive_by"])
+    depart, arrive = (datetime.fromisoformat(body[k]) for k in ("depart_at", "arrive_at"))
+    assert body["basis"] == "arrive_by"
+    # 도착 희망 5분 전에 닿도록, 지금이 아니라 몇 시간 뒤에 출발해요 (912분 여유 문제)
+    assert arrive_by - arrive == timedelta(minutes=5)
+    assert depart - datetime.now(planner.KST) > timedelta(hours=4)
+    assert called == []  # 지금 오는 차는 그때 탈 차가 아니라서 실시간을 부르지 않아요
+    card = body["routes"][0]
+    assert card["basis"] == "arrive_by" and card["has_realtime"] is False
+    assert card["depart_at"] == body["depart_at"]
+
+
+def test_출발이_임박하면_실시간_차로_탈_차를_정함(client, world):
+    setup_user(client)  # 40분 뒤
+    body = plan(client).json()
+    assert body["basis"] == "realtime" and body["routes"][0]["has_realtime"] is True
+    depart, board = (datetime.fromisoformat(body[k]) for k in ("depart_at", "board_at"))
+    assert depart <= board
+
+
+def test_홈_검색창은_일정_없이_지금_출발(client, world):
+    res = client.post("/api/plan", json={"user_id": "nobody", "demo": False, "origin": ORIGIN,
+                                         "destination": {"name": "서울역", "lat": 37.5547, "lng": 126.9707}})
+    assert res.status_code == 200  # 일정이 없어도 돼요 ("다가오는 일정이 없어요" 오류 해결)
+    body = res.json()
+    assert body["basis"] == "now"
+    assert body["schedule"]["destination"]["name"] == "서울역" and body["schedule"]["arrive_by"] is None
+    assert body["todos"] == []  # 고른 할 일이 없으면 길만 찾아요
+    now = datetime.now(planner.KST)
+    assert abs((datetime.fromisoformat(body["depart_at"]) - now).total_seconds()) < 15 * 60
+
+
+def test_홈_검색창도_고른_할_일은_넣음(client, world):
+    setup_user(client)
+    todo_id = client.get("/api/todos", params={"user_id": "u1"}).json()[0]["id"]
+    body = client.post("/api/plan", json={"user_id": "u1", "demo": False, "origin": ORIGIN, "todo_ids": [todo_id],
+                                          "destination": {"lat": 37.5547, "lng": 126.9707}}).json()
+    assert [t["todo_id"] for t in body["todos"]] == [todo_id]
+
+
+def test_경로_카드에_구간_목록(client, world):
+    setup_user(client)
+    legs = next(r for r in plan(client).json()["routes"] if r["name"] == "2115")["legs"]
+    assert [leg["type"] for leg in legs] == ["WALK", "BUS", "WALK"]
+    walk, bus, last = legs
+    assert (walk["from"], walk["to"]) == ("출발지", "안암역3번출구") and walk["minutes"] == 2
+    assert bus["name"] == "2115" and (bus["from"], bus["to"]) == ("안암역3번출구", "청량리역환승센터")
+    assert bus["minutes"] == 14 and bus["stop_count"] == 5
+    assert 2 <= len(bus["points"]) <= 40  # 지도에 그릴 선 (카카오 57개 → 40개로 줄임)
+    assert last["to"] == "도착지"
+
+
+# ---------- 실시간이 없을 때 질문 (11/13 새벽 2시 테스트에서 발견) ----------
+@pytest.fixture()
+def far_plan(client, world, monkeypatch):
+    """5시간 뒤 일정: 도착 시각에서 거꾸로 계산하고, 질문할 때도 실시간을 부르지 않아요."""
+    called = []
+    monkeypatch.setattr(planner, "_vehicle_seconds", lambda leg: called.append(1) or [600, 1200])
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(config, "LLM_MODEL", "")
+    setup_user(client, hours=5)
+    body = plan(client).json()
+
+    def ask(text):
+        return client.post("/api/ask", json={"user_id": "u1", "text": text, "demo": False}).json()
+    return body, ask, called
+
+
+def _hm(iso: str) -> str:
+    t = datetime.fromisoformat(iso)
+    return f"{t.hour}시" if t.minute == 0 else f"{t.hour}시 {t.minute}분"
+
+
+def test_먼_일정_다음_버스는_출발_시각으로_안내(far_plan):
+    body, ask, called = far_plan
+    answer = ask("다음 버스 언제야?")["answer"]
+    assert _hm(body["depart_at"]) in answer and "출발 30분 전부터" in answer
+    assert called == []
+
+
+def test_먼_일정_남은_시간은_출발_시각까지(far_plan):
+    body, ask, _ = far_plan
+    r = ask("몇 분 남았어?")
+    assert r["result"]["leave_by"] == body["depart_at"]
+    assert r["answer"].startswith(f"{_hm(body['depart_at'])}에 출발하면 돼요.")
+
+
+def test_먼_일정_늦어짐은_계획한_출발_시각_기준(far_plan):
+    body, ask, _ = far_plan
+    r = ask("10분 늦을 것 같아")
+    assert r["result"]["on_time"] is False  # 도착 5분 전 여유보다 10분 늦어서
+    assert r["answer"].startswith("10분 늦게 출발하면") and r["answer"].endswith("도착 희망 시각보다 늦어요.")
+
+
+def test_먼_일정_들르기는_일찍_나가면_됨(far_plan):
+    body, ask, _ = far_plan
+    r = ask("편의점 들러도 돼?")
+    assert r["result"]["feasible"] is True
+    assert r["answer"].endswith("에 출발하면 돼요.") and r["result"]["depart_at"] <= body["depart_at"]
+
+
+def test_새벽처럼_실시간이_없으면_이유를_안내(client, world, monkeypatch):
+    monkeypatch.setattr(planner, "_vehicle_seconds", lambda leg: [])
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(config, "LLM_MODEL", "")
+    setup_user(client)
+    plan(client)
+    answer = client.post("/api/ask", json={"user_id": "u1", "text": "다음 버스 언제야?", "demo": False}).json()["answer"]
+    assert answer.startswith("지금은 2115번 실시간 도착 정보가 없어요.") and "마을버스" in answer

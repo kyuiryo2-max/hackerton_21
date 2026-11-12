@@ -24,7 +24,9 @@ log = logging.getLogger(__name__)
 
 NOT_READY_ANSWER = "실시간 계산은 아직 준비 중이에요. 시연 모드에서 확인해 주세요."
 NO_PLAN_ANSWER = "먼저 길찾기에서 경로를 추천받아 주세요. 그 경로로 계산해 드릴게요."
-NO_ARRIVAL_ANSWER = "지금은 실시간 도착 정보를 찾지 못했어요."
+# 새벽처럼 운행하지 않는 시간이거나, 마을버스처럼 서울시 API가 실시간을 주지 않는 노선이에요 (11/13)
+NO_ARRIVAL_ANSWER = ("지금은 {label} 실시간 도착 정보가 없어요. "
+                     "운행 시간이 아니거나, 실시간 정보를 주지 않는 노선(마을버스 등)일 수 있어요.")
 UNSUPPORTED_ANSWER = "이동과 할 일에 관한 질문만 도와드릴 수 있어요."
 NEEDS_TRANSIT = {"next_vehicle", "stopover_check", "running_late", "time_left", "place_info", "change_route"}
 
@@ -187,7 +189,9 @@ def _combine_stops(state: dict, results: list[dict], answers: list[str], intents
         return names[0] if len(names) == 1 else ", ".join(names[:-2] + [f"{_josa(names[-2], '과와')} {names[-1]}"])
     if not no_names:
         combined = f"{both(ok_names)}에 모두 들를 수 있어요."
-        if board_at:
+        if final.board_seconds is None and state.get("stop_depart"):
+            combined += f" {_hhmm(state['stop_depart'])}에 출발하면 돼요."
+        elif board_at:
             combined += f" {_hhmm(board_at)} 차를 타면 되고"
             combined += f", 여유는 최대 {max_stay}분이에요." if max_stay is not None else "요."
     elif ok_names:
@@ -231,15 +235,15 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     return out, _short_answer(place, state)
 
 
-def _late_answer(delay, board_at, arrive_at, on_time: bool) -> str:
+def _late_answer(delay, board_at, arrive_at, on_time: bool | None) -> str:
     """늦어짐 답변. delay가 None이면 차를 놓친 경우, 0이면 "지금 출발하면 늦어?" (11/12)."""
     when = "지금 차를 놓쳤다면" if delay is None else "지금 출발하면" if delay == 0 else f"{delay}분 늦으면"
     if board_at is None:
         return f"{when} 탈 수 있는 차가 없어요."
     answer = f"{when} {_hhmm(board_at)} 차를 타고 {_hhmm(arrive_at)}에 도착해요."
-    if not on_time:
+    if on_time is False:
         return answer + " 도착 희망 시각보다 늦어요."
-    return answer + (" 늦지 않아요." if delay == 0 else "")
+    return answer + (" 늦지 않아요." if delay == 0 and on_time else "")
 
 
 def _running_late(item: dict, state: dict) -> tuple[dict, str]:
@@ -360,13 +364,28 @@ def _now() -> datetime:
 
 
 def _live_context(state: dict):
-    """(계획, 지금, 계획 뒤 지난 초, 실시간 차 도착 초). 계획이 없으면 None."""
+    """(계획, 지금, 출발 뒤 걸은 초, 실시간 차 도착 초). 계획이 없으면 None.
+
+    출발 시각(depart_at)이 지났으면 그만큼 정류장으로 걸어갔다고 봐요 (현재 위치를 다시 받지 않아서 추정).
+    도착 시각에서 거꾸로 계산한 계획인데 출발이 아직 멀면, 지금 오는 차는 탈 차가 아니라서 실시간을 부르지 않아요.
+    """
     now = _now()
     plan = live.recall(state["user_id"], now)
     if plan is None:
         return None
-    elapsed = int((now - plan.planned_at).total_seconds())
-    return plan, now, elapsed, planner._vehicle_seconds(plan.leg)
+    walked = max(int((now - (plan.depart_at or plan.planned_at)).total_seconds()), 0)
+    vehicles = [] if _departure_far(plan, now) else planner._vehicle_seconds(plan.leg)
+    return plan, now, walked, vehicles
+
+
+def _departure_far(plan: live.LivePlan, now: datetime) -> bool:
+    return (plan.basis == "arrive_by" and plan.depart_at is not None
+            and (plan.depart_at - now).total_seconds() > planner.REALTIME_WINDOW_SECONDS)
+
+
+def _depart_for(plan: live.LivePlan, now: datetime, total_seconds: int) -> datetime:
+    """실시간 차 없이, 도착 희망 5분 전에 닿으려면 늦어도 출발해야 하는 시각 (지났으면 지금)."""
+    return max(now, plan.arrive_by - timedelta(seconds=planner.ARRIVE_MARGIN_SECONDS + total_seconds))
 
 
 def _route_label(leg: dict) -> tuple[str, str]:
@@ -390,7 +409,12 @@ def _live_next_vehicle(item: dict, state: dict) -> tuple[dict, str]:
     second = wait_minutes_from_seconds(vehicles[1]) if len(vehicles) > 1 else None
     result = {"intent": "next_vehicle", "route": route, "minutes": first, "next_minutes": second}
     if first is None:
-        return result, NO_ARRIVAL_ANSWER
+        now = ctx[1]
+        if _departure_far(plan, now):
+            result["depart_at"] = plan.depart_at.isoformat()
+            return result, (f"{_josa(label, '은는')} {_hhmm(plan.depart_at)}에 출발하면 타요. "
+                            "출발 30분 전부터 실시간 도착을 알려 드릴게요.")
+        return result, NO_ARRIVAL_ANSWER.format(label=label)
     answer = f"{_josa(label, '이가')} {first}분 뒤에 와요."
     if second is not None:
         answer += f" 그다음 차는 {second}분 뒤예요."
@@ -404,7 +428,14 @@ def _live_time_left(item: dict, state: dict) -> tuple[dict, str]:
     plan, now, _, vehicles = ctx
     _, label = _route_label(plan.leg)
     if not vehicles:
-        return {"intent": "time_left", "minutes": None, "leave_by": None}, NO_ARRIVAL_ANSWER
+        # 실시간 차가 없으면 계획한 출발 시각으로 답해요 (도착 시각에서 거꾸로 계산한 값)
+        if plan.depart_at and plan.depart_at > now:
+            minutes = wait_minutes_from_seconds(int((plan.depart_at - now).total_seconds()))
+            return ({"intent": "time_left", "minutes": minutes, "leave_by": plan.depart_at.isoformat()},
+                    f"{_hhmm(plan.depart_at)}에 출발하면 돼요. {minutes}분 남았어요.")
+        if not plan.has_target:
+            return {"intent": "time_left", "minutes": None, "leave_by": None}, NO_ARRIVAL_ANSWER.format(label=label)
+        return ({"intent": "time_left", "minutes": 0, "leave_by": now.isoformat()}, "지금 바로 출발해야 해요.")
     # 시연 모드와 같이, 여유를 두고 정류장에 있어야 하는 시각을 알려요
     seconds_left = max(vehicles[0] - DEFAULT_BUFFER_SECONDS, 0)
     leave_by = now + timedelta(seconds=seconds_left)
@@ -441,6 +472,12 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
     }
     _remember_todo(state, item, decision, place, now)
+    if feasible and not vehicles and plan.has_target:
+        # 실시간 차가 없으면(출발이 멀거나 운행 전) 들르는 만큼 일찍 나가면 돼요
+        depart = _depart_for(plan, now, result.total_seconds)
+        out["depart_at"] = depart.isoformat()
+        state["stop_depart"] = depart
+        return out, f"{place['name']}에 들를 수 있어요. {_hhmm(depart)}에 출발하면 돼요."
     if feasible:
         if out["max_stay_min"] is None:
             return out, f"{place['name']}에 들를 수 있어요."
@@ -455,7 +492,9 @@ def _live_running_late(item: dict, state: dict) -> tuple[dict, str]:
         return _no_plan("running_late")
     plan, now, elapsed, vehicles = ctx
     delay = item.get("delay_minutes")
-    shift = (vehicles[0] + 1 if vehicles else 0) if delay is None else delay * 60
+    if not vehicles:
+        return _late_without_realtime(plan, now, delay)
+    shift = vehicles[0] + 1 if delay is None else delay * 60
     later = now + timedelta(seconds=shift)
     included = [c for c, _ in _live_included(plan, state["user_id"])]
     timing = replace(plan.timing, first_walk_seconds=max(plan.timing.first_walk_seconds - elapsed, 0),
@@ -464,10 +503,30 @@ def _live_running_late(item: dict, state: dict) -> tuple[dict, str]:
     result = decide_stops(timing, included, deadline)
     arrive_at = later + timedelta(seconds=result.total_seconds)
     board_at = None if result.board_seconds is None else later + timedelta(seconds=result.board_seconds)
-    on_time = result.total_seconds <= deadline
+    on_time = result.total_seconds <= deadline if plan.has_target else None
     out = {"intent": "running_late", "delay_minutes": delay, "missed": delay is None, "on_time": on_time,
            "board_at": board_at and board_at.isoformat(), "arrive_at": arrive_at.isoformat()}
     return out, _late_answer(delay, board_at, arrive_at, on_time)
+
+
+def _late_without_realtime(plan: live.LivePlan, now: datetime, delay: int | None) -> tuple[dict, str]:
+    """실시간 차 없이 늦어짐 계산. "N분 늦게"는 계획한 출발 시각 기준, "지금 출발하면"은 지금 기준이에요."""
+    if delay is None:  # "버스 놓쳤어"인데 다음 차를 모르면 추측하지 않아요
+        return ({"intent": "running_late", "available": False, "missed": True},
+                "지금은 다음 차 정보를 알 수 없어요. 실시간 도착 정보가 없어요.")
+    base = now if delay == 0 else max(now, plan.depart_at or now)
+    start = base + timedelta(minutes=delay)
+    arrive = start + timedelta(seconds=plan.total_seconds)
+    on_time = arrive <= plan.arrive_by if plan.has_target else None
+    out = {"intent": "running_late", "delay_minutes": delay, "missed": False, "on_time": on_time,
+           "depart_at": start.isoformat(), "board_at": None, "arrive_at": arrive.isoformat()}
+    when = "지금 출발하면" if delay == 0 else f"{delay}분 늦게 출발하면"
+    answer = f"{when} {_hhmm(start)}에 나가서 {_hhmm(arrive)}에 도착해요."
+    if on_time is False:
+        answer += " 도착 희망 시각보다 늦어요."
+    elif on_time and delay == 0:
+        answer += " 늦지 않아요."
+    return out, answer
 
 
 def _live_included(plan: live.LivePlan, user_id: str) -> list[tuple[StopCandidate, dict]]:
