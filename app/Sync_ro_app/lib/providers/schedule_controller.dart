@@ -1,3 +1,6 @@
+import 'active_route_controller.dart';
+import '../config/runtime_mode.dart';
+import '../services/real_data_service.dart';
 import 'package:flutter/material.dart';
 
 import '../models/schedule.dart';
@@ -5,6 +8,7 @@ import '../services/schedule_storage_service.dart';
 
 class ScheduleController extends ChangeNotifier {
   final _storage = ScheduleStorageService();
+  final _remote = RealDataService();
 
   List<Schedule> _schedules = [];
   bool _isLoading = true;
@@ -17,7 +21,9 @@ class ScheduleController extends ChangeNotifier {
 
   Future<void> initialize() async {
     try {
-      _schedules = await _storage.load() ?? [];
+      final local = await _storage.load() ?? <Schedule>[];
+      _schedules = RuntimeMode.instance.isDemo
+          ? local : await _remote.loadSchedules(previous: local);
       _sort();
       _error = null;
     } catch (e) {
@@ -82,10 +88,12 @@ class ScheduleController extends ChangeNotifier {
         endTime: endTime,
         preparationMinutes: preparationMinutes,
       );
-    _schedules.add(added);
+    final persisted = RuntimeMode.instance.isDemo ? added : await _remote.createSchedule(added);
+    _schedules.add(persisted);
     _sort();
     await _save();
-    return added;
+    activeRouteController.requestPlanRefresh();
+    return persisted;
   }
 
   Future<void> updateSchedule(Schedule updated) async {
@@ -93,14 +101,23 @@ class ScheduleController extends ChangeNotifier {
 
     if (index < 0) return;
 
-    _schedules[index] = updated;
+    final saved = RuntimeMode.instance.isDemo ? updated : await _remote.updateSchedule(updated);
+    _schedules[index] = saved;
     _sort();
     await _save();
+    activeRouteController.requestPlanRefresh();
   }
 
   Future<void> deleteSchedule(int id) async {
+    if (!RuntimeMode.instance.isDemo) await _remote.deleteSchedule(id);
     _schedules.removeWhere((e) => e.id == id);
     await _save();
+    activeRouteController.requestPlanRefresh();
+  }
+  @override
+  void dispose() {
+    _remote.dispose();
+    super.dispose();
   }
 }
 

@@ -54,11 +54,13 @@ class RouteInlineMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final points = <LatLng>[];
+    final routePoints = <LatLng>[];
     final lines = <Polyline>[];
     for (final segment in candidate?.segments ?? <RouteSegment>[]) {
       if (segment.type == RouteSegmentType.waiting || segment.geometry.length < 2) continue;
       final geometry = segment.geometry.map((p) => LatLng(p.latitude, p.longitude)).toList();
       points.addAll(geometry);
+      routePoints.addAll(geometry);
       if (segment.type == RouteSegmentType.walking) {
         lines.addAll(walkingDashes(geometry));
         continue;
@@ -74,6 +76,7 @@ class RouteInlineMap extends StatelessWidget {
       for (final leg in demoLegs!) {
         if (leg.path.length < 2) continue;
         points.addAll(leg.path);
+        routePoints.addAll(leg.path);
         if (leg.mode == 'WALKING') {
           lines.addAll(walkingDashes(leg.path));
         } else {
@@ -104,6 +107,7 @@ class RouteInlineMap extends StatelessWidget {
     // The demo line is sourced from the bundled Kakao transit sample, not invented.
     if (demoPath != null && demoPath!.length >= 2) {
       points.addAll(demoPath!);
+      routePoints.addAll(demoPath!);
       lines.add(Polyline(points: demoPath!, strokeWidth: 5, color: DemoRouteStyle.bus));
     }
     final markers = <Marker>[...transferMarkers];
@@ -171,15 +175,20 @@ class RouteInlineMap extends StatelessWidget {
       points.add(p);
       markers.add(Marker(point: p, width: 48, height: 48, child: const Icon(Icons.location_on, color: Colors.red, size: 38)));
     }
+    final cameraPoints = routePoints.length >= 2 ? routePoints : points;
+    final cameraKey = cameraPoints.isEmpty ? 'empty' :
+      '${cameraPoints.length}:${cameraPoints.first.latitude}:${cameraPoints.first.longitude}:'
+      '${cameraPoints.last.latitude}:${cameraPoints.last.longitude}';
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: Stack(children: [
         FlutterMap(
+          key: ValueKey(cameraKey),
           options: MapOptions(
-            initialCenter: points.isEmpty ? const LatLng(37.5665, 126.9780) : points.first,
+            initialCenter: cameraPoints.isEmpty ? const LatLng(37.5665, 126.9780) : cameraPoints.first,
             initialZoom: 12,
-            initialCameraFit: points.length >= 2
-                ? CameraFit.coordinates(coordinates: points, padding: const EdgeInsets.all(42), maxZoom: 15)
+            initialCameraFit: cameraPoints.length >= 2
+                ? CameraFit.coordinates(coordinates: cameraPoints, padding: const EdgeInsets.all(42), maxZoom: 15)
                 : null,
           ),
           children: [

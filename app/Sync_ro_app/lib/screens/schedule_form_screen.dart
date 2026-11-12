@@ -153,6 +153,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
     final controller = ScheduleScope.of(context);
 
+    try {
     Schedule saved;
     if (widget.existing == null) {
       saved = await controller.addSchedule(
@@ -205,6 +206,13 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     setState(() => _saving = false);
     if (controller.error == null) {
       Navigator.pop(context, saved);
+    }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('일정 서버 저장 실패: $error')),
+      );
     }
   }
 

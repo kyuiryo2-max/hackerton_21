@@ -1,3 +1,6 @@
+import '../config/app_theme.dart';
+import '../config/runtime_mode.dart';
+import '../providers/active_route_controller.dart';
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import '../models/todo_item.dart';
@@ -28,14 +31,48 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _screens = [
-    HomeScreen(onOpenRoutes: _openRoutes, onSelectWaypoint: _selectWaypoint, onOpenScheduleRoutes: _openScheduleRoutes),
+    HomeScreen(
+      onOpenRoutes: _openRoutes,
+      onSelectWaypoint: _selectWaypoint,
+      onOpenScheduleRoutes: _openScheduleRoutes,
+      onOpenTab: _onDestinationSelected,
+      onOpenAssistant: _openAssistant,
+      onChangeMode: _changeMode,
+    ),
     ScheduleScreen(onOpenScheduleRoutes: _openScheduleRoutes),
     const TodoScreen(),
     NavigationScreen(selectedWaypoint: _waypoint, requestedSchedule: _requestedSchedule),
     ];
   }
 
+  Future<void> _changeMode() async {
+    final wasDemo = RuntimeMode.instance.isDemo;
+    final nextDemo = await showDialog<bool>(context: context, builder: (dialogContext) =>
+      AlertDialog(
+        title: const Text('앱 사용 모드'),
+        content: Text(wasDemo
+          ? '실제 모드로 전환할까요? 이 기기의 전용 ID로 데이터가 분리됩니다. 서버 API가 아직 일부 기능을 지원하지 않을 수 있습니다.'
+          : '시연 모드로 전환할까요? 기존 시연 데이터가 표시됩니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('취소')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, !wasDemo), child: const Text('전환')),
+        ],
+      ));
+    if (nextDemo == null || !mounted) return;
+    try {
+      activeRouteController.clearSearch();
+      await RuntimeMode.instance.changeMode(nextDemo);
+      activeRouteController.requestPlanRefresh();
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('모드 전환 실패: $error')));
+    }
+  }
+
   void _openRoutes() => _onDestinationSelected(3);
+
+  void _openAssistant([String? question]) => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => AssistantScreen(initialQuestion: question)),
+      );
 
   void _openScheduleRoutes(Schedule schedule) {
     // Force a refresh even when the same schedule is selected twice.
@@ -87,6 +124,19 @@ class _MainScreenState extends State<MainScreen> {
             onPageChanged: _onPageChanged,
             children: _screens,
           ),
+          if (_selectedIndex != 0) Positioned(
+            top: 4, left: 8,
+            child: SafeArea(child: Material(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(24),
+              elevation: 2,
+              child: ActionChip(
+                avatar: Icon(RuntimeMode.instance.isDemo ? Icons.science_outlined : Icons.person_outline, size: 17),
+                label: Text(RuntimeMode.instance.isDemo ? '시연 모드' : '실제 모드'),
+                onPressed: _changeMode,
+              ),
+            )),
+          ),
           // AI button is draggable within the visible content area.
           LayoutBuilder(
             builder: (context, constraints) {
@@ -97,7 +147,7 @@ class _MainScreenState extends State<MainScreen> {
                   .clamp(0.0, double.infinity).toDouble();
               final maxY = (constraints.maxHeight - buttonHeight - margin)
                   .clamp(0.0, double.infinity).toDouble();
-              final position = _aiButtonPosition ?? Offset(maxX, margin);
+              final position = _aiButtonPosition ?? Offset(maxX - 8, maxY - 84);
               final left = position.dx.clamp(0.0, maxX).toDouble();
               final top = position.dy.clamp(0.0, maxY).toDouble();
               return Stack(
@@ -109,9 +159,10 @@ class _MainScreenState extends State<MainScreen> {
                       top: false,
                       bottom: false,
                       child: Material(
-                        elevation: 3,
+                        elevation: 6,
+                        shadowColor: AppTheme.primary.withValues(alpha: 0.4),
                         borderRadius: BorderRadius.circular(24),
-                        color: Theme.of(context).colorScheme.primaryContainer,
+                        color: AppTheme.primary,
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
                           onPanUpdate: (details) {
@@ -122,18 +173,16 @@ class _MainScreenState extends State<MainScreen> {
                               );
                             });
                           },
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const AssistantScreen()),
-                          ),
+                          onTap: _openAssistant,
                           child: const SizedBox(
                             width: buttonWidth,
                             height: buttonHeight,
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.auto_awesome, size: 18),
+                                Icon(Icons.auto_awesome, size: 18, color: Colors.white),
                                 SizedBox(width: 6),
-                                Text('AI 질문'),
+                                Text('AI 질문', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                               ],
                             ),
                           ),
@@ -147,7 +196,11 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppTheme.border)),
+        ),
+        child: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: _onDestinationSelected,
         destinations: const [
@@ -172,6 +225,7 @@ class _MainScreenState extends State<MainScreen> {
             label: '이동',
           ),
         ],
+      ),
       ),
     );
   }

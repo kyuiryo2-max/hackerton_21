@@ -1,3 +1,5 @@
+import 'runtime_mode.dart';
+
 /// All backend HTTP calls share API_BASE_URL.
 /// Example: flutter run --dart-define=API_BASE_URL=https://teumgil-server.onrender.com
 class ApiConfig {
@@ -5,10 +7,8 @@ class ApiConfig {
   static const bool offlineDemo = bool.fromEnvironment(
       'SYNC_RO_OFFLINE_DEMO', defaultValue: false);
   // Demo data on the REAL server; distinct from offline demo assets.
-  static const bool demoMode = bool.fromEnvironment(
-      'SYNC_RO_DEMO_MODE', defaultValue: false);
-  static const String userId = String.fromEnvironment(
-      'SYNC_RO_USER_ID', defaultValue: 'demo');
+  static bool get demoMode => RuntimeMode.instance.isDemo;
+  static String get userId => RuntimeMode.instance.userId;
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL', defaultValue: 'https://teumgil-server.onrender.com');
   static String get normalizedBaseUrl => baseUrl.replaceFirst(RegExp(r'/+$'), '');

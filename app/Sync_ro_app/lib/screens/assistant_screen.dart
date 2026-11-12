@@ -8,7 +8,10 @@ import '../config/api_config.dart';
 
 
 class AssistantScreen extends StatefulWidget {
-  const AssistantScreen({super.key});
+  const AssistantScreen({super.key, this.initialQuestion});
+
+  /// 홈 "가는 길에 할 일"에서 넘어온 질문. 있으면 화면이 열리자마자 물어봐요.
+  final String? initialQuestion;
 
   @override
   State<AssistantScreen> createState() => _AssistantScreenState();
@@ -39,10 +42,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
       if (!mounted) return;
       setState(() => _history.add(_Message(
         response.needsConfirm && response.question != null ? response.question! : response.answer,
-        false, todo: response.needsConfirm ? null : response.todo,
+        false, todo: _shouldShowTodo(response) ? response.todo : null,
         intent: response.result?['intent']?.toString(),
         engine: response.engine,
       )));
+      // In real mode /api/ask may have already saved a new todo.
+      // Refresh the visible todo list rather than showing an Add button again.
+      if (!ApiConfig.demoMode && response.todo?['id'] != null) {
+        await TodoScope.of(context).initialize();
+        if (!mounted) return;
+      }
       // A persisted server-side change can invalidate the current plan.
       // The demo account does not persist changes, so don't imply recalculation.
       if (!ApiConfig.demoMode && !response.needsConfirm &&
@@ -55,6 +64,22 @@ class _AssistantScreenState extends State<AssistantScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  bool _shouldShowTodo(ServerAskResponse response) {
+    if (response.needsConfirm || response.todo == null) return false;
+    // /api/ask persists generated todos for real users. Never POST them again.
+    if (!ApiConfig.demoMode && response.todo?['id'] != null) return false;
+    final result = response.result ?? const <String, dynamic>{};
+    // Prefer machine-readable server decision rather than a language heuristic.
+    if (result['can_add_todo'] == false || result['feasible'] == false ||
+        result['can_stop'] == false || result['status'] == '제외' ||
+        result['status'] == '불가능') {
+      return false;
+    }
+    final answer = response.answer.replaceAll(' ', '');
+    return !['시간이부족', '시간부족', '다음에가', '들르기어려', '불가능합니다', '추천하지않']
+        .any(answer.contains);
   }
 
   Future<void> _addSuggestedTodo(_Message message) async {
@@ -154,6 +179,18 @@ class _AssistantScreenState extends State<AssistantScreen> {
         setState(() => _listening = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('음성 입력 오류: $error')));
       }
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final question = widget.initialQuestion?.trim();
+    if (question != null && question.isNotEmpty) {
+      _input.text = question;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _send();
+      });
     }
   }
 

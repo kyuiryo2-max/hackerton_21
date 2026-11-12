@@ -1,3 +1,6 @@
+import 'active_route_controller.dart';
+import '../services/real_data_service.dart';
+import '../config/runtime_mode.dart';
 import 'package:flutter/material.dart';
 
 import '../data/mock_todos.dart';
@@ -6,6 +9,7 @@ import '../services/todo_storage_service.dart';
 
 class TodoController extends ChangeNotifier {
   final TodoStorageService _storage = TodoStorageService();
+  final RealDataService _remote = RealDataService();
 
   List<TodoItem> _todos = [];
   bool _isLoading = true;
@@ -19,11 +23,13 @@ class TodoController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       final saved = await _storage.loadTodos();
-      _todos = saved ?? List.of(mockTodos);
+      _todos = RuntimeMode.instance.isDemo
+          ? saved ?? List.of(mockTodos)
+          : await _remote.loadTodos(previous: saved ?? <TodoItem>[]);
       _error = null;
     } catch (e) {
       _error = '할 일 불러오기 실패: $e';
-      _todos = List.of(mockTodos);
+      _todos = RuntimeMode.instance.isDemo ? List.of(mockTodos) : <TodoItem>[];
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -48,31 +54,35 @@ class TodoController extends ChangeNotifier {
     required int minutes,
     required bool requiresTravel,
     String? placeName,
+    String? placeType,
   }) async {
     final nextId = _todos.isEmpty
         ? 1
         : _todos.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
 
-    _todos.add(
-      TodoItem(
-        id: nextId,
-        title: title,
-        estimatedMinutes: minutes,
-        requiresTravel: requiresTravel,
-        placeName: placeName,
-      ),
+    final draft = TodoItem(
+      id: nextId, title: title, estimatedMinutes: minutes,
+      requiresTravel: requiresTravel || (placeType?.isNotEmpty ?? false), placeName: placeName,
     );
+    final saved = RuntimeMode.instance.isDemo
+        ? draft : await _remote.createTodo(title: title, minutes: minutes, placeType: placeType);
+    _todos.add(saved);
 
     await _persist();
+    activeRouteController.requestPlanRefresh();
   }
 
-  Future<void> updateTodo(TodoItem updated) async {
+  Future<void> updateTodo(TodoItem updated, {String? placeType}) async {
     final index = _todos.indexWhere((item) => item.id == updated.id);
 
     if (index == -1) return;
 
-    _todos[index] = updated;
+    final saved = RuntimeMode.instance.isDemo
+        ? updated.copyWith(requiresTravel: (placeType?.isNotEmpty ?? false) || updated.requiresTravel)
+        : await _remote.updateTodo(updated, previous: _todos[index], placeType: placeType);
+    _todos[index] = saved;
     await _persist();
+    activeRouteController.requestPlanRefresh();
   }
 
   Future<void> toggleCompleted(TodoItem todo) async {
@@ -80,8 +90,15 @@ class TodoController extends ChangeNotifier {
   }
 
   Future<void> deleteTodo(int id) async {
+    if (!RuntimeMode.instance.isDemo) await _remote.deleteTodo(id);
     _todos.removeWhere((item) => item.id == id);
     await _persist();
+    activeRouteController.requestPlanRefresh();
+  }
+  @override
+  void dispose() {
+    _remote.dispose();
+    super.dispose();
   }
 }
 

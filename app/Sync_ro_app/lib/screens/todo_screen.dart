@@ -16,17 +16,23 @@ class TodoScreen extends StatelessWidget {
     );
     if (result == null) return;
 
+    try {
     if (existing == null) {
       await todoController.addTodo(
         title: result.title,
         minutes: result.minutes,
-        requiresTravel: false, // Future NLP pipeline will infer travel needs.
+        requiresTravel: result.placeType != null,
+        placeType: result.placeType,
       );
     } else {
       await todoController.updateTodo(existing.copyWith(
         title: result.title,
         estimatedMinutes: result.minutes,
-      ));
+      ), placeType: result.placeType);
+    }
+    } catch (error) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('할 일 서버 저장 실패: $error')));
     }
   }
 
@@ -66,7 +72,14 @@ class TodoScreen extends StatelessWidget {
                               child: ListTile(
                                 leading: Checkbox(
                                   value: todo.isCompleted,
-                                  onChanged: (_) => controller.toggleCompleted(todo),
+                                  onChanged: (_) async {
+                                    try {
+                                      await controller.toggleCompleted(todo);
+                                    } catch (e) {
+                                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('할 일 변경 실패: $e')));
+                                    }
+                                  },
                                 ),
                                 title: Text(todo.title,
                                     style: TextStyle(
@@ -74,13 +87,21 @@ class TodoScreen extends StatelessWidget {
                                           ? TextDecoration.lineThrough
                                           : null,
                                     )),
-                                subtitle: Text('예상 ${todo.estimatedMinutes}분'),
+                                subtitle: Text(
+                                  '예상 ${todo.estimatedMinutes}분 · '
+                                  '${todo.isCompleted ? '완료' : (todo.requiresTravel ? '경유지 추천 후보' : '경유 장소 미분류 · 수정에서 장소 종류 선택')}',
+                                ),
                                 trailing: PopupMenuButton<String>(
-                                  onSelected: (value) {
+                                  onSelected: (value) async {
                                     if (value == 'edit') {
-                                      _showTodoDialog(context, existing: todo);
+                                      await _showTodoDialog(context, existing: todo);
                                     } else if (value == 'delete') {
-                                      controller.deleteTodo(todo.id);
+                                      try {
+                                        await controller.deleteTodo(todo.id);
+                                      } catch (e) {
+                                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('할 일 삭제 실패: $e')));
+                                      }
                                     }
                                   },
                                   itemBuilder: (_) => const [
@@ -103,7 +124,8 @@ class _TodoFormResult {
   final String title;
   final int minutes;
 
-  const _TodoFormResult(this.title, this.minutes);
+  final String? placeType;
+  const _TodoFormResult(this.title, this.minutes, this.placeType);
 }
 
 // Controllers belong to the dialog's State and are disposed only when Flutter
@@ -120,6 +142,11 @@ class _TodoFormDialogState extends State<_TodoFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
   late final TextEditingController _minutesController;
+  String _placeType = '';
+  static const _placeTypes = <String>[
+    '약국', '편의점', '우체국', '꽃집', '케이크집', '카페', '프린트',
+    '은행·ATM', '마트', '병원', '안경점', '다이소', '음식점', '빵집', '올리브영',
+  ];
 
   @override
   void initState() {
@@ -153,6 +180,19 @@ class _TodoFormDialogState extends State<_TodoFormDialog> {
                     ? '할 일을 입력해 주세요.'
                     : null,
               ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: _placeType,
+                decoration: const InputDecoration(labelText: '경유 장소 종류',
+                  helperText: '자동 분류가 안 되는 할 일은 직접 선택하세요.'),
+                isExpanded: true,
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('자동 분류')),
+                  for (final type in _placeTypes)
+                    DropdownMenuItem(value: type, child: Text(type)),
+                ],
+                onChanged: (value) => setState(() => _placeType = value ?? ''),
+              ),
               TextFormField(
                 controller: _minutesController,
                 keyboardType: TextInputType.number,
@@ -179,6 +219,7 @@ class _TodoFormDialogState extends State<_TodoFormDialog> {
             Navigator.of(context).pop(_TodoFormResult(
               _titleController.text.trim(),
               int.parse(_minutesController.text.trim()),
+              _placeType.isEmpty ? null : _placeType,
             ));
           },
           child: const Text('저장'),
