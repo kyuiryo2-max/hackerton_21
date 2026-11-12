@@ -49,7 +49,8 @@ class TodoController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addTodo({
+  /// 저장된 할 일을 돌려줘요 (할 일·일정 탭에서 날짜를 붙일 때 써요).
+  Future<TodoItem> addTodo({
     required String title,
     required int minutes,
     required bool requiresTravel,
@@ -70,6 +71,7 @@ class TodoController extends ChangeNotifier {
 
     await _persist();
     activeRouteController.requestPlanRefresh();
+    return saved;
   }
 
   Future<void> updateTodo(TodoItem updated, {String? placeType}) async {

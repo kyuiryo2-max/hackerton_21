@@ -5,8 +5,7 @@ import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import '../models/todo_item.dart';
 import '../models/schedule.dart';
-import 'schedule_screen.dart';
-import 'todo_screen.dart';
+import 'planner_screen.dart';
 import 'navigation_screen.dart';
 import 'assistant_screen.dart';
 
@@ -39,9 +38,9 @@ class _MainScreenState extends State<MainScreen> {
       onOpenAssistant: _openAssistant,
       onChangeMode: _changeMode,
     ),
-    ScheduleScreen(onOpenScheduleRoutes: _openScheduleRoutes),
-    const TodoScreen(),
+    // 탭: 0 홈(경유 판단·추천) / 1 길찾기(경로 비교) / 2 할 일·일정(시간표)
     NavigationScreen(selectedWaypoint: _waypoint, requestedSchedule: _requestedSchedule),
+    PlannerScreen(onOpenScheduleRoutes: _openScheduleRoutes),
     ];
   }
 
@@ -68,7 +67,7 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _openRoutes() => _onDestinationSelected(3);
+  void _openRoutes() => _onDestinationSelected(1);
 
   void _openAssistant([String? question]) => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => AssistantScreen(initialQuestion: question)),
@@ -78,12 +77,12 @@ class _MainScreenState extends State<MainScreen> {
     // Force a refresh even when the same schedule is selected twice.
     _requestedSchedule.value = null;
     _requestedSchedule.value = schedule;
-    _onDestinationSelected(3);
+    _onDestinationSelected(1);
   }
 
   void _selectWaypoint(TodoItem todo) {
     _waypoint.value = todo;
-    _onDestinationSelected(3);
+    _onDestinationSelected(1);
   }
 
   // 하단 네비게이션 버튼 클릭 시
@@ -123,19 +122,6 @@ class _MainScreenState extends State<MainScreen> {
             controller: _pageController,
             onPageChanged: _onPageChanged,
             children: _screens,
-          ),
-          if (_selectedIndex != 0) Positioned(
-            top: 4, left: 8,
-            child: SafeArea(child: Material(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(24),
-              elevation: 2,
-              child: ActionChip(
-                avatar: Icon(RuntimeMode.instance.isDemo ? Icons.science_outlined : Icons.person_outline, size: 17),
-                label: Text(RuntimeMode.instance.isDemo ? '시연 모드' : '실제 모드'),
-                onPressed: _changeMode,
-              ),
-            )),
           ),
           // AI button is draggable within the visible content area.
           LayoutBuilder(
@@ -210,19 +196,14 @@ class _MainScreenState extends State<MainScreen> {
             label: '홈',
           ),
           NavigationDestination(
-            icon: Icon(Icons.calendar_today_outlined),
-            selectedIcon: Icon(Icons.calendar_today),
-            label: '일정',
+            icon: Icon(Icons.alt_route_outlined),
+            selectedIcon: Icon(Icons.alt_route),
+            label: '길찾기',
           ),
           NavigationDestination(
-            icon: Icon(Icons.checklist_outlined),
-            selectedIcon: Icon(Icons.checklist),
-            label: '할 일',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.route_outlined),
-            selectedIcon: Icon(Icons.route),
-            label: '이동',
+            icon: Icon(Icons.calendar_month_outlined),
+            selectedIcon: Icon(Icons.calendar_month),
+            label: '할 일·일정',
           ),
         ],
       ),

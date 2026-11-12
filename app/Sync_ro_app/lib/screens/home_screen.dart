@@ -390,7 +390,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                         _StayHintCard(onOpenRoutes: widget.onOpenRoutes),
                       ],
                       const SizedBox(height: 26),
-                      _SectionTitle(title: '오늘 일정', actionLabel: '전체', onAction: () => widget.onOpenTab?.call(1)),
+                      _SectionTitle(title: '오늘 일정', actionLabel: '전체', onAction: () => widget.onOpenTab?.call(2)),
                       _TodaySchedules(schedules: today, now: _now, onTap: _openSchedule, onAdd: _addSchedule),
                     ]),
                   ),

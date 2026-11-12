@@ -407,37 +407,53 @@ class _StepRow extends StatelessWidget {
   final bool late;
   final bool last;
 
+  // 왼쪽 시각 46 + 간격 10 + 점 칸 14
+  static const double _timeWidth = 46;
+  static const double _gap = 10;
+  static const double _dotColumn = 14;
+
   @override
   Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    // IntrinsicHeight 없이 Stack으로 세로 선을 그려요.
+    // 선은 이 줄의 점 아래부터 줄 끝(다음 줄 점 위)까지 끊김 없이 이어져요.
+    return Stack(clipBehavior: Clip.none, children: [
+      if (!last)
+        Positioned(
+          left: _timeWidth + _gap + _dotColumn / 2 - 1,
+          top: 15,
+          bottom: -5,
+          width: 2,
+          child: Container(color: line ?? AppTheme.border),
+        ),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
-          width: 46,
+          width: _timeWidth,
           child: Text(time,
               textAlign: TextAlign.end,
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: late ? AppTheme.danger : AppTheme.textStrong)),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: _gap),
         SizedBox(
-          width: 14,
-          child: Column(children: [
-            const SizedBox(height: 5),
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: dot ?? Colors.white,
-                border: Border.all(color: dot ?? AppTheme.textMuted, width: 2),
+          width: _dotColumn,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Center(
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: dot ?? Colors.white,
+                  border: Border.all(color: dot ?? AppTheme.textMuted, width: 2),
+                ),
               ),
             ),
-            if (!last) Expanded(child: Container(width: 2, color: line ?? AppTheme.border)),
-          ]),
+          ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: _gap),
         Expanded(
           child: Padding(
-            padding: EdgeInsets.only(bottom: last ? 0 : 12),
+            padding: EdgeInsets.only(bottom: last ? 0 : 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
               if (sub.isNotEmpty)
@@ -446,7 +462,7 @@ class _StepRow extends StatelessWidget {
           ),
         ),
       ]),
-    );
+    ]);
   }
 }
 

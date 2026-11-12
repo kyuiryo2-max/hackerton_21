@@ -426,7 +426,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       }
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('이동')),
+      appBar: AppBar(title: const Text('길찾기')),
       body: AnimatedBuilder(animation: activeRouteController, builder: (context, _) {
         final active = activeRouteController.active;
         return ListView(padding: const EdgeInsets.all(16), children: [
