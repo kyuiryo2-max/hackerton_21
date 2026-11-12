@@ -1,7 +1,7 @@
 """AI 호출 안전장치: 대기 시간 제한, 대체 규칙은 키워드만."""
 
 
-def test_AI_대기_시간은_10초를_넘지_않음(monkeypatch):
+def test_AI_대기_시간은_5초를_넘지_않음(monkeypatch):
     """AI가 응답하지 않아도 화면이 오래 멈추지 않고 키워드 규칙으로 넘어가요."""
     from app.services import llm
 
@@ -9,8 +9,8 @@ def test_AI_대기_시간은_10초를_넘지_않음(monkeypatch):
     llm._client.cache_clear()
     try:
         client = llm._client()
-        assert llm.LLM_TIMEOUT_SECONDS <= 10
-        assert client.timeout <= 10
+        assert llm.LLM_TIMEOUT_SECONDS <= 5
+        assert client.timeout <= 5
         assert client.max_retries == 0
     finally:
         llm._client.cache_clear()

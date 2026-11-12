@@ -41,6 +41,7 @@ jobs:
           --dart-define=SYNC_RO_API_URL=${{ vars.API_BASE_URL }}
           --dart-define=SYNC_RO_OFFLINE_DEMO=false
           --dart-define=SYNC_RO_DEMO_MODE=true
+          --dart-define=SYNC_RO_USE_REAL_PLACES=true
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

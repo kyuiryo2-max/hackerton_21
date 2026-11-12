@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app import config
 from app.db.database import init_db, seed_demo_data
-from app.routers import assistant, plan, storage, transit
+from app.routers import assistant, places, plan, storage, transit
 
 
 @asynccontextmanager
@@ -63,6 +63,7 @@ app.include_router(storage.router)
 app.include_router(transit.router)
 app.include_router(plan.router)
 app.include_router(assistant.router)
+app.include_router(places.router)
 
 
 # 오류 응답을 기준 문서 형식 {"error": {"code", "message"}} 하나로 맞춰요.
