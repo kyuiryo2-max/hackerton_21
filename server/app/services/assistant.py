@@ -140,6 +140,7 @@ def _judge_stop(timing, included: list, place: dict, state: dict, deadline: int)
         earlier.append((new, place))
     target = same[0] if same else new.todo_id
     decision = next(d for d in result.decisions if d.todo_id == target)
+    state["stop_final"] = result  # 한 질문에 두 곳이면 마지막 판단이 둘을 함께 본 최종 결과예요
     return result, decision
 
 
@@ -150,11 +151,59 @@ def _short_answer(place: dict, state: dict) -> str:
     return "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
 
 
-def _remember_todo(state: dict, item: dict, decision) -> None:
+def _remember_todo(state: dict, item: dict, decision, place: dict, now) -> None:
     todo = {"text": _stop_text(item, state), "place_types": item["place_types"], "importance": "필수",
             "status": STATUS[decision.status], "source": "질문"}
     state["todo"] = todo
     state.setdefault("todos", []).append(todo)
+    state.setdefault("stop_refs", []).append((decision.todo_id, place["name"]))
+    state["stop_now"] = now
+
+
+def _combine_stops(state: dict, results: list[dict], answers: list[str], intents: list[dict]) -> list[str]:
+    """한 질문에 들를 곳이 두 군데 이상이면, 마지막(둘을 함께 본) 판단 하나로 답을 합쳐요.
+
+    장소마다 따로 답하면 "편의점 최대 8분, 약국 최대 11분"처럼 서로 다른 버스 기준 숫자가 섞여 헷갈려요.
+    저장할 할 일 상태와 결과(feasible, max_stay_min, board_at)도 최종 판단으로 맞춰요.
+    """
+    final, refs = state.get("stop_final"), state.get("stop_refs", [])
+    if state["stopovers"] < 2 or final is None or len(refs) < 2:
+        return answers
+    status = {d.todo_id: d.status for d in final.decisions}
+    ok_names, no_names = [], []
+    for todo, (stop_id, name) in zip(state["todos"], refs):
+        todo["status"] = STATUS[status.get(stop_id, "excluded")]
+        (ok_names if status.get(stop_id) == "included" else no_names).append(name)
+    now = state["stop_now"]
+    board_at = now + timedelta(seconds=final.board_seconds) if final.board_seconds is not None else None
+    max_stay = wait_minutes_from_seconds(final.max_stay_seconds) if final.max_stay_seconds is not None else None
+    for r in results:
+        if r.get("intent") == "stopover_check" and r.get("place"):
+            ok = r["place"]["name"] in ok_names
+            r.update(feasible=ok, max_stay_min=max_stay if ok else None,
+                     board_at=board_at.isoformat() if ok and board_at else None)
+
+    def both(names):
+        return names[0] if len(names) == 1 else ", ".join(names[:-2] + [f"{_josa(names[-2], '과와')} {names[-1]}"])
+    if not no_names:
+        combined = f"{both(ok_names)}에 모두 들를 수 있어요."
+        if board_at:
+            combined += f" {_hhmm(board_at)} 차를 타면 되고"
+            combined += f", 여유는 최대 {max_stay}분이에요." if max_stay is not None else "요."
+    elif ok_names:
+        combined = f"{both(ok_names)}에는 들를 수 있지만, {both(no_names)}까지 들르기엔 시간이 부족해요."
+    else:
+        combined = f"{both(no_names)}에 모두 들르기엔 시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+    # 들르기 답들을 첫 들르기 자리에 합친 답 하나로 바꿔요
+    out, placed = [], False
+    for item, answer in zip(intents, answers):
+        if item["intent"] == "stopover_check":
+            if not placed:
+                out.append(combined)
+                placed = True
+        else:
+            out.append(answer)
+    return out
 
 
 def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
@@ -176,7 +225,7 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         "max_stay_min": wait_minutes_from_seconds(result.max_stay_seconds) if feasible and result.max_stay_seconds is not None else None,
         "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
     }
-    _remember_todo(state, item, decision)
+    _remember_todo(state, item, decision, place, now)
     if feasible:
         return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
     return out, _short_answer(place, state)
@@ -391,7 +440,7 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         "max_stay_min": wait_minutes_from_seconds(result.max_stay_seconds) if feasible and result.max_stay_seconds is not None else None,
         "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
     }
-    _remember_todo(state, item, decision)
+    _remember_todo(state, item, decision, place, now)
     if feasible:
         if out["max_stay_min"] is None:
             return out, f"{place['name']}에 들를 수 있어요."
@@ -538,6 +587,9 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
                 result, answer = HANDLERS[name](item, state)
             results.append(result)
             answers.append(answer)
+
+    if not classified["needs_confirm"]:
+        answers = _combine_stops(state, results, answers, intents)
 
     # 들르기 질문으로 생긴 할 일 저장. 한 질문에 두 곳이면 둘 다 (todo는 마지막 것, 예전 앱 호환)
     todos = state["todos"]

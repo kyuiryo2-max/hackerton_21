@@ -367,3 +367,19 @@ def test_할_일_완료(client, live_ask, monkeypatch):
     assert body["answer"] == "우유 사기는 완료로 표시할게요."
     todos = client.get("/api/todos", params={"user_id": "u1"}).json()
     assert next(t for t in todos if t["id"] == todo_id)["status"] == "완료"
+
+
+def test_실제_모드_두_곳_모두_들를_수_있으면_하나로_답함(client, live_ask, world, monkeypatch):
+    world["places"] = {"편의점": [CU], "약국": [{**GS, "name": "대학약국", "address": "서울 성북구 고려대로 89"}]}
+    setup_user(client, todos=())
+    plan(client)
+    monkeypatch.setattr(planner, "_vehicle_seconds", lambda leg: [600, 1200, 1800])  # 두 곳을 들르면 30분 차
+    monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
+    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+        "type": "question", "needs_confirm": False, "question": None, "engine": "ai",
+        "intents": [{"intent": "stopover_check", "place_types": [k], "delay_minutes": None} for k in ("편의점", "약국")]})
+    body = live_ask("편의점 들렀다가 약국도 갈 수 있어?")
+    assert body["answer"].startswith("CU 안암역점과 대학약국에 모두 들를 수 있어요.")
+    assert "차를 타면 되고" in body["answer"]
+    assert [t["status"] for t in body["todos"]] == ["포함", "포함"]
+    assert body["result"]["feasible"] is True and body["result"]["board_at"]

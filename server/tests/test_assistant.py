@@ -292,8 +292,8 @@ def test_두_곳_들르기는_앞_장소와_함께_판단하고_둘_다_저장(c
     body = ask(client, "편의점 들렀다가 다이소도 갈 수 있어?", user_id="u1")
     assert [(t["text"], t["status"]) for t in body["todos"]] == [("편의점 들르기", "포함"), ("다이소 들르기", "대기")]
     assert all(t["id"] for t in body["todos"]) and body["todo"] == body["todos"][-1]
-    assert body["answer"] == ("CU 안암센트럴점에 들를 수 있어요. 최대 6분 있을 수 있어요. "
-                              "다이소 안암점까지 들르기엔 시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요.")
+    # 두 곳을 함께 본 최종 판단 하나로 답해요 (장소마다 따로 답하면 숫자가 엇갈려 보여요)
+    assert body["answer"] == "CU 안암센트럴점에는 들를 수 있지만, 다이소 안암점까지 들르기엔 시간이 부족해요."
     saved = {t["text"] for t in client.get("/api/todos", params={"user_id": "u1"}).json()}
     assert {"편의점 들르기", "다이소 들르기"} <= saved
 
