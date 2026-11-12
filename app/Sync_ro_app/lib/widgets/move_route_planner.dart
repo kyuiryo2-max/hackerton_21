@@ -177,17 +177,21 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
 
   Future<void> _openTaskPicker() async {
     final tasks = _tasks;
-    final feasible = <(StayTask, StayEval)>[];
+    final feasible = <(StayTask, StayEval, bool)>[];
     var hidden = 0;
     for (final t in tasks) {
       StayEval? best;
+      var early = false;
       for (final r in widget.routes) {
         final evals = _evals(r, t);
         if (evals == null || evals.isEmpty) continue;
-        if (best == null || evals.first.dwell > best.dwell) best = evals.first;
+        if (best == null || evals.first.dwell > best.dwell) {
+          best = evals.first;
+          early = _overviewFor(r)?.leaveEarlier ?? false;
+        }
       }
       if (best != null && best.status != StayStatus.bad) {
-        feasible.add((t, best));
+        feasible.add((t, best, early));
       } else {
         hidden++;
       }
@@ -229,7 +233,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                   ),
                 )
               else
-                for (final (t, e) in feasible)
+                for (final (t, e, early) in feasible)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 5),
                     child: Material(
@@ -255,11 +259,20 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                                     style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                               ]),
                             ),
-                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                              Text('최대 ${e.dwell}분',
-                                  style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
-                              const Text('체류 가능', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                            ]),
+                            // 일정이 멀면: 몇 시에 나가면 들를 수 있는지 / 가까우면: 최대 몇 분 머물 수 있는지
+                            if (early && e.latestDepart != null)
+                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                Text('${KstTime.hm(e.latestDepart)} 출발',
+                                    style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
+                                const Text('이때 나가면 들를 수 있어요',
+                                    style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                              ])
+                            else
+                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                Text('최대 ${e.dwell}분',
+                                    style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
+                                const Text('체류 가능', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                              ]),
                           ]),
                         ),
                       ),

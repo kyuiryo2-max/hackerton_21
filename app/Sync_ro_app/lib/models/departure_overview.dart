@@ -164,7 +164,12 @@ class DepartureOverview {
     this.totalMinutes,
     this.origin,
     this.destinationPoint,
+    this.leaveEarlier = false,
   });
+
+  /// 일정이 아직 멀어서(도착 시각에서 거꾸로 계산, 실시간 차 없음) 서버가 체류 여유(max_stay_min)를 안 줄 때.
+  /// 이때는 "더 일찍 나가면" 들를 수 있어요: 지금 나간다고 보고, 원래 출발 시각까지를 여유로 계산해요.
+  final bool leaveEarlier;
 
   /// 정류장에 미리 도착해 있는 여유 (server timecalc.STOP_BUFFER_SECONDS 와 같은 값)
   static const int stopBufferMinutes = 2;
@@ -194,7 +199,16 @@ class DepartureOverview {
 
   bool get isDemo => source == DepartureSource.serverDemo || source == DepartureSource.offlineDemo;
   bool get isEstimate => source == DepartureSource.scheduleEstimate;
-  bool get canPlanStay => spareMinutes != null && departure != null && boardAt != null;
+  bool get canPlanStay => (spareMinutes != null || leaveEarlier) && departure != null && boardAt != null;
+
+  /// 체류 판정의 기준 출발 시각과 여유(분)
+  (DateTime, int) get _stayBase {
+    final dep = departure!;
+    if (spareMinutes != null || !leaveEarlier) return (dep, spareMinutes ?? 0);
+    final now = DateTime.now();
+    final base = now.isBefore(dep) ? now : dep;
+    return (base, dep.difference(base).inMinutes);
+  }
 
   DateTime? get prepStart => departure?.subtract(Duration(minutes: prepMinutes));
 
@@ -210,9 +224,8 @@ class DepartureOverview {
 
   /// [delayMinutes]만큼 늦게(음수면 일찍) 나갈 때 [candidate]에서 [need]분 머무는 판정.
   StayEval evaluate(StayCandidate candidate, {required int delayMinutes, required int need}) {
-    final dep = departure!;
+    final (dep, spare) = _stayBase;
     final board = boardAt!;
-    final spare = spareMinutes ?? 0;
     final depart = dep.add(Duration(minutes: delayMinutes));
     final arrive = depart.add(Duration(minutes: candidate.walkTo));
 
@@ -384,6 +397,8 @@ class DepartureOverview {
       boardStopName: stopsOnRoute.isEmpty ? null : '${stopsOnRoute.first}',
       totalMinutes: _int(route['total_min']),
       spareMinutes: maxStay == null ? null : maxStay + includedDetour,
+      // 일정이 멀어서 실시간 차가 없을 때(도착 시각에서 거꾸로): 더 일찍 나가는 걸로 계산
+      leaveEarlier: maxStay == null && '${route['basis'] ?? plan.basis ?? ''}' == 'arrive_by',
       tasks: tasks,
       explanation: plan.explanation,
       origin: GeoPoint.fromJson(plan.data['origin'], fallbackName: '출발') ?? fallbackOrigin,
