@@ -169,7 +169,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
             title: Text(s.title, style: const TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: Text('${s.location} · ${s.startTime.month}/${s.startTime.day} ${_hm(s.startTime)}–${_hm(s.endTime)}'),
+            subtitle: Text('${s.location} · ${s.startTime.month}/${s.startTime.day} ${_hm(s.startTime)}까지 도착'),
           ),
           const Divider(height: 1),
           ListTile(
@@ -488,7 +488,7 @@ class _WeekSchedulePreview extends StatelessWidget {
                             color: past ? AppTheme.textMuted : AppTheme.textStrong,
                             decoration: s.isCompleted ? TextDecoration.lineThrough : null,
                           )),
-                      Text('${_hm(s.startTime)}–${_hm(s.endTime)} · ${s.location}',
+                      Text('${_hm(s.startTime)}까지 도착 · ${s.location}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
