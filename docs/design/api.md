@@ -36,7 +36,7 @@
 | 있음 | `GET /api/demo/context` | 시연 모드 시각·위치·일정·경로. 지도용 `route.path`(버스 경로 선, `[경도, 위도]`), `route.stop_points`(정류장), `places`(들를 곳 좌표) | [demo_context.json](api-examples/demo_context.json) | routers/transit.py |
 | 있음 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | routers/assistant.py |
 | 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외. `demo=true`면 시연, 아니면 `origin`(현재 위치)으로 실시간 | [plan.json](api-examples/plan.json) | routers/plan.py |
-| 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변. 실제 모드는 다음 차·들르기·남은 시간만 계산 (#59) | [ask.json](api-examples/ask.json) | routers/assistant.py |
+| 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변. 실제 모드는 마지막 실시간 계획의 경로로 계산 (#59) | [ask.json](api-examples/ask.json) | routers/assistant.py |
 | 있음 | `GET /api/places/search?query=` | 목적지 장소 검색 (카카오 키워드, 서울 전체·정확도순 최대 10곳, `lat`·`lng`를 주면 그 근처). 응답 `[{name, address, lat, lng}]` (#61) | – | routers/places.py |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
@@ -101,10 +101,17 @@
   - `running_late`: `delay_minutes`, `missed`, `on_time`, `board_at`, `arrive_at` (뒤 질문도 늦어진 시각으로 계산). 분이 없고 "놓쳤어"면 지금 차를 놓친 것으로 보고 다음 차 기준(`missed: true`), 그 밖에는 "몇 분 늦을 것 같아요?"로 되물음
   - `time_left`: `minutes`, `leave_by` (차 도착에서 여유 2분을 뺀 시각)
   - `place_info`: `place`, `change_route`: `route`, `change_todo`: `todo_id`, `action`, `unsupported`: 없음
-  - `demo=false`(실제 모드, #59): `next_vehicle`, `stopover_check`, `time_left`는 마지막 실시간 계획(`/api/plan`, 1시간 안)의 1번 경로로 실시간 도착을 다시 물어 계산한다. 들르기는 그 경로의 탑승 정류장 근처에서 찾고, 계획 뒤 지난 시간만큼 정류장으로 걸어갔다고 보고 판단한다(추정)
+  - `demo=false`(실제 모드, #59, 11/12): 교통 질문 6종 모두 마지막 실시간 계획(`/api/plan`, 1시간 안)의 1번 경로로, 실시간 도착을 다시 물어 계산한다. 계획 뒤 지난 시간만큼 정류장으로 걸어갔다고 보고 판단한다(추정)
+    - `running_late`: 늦는 분만큼 시각을 미뤄 다시 계산. 분이 없으면 지금 차를 놓친 것으로 봄
+    - `stopover_check`·`place_info`: 그 경로의 탑승 정류장 근처에서 찾음. `place_info`는 `places[]`(최대 3곳, `round_trip_min`)도 줌
+    - `change_route`: `routes[]`(추천한 경로 요약)를 알려 주기만 하고 경로를 바꾸지 않음. 바꾸는 건 길찾기 화면
     - 계획이 없거나 1시간이 지났으면 `{"intent", "available": false}` 와 "먼저 길찾기에서 경로를 추천받아 주세요"
-    - 나머지 교통 질문(`running_late`, `place_info`, `change_route`)은 아직 `{"intent", "available": false}` 와 준비 중 안내
-    - `available: false` 결과는 AI 답변 문장으로 바꾸지 않는다
+- `answer` (AI 답변 문장, #37, 11/12 모든 질문 종류로 확대): `EXPLAIN_WITH_AI=true`면 코드가 만든 기본 답변을 초안(`draft`)으로 AI에 주고, AI 문장이 아래 검사를 모두 통과할 때만 쓴다. 하나라도 걸리면 기본 답변
+  - 숫자: 계산 결과와 초안에 있는 숫자만 (`llm.numbers_match`)
+  - 경고 유지: 들르기 불가·늦음·장소 없음이면 "부족해요·늦어요·없어요·못 찾았어요" 같은 말이 있어야 함 (`assistant._ai_content_ok`)
+  - 하지 않은 일 금지: 할 일 변경이 아닌데 "삭제했·변경했·예약…"을 말하면 안 됨
+  - 200자 이내. 계산을 못 한 안내(`available: false`, 도착 정보 없음, 할 일 못 찾음)는 AI에 보내지 않음
+  - 질문이 여러 개면 결과 목록을 함께 보내 한 답으로 이어 말하게 함
 - `engine`: `ai` 또는 `rule`. AI 키가 없거나, AI 호출이 실패하거나, AI 출력 형식이 맞지 않으면 키워드 규칙(`services/rules.py`)으로 답한다. 규칙 정확도는 팀 테스트 문장 기준 의도 14/25, 장소 10/15라 AI보다 낮다
 - 질문과 할 일 문장은 200자까지
 - `demo` 사용자는 부스에서 여럿이 함께 써서 질문 기록을 저장하지 않고 AI에 이전 대화도 보내지 않는다

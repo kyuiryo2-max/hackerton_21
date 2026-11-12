@@ -175,9 +175,9 @@ def test_실제_모드는_경로를_추천받기_전엔_안내만(client, no_ai)
     assert body["answer"] == assistant.NO_PLAN_ANSWER
 
 
-def test_실제_모드_늦어짐은_아직_준비_중(client, no_ai):
-    body = ask(client, "10분 늦을 것 같아", user_id="u1", demo=False)
-    assert body["answer"] == assistant.NOT_READY_ANSWER
+@pytest.mark.parametrize("text", ["10분 늦을 것 같아", "편의점 어디야?", "환승 적은 걸로 없어?", "몇 분 남았어?"])
+def test_실제_모드_교통_질문은_모두_경로가_있어야_계산(client, no_ai, text):
+    assert ask(client, text, user_id="u1", demo=False)["answer"] == assistant.NO_PLAN_ANSWER
 
 
 # ---------- 입력 ----------

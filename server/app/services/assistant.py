@@ -18,7 +18,7 @@ from app.db.database import DEMO_USER_ID
 from app.services import demo, live, llm, planner, rules
 from app.services.planner import ACTIVE, KST, STATUS, _demo_place
 from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, decide_stops
-from app.services.timecalc import wait_minutes_from_seconds
+from app.services.timecalc import travel_minutes_from_seconds, wait_minutes_from_seconds
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def _copula(word: str) -> str:
 
 # ---------- 질문 종류별 계산 (시연 모드) ----------
 def _hhmm(dt) -> str:
-    return f"{dt.hour}시 {dt.minute}분"
+    return f"{dt.hour}시" if dt.minute == 0 else f"{dt.hour}시 {dt.minute}분"
 
 
 def _demo_route_arrival(elapsed: int) -> dict:
@@ -214,19 +214,53 @@ def _change_todo(item: dict, state: dict) -> tuple[dict, str]:
     return {"intent": "change_todo", "todo_id": todo["id"], "action": action}, f"{_josa(todo['text'], '은는')} {words.get(action, '바꿀게요')}."
 
 
-# AI 답변 문장(#37)은 계산 결과를 그대로 말로 풀면 되는 질문에만 써요.
-# 할 일 변경·경로 변경·장소 정보는 "삭제했어요", "바꿨어요"처럼 하지 않은 일을 말할 수 있어서 정해진 문장을 써요.
-AI_SENTENCE_INTENTS = {"next_vehicle", "stopover_check", "time_left"}
+# AI 답변 문장(#37). 11/12부터 모든 질문 종류에 써요 (현장 평가에서 대화가 자연스럽게 느껴지도록).
+# 대신 코드가 만든 기본 답변을 AI에 "초안"으로 주고, AI 문장이 아래 검사를 통과할 때만 써요.
+#   1) 숫자: 계산 결과와 초안에 있는 숫자만 (llm.numbers_match)
+#   2) 경고 유지: 시간이 부족하거나 늦는 결과면 "부족해요·늦어요·어려워요·없어요·못 찾았어요" 같은 말이 있어야 해요
+#   3) 하지 않은 일 금지: 할 일 변경이 아닌데 "삭제했·변경했·예약…"을 말하면 안 돼요 (11/11 측정에서 발견)
+#   4) 길이: 200자 이내
+# 하나라도 걸리면 코드가 만든 기본 답변을 그대로 보여 줘요.
+AI_SENTENCE_INTENTS = {"next_vehicle", "stopover_check", "running_late", "time_left",
+                       "place_info", "change_route", "change_todo", "unsupported"}
+# "늦으셔도 도착할 수 있어요"처럼 경고를 뒤집는 표현은 통과하지 않게, 경고로 끝나는 말만 셉니다
+WARNING_WORDS = ("부족", "늦어", "늦게", "늦습", "늦는", "늦을 거", "어려", "어렵", "없어", "없습", "없는", "없고",
+                 "못 ", "못했", "못해", "못합", "못 찾")
+FALSE_ACTION_WORDS = ("삭제했", "삭제하였", "변경했", "변경하였", "바꿨", "바꾸었", "예약", "취소했", "등록했", "추가했")
+MAX_AI_ANSWER_CHARS = 200
 
 
-def _ai_sentence_ok(intents: list[dict], result: dict) -> bool:
-    """질문 종류가 하나이고 AI_SENTENCE_INTENTS 안에 있을 때만 AI 문장을 써요.
-    질문이 두 개면 AI가 앞 질문의 답을 빠뜨려서 정해진 문장을 써요."""
-    if len(intents) != 1 or intents[0].get("intent") not in AI_SENTENCE_INTENTS:
+def _needs_warning(result: dict) -> bool:
+    return (result.get("feasible") is False or result.get("on_time") is False
+            or (result.get("intent") == "running_late" and result.get("board_at") is None)
+            or (result.get("intent") in ("place_info", "stopover_check") and "place" in result
+                and result["place"] is None))
+
+
+def _ai_sentence_ok(intents: list[dict], results: list[dict] | dict) -> bool:
+    """AI 문장을 써도 되는 결과인지. 계산을 못 한 안내(계획 없음, 도착 정보 없음, 할 일 못 찾음)는 정해진 문장을 써요."""
+    results = results if isinstance(results, list) else [results]
+    if not results or any(i.get("intent") not in AI_SENTENCE_INTENTS for i in intents):
         return False
-    if result.get("available") is False:  # 계산을 못 한 안내 문장은 그대로 써요 (실제 모드 계획 없음 등)
+    for r in results:
+        if r.get("intent") not in AI_SENTENCE_INTENTS or r.get("available") is False:
+            return False
+        if r["intent"] in ("next_vehicle", "time_left") and r.get("minutes") is None:
+            return False
+        if r["intent"] == "change_todo" and r.get("todo_id") is None:
+            return False
+    return True
+
+
+def _ai_content_ok(answer: str, results: list[dict]) -> bool:
+    """AI 문장 내용 검사 (숫자 검사는 llm.explain_result가 해요)."""
+    if not answer or len(answer) > MAX_AI_ANSWER_CHARS:
         return False
-    return result.get("intent") in AI_SENTENCE_INTENTS
+    if any(_needs_warning(r) for r in results) and not any(w in answer for w in WARNING_WORDS):
+        return False
+    if not any(r.get("intent") == "change_todo" for r in results) and any(w in answer for w in FALSE_ACTION_WORDS):
+        return False
+    return True
 
 
 # ---------- 질문 종류별 계산 (실제 모드, #59) ----------
@@ -304,9 +338,7 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         kind = item["place_types"][0] if item["place_types"] else "들를 곳"
         return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None, "board_at": None},
                 f"정류장 근처에서 {_josa(kind, '을를')} 찾지 못했어요.")
-    included_ids = {t["id"] for t in repo.list_todos(state["user_id"], status="포함")}
-    included = [(StopCandidate(tid, "필수", p["round_trip_walk_seconds"], p["stay_seconds"]), p)
-                for tid, p in plan.places.items() if p and tid in included_ids]
+    included = _live_included(plan, state["user_id"])
     same = [c.todo_id for c, p in included if p["name"] == place["name"]]
     new = StopCandidate(-1, "필수", place["round_trip_walk_seconds"], place["stay_seconds"])
     timing = replace(plan.timing, first_walk_seconds=max(plan.timing.first_walk_seconds - elapsed, 0),
@@ -332,10 +364,85 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     return out, "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
 
 
+def _live_running_late(item: dict, state: dict) -> tuple[dict, str]:
+    """늦는 만큼 시각을 미뤄 다시 계산해요. 분이 없으면("버스 하나 놓쳤어") 지금 차를 놓친 것으로 봐요."""
+    ctx = _live_context(state)
+    if ctx is None:
+        return _no_plan("running_late")
+    plan, now, elapsed, vehicles = ctx
+    delay = item.get("delay_minutes")
+    shift = (vehicles[0] + 1 if vehicles else 0) if delay is None else delay * 60
+    later = now + timedelta(seconds=shift)
+    included = [c for c, _ in _live_included(plan, state["user_id"])]
+    timing = replace(plan.timing, first_walk_seconds=max(plan.timing.first_walk_seconds - elapsed, 0),
+                     vehicle_seconds=[v - shift for v in vehicles if v - shift >= 0])
+    deadline = int((plan.arrive_by - later).total_seconds())
+    result = decide_stops(timing, included, deadline)
+    arrive_at = later + timedelta(seconds=result.total_seconds)
+    board_at = None if result.board_seconds is None else later + timedelta(seconds=result.board_seconds)
+    on_time = result.total_seconds <= deadline
+    out = {"intent": "running_late", "delay_minutes": delay, "missed": delay is None, "on_time": on_time,
+           "board_at": board_at and board_at.isoformat(), "arrive_at": arrive_at.isoformat()}
+    when = "지금 차를 놓쳤다면" if delay is None else f"{delay}분 늦으면"
+    if board_at is None:
+        return out, f"{when} 탈 수 있는 차가 없어요."
+    answer = f"{when} {_hhmm(board_at)} 차를 타고 {_hhmm(arrive_at)}에 도착해요."
+    return out, answer if on_time else answer + " 도착 희망 시각보다 늦어요."
+
+
+def _live_included(plan: live.LivePlan, user_id: str) -> list[tuple[StopCandidate, dict]]:
+    """계획한 경로에 이미 넣은(포함) 할 일과 그 장소."""
+    included_ids = {t["id"] for t in repo.list_todos(user_id, status="포함")}
+    return [(StopCandidate(tid, "필수", p["round_trip_walk_seconds"], p["stay_seconds"]), p)
+            for tid, p in plan.places.items() if p and tid in included_ids]
+
+
+def _live_place_info(item: dict, state: dict) -> tuple[dict, str]:
+    """탑승 정류장 근처의 장소 (가까운 순 최대 3곳). 종류가 없으면 이미 넣은 할 일의 장소를 알려요."""
+    ctx = _live_context(state)
+    if ctx is None:
+        return _no_plan("place_info")
+    plan = ctx[0]
+    if item["place_types"]:
+        found = planner._near_place({"place_types": item["place_types"]}, tuple(plan.leg["start"]), {})
+        places = (found or {}).get("candidates", [])
+    else:
+        places = [p for _, p in _live_included(plan, state["user_id"])]
+    if not places:
+        kind = item["place_types"][0] if item["place_types"] else "들를 곳"
+        return {"intent": "place_info", "place": None, "places": []}, f"정류장 근처에서 {_josa(kind, '을를')} 찾지 못했어요."
+    out_places = [{"name": p["name"], "address": p["address"],
+                   "round_trip_min": travel_minutes_from_seconds(p["round_trip_walk_seconds"])} for p in places]
+    first = out_places[0]
+    answer = f"가까운 곳은 {_copula(first['name'])}. ({first['address']}, 정류장에서 왕복 {first['round_trip_min']}분)"
+    if len(out_places) > 1:
+        answer += " 다른 곳: " + ", ".join(p["name"] for p in out_places[1:]) + "."
+    return {"intent": "place_info", "place": {"name": first["name"], "address": first["address"]},
+            "places": out_places}, answer
+
+
+def _live_change_route(item: dict, state: dict) -> tuple[dict, str]:
+    """추천한 다른 경로를 알려 줘요. 경로를 바꾸는 건 길찾기 화면에서 해요 (여기서 바꾸지 않아요)."""
+    ctx = _live_context(state)
+    if ctx is None:
+        return _no_plan("change_route")
+    routes = ctx[0].routes
+    others = routes[1:]
+    out = {"intent": "change_route", "route": routes[0]["name"] if routes else None, "routes": routes}
+    if not others:
+        return out, "추천한 경로가 하나뿐이에요. 다른 경로는 없어요."
+    parts = [f"{r['name']}{'번' if r['name'].isdigit() else ''}({r['total_min']}분, 환승 {r['transfers']}번)"
+             for r in others]
+    return out, f"다른 경로는 {', '.join(parts)}이 있어요. 길찾기에서 골라 주세요."
+
+
 LIVE_HANDLERS = {
     "next_vehicle": _live_next_vehicle,
     "stopover_check": _live_stopover_check,
+    "running_late": _live_running_late,
     "time_left": _live_time_left,
+    "place_info": _live_place_info,
+    "change_route": _live_change_route,
 }
 
 
@@ -361,7 +468,7 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
     if keep_history:
         repo.add_message(user_id, "user", text, intents)
 
-    result, answers = None, []
+    result, results, answers = None, [], []
     state = {"user_id": user_id, "text": text, "elapsed": 0, "todo": None}
     if classified["needs_confirm"]:
         answers.append(classified["question"])
@@ -377,6 +484,7 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
                     result, answer = {"intent": name, "available": False}, NOT_READY_ANSWER
             else:
                 result, answer = HANDLERS[name](item, state)
+            results.append(result)
             answers.append(answer)
 
     todo = state["todo"]
@@ -387,8 +495,10 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
 
     # #37: AI 답변 문장 생성 및 숫자 대조 검증 (기존 코드 안전망 유지)
     should_explain = explain_with_ai if explain_with_ai is not None else config.EXPLAIN_WITH_AI
-    if should_explain and _ai_ready() and result and not classified["needs_confirm"] and _ai_sentence_ok(intents, result):
-        answer = llm.explain_result(text, result, answer)
+    if should_explain and _ai_ready() and results and not classified["needs_confirm"] and _ai_sentence_ok(intents, results):
+        # 질문이 여러 개면 결과 목록을 함께 줘서 AI가 하나의 답으로 이어 말하게 해요
+        answer = llm.explain_result(text, results if len(results) > 1 else results[0], answer,
+                                    check=lambda a: _ai_content_ok(a, results))
 
     if keep_history:
         repo.add_message(user_id, "assistant", answer)

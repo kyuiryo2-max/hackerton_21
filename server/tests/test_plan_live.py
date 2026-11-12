@@ -300,3 +300,45 @@ def test_실제_모드_계획은_사용자마다_따로(client, live_ask):
     plan(client)
     other = client.post("/api/ask", json={"user_id": "u2", "text": "다음 버스 언제야?", "demo": False}).json()
     assert other["answer"] == assistant.NO_PLAN_ANSWER
+
+
+def test_실제_모드_늦어짐은_늦은_만큼_다음_차로_다시_계산(client, live_ask):
+    setup_user(client)
+    plan(client)
+    body = live_ask("10분 늦을 것 같아")
+    r = body["result"]
+    assert r["intent"] == "running_late" and r["delay_minutes"] == 10 and r["missed"] is False
+    # 10분 뒤에 오는 차는 못 타고 20분 차를 타요
+    board = datetime.fromisoformat(r["board_at"])
+    now = datetime.now(planner.KST)
+    assert 9 * 60 <= (board - now).total_seconds() <= 21 * 60
+    assert "10분 늦으면" in body["answer"]
+
+
+def test_실제_모드_버스를_놓치면_다음_차(client, live_ask):
+    setup_user(client)
+    plan(client)
+    r = live_ask("버스 놓쳤어")["result"]
+    assert r["missed"] is True and r["board_at"]
+
+
+def test_실제_모드_장소_정보는_정류장_근처_후보(client, live_ask, world):
+    world["places"] = {"편의점": [CU, GS]}
+    setup_user(client)
+    plan(client)
+    body = live_ask("편의점 어디야?")
+    names = [p["name"] for p in body["result"]["places"]]
+    assert set(names) == {"CU 안암역점", "GS25 안암점"}
+    assert body["answer"].startswith("가까운 곳은") and "왕복" in body["answer"]
+
+
+def test_실제_모드_다른_경로는_추천한_경로를_알려_줌(client, live_ask):
+    setup_user(client)
+    routes = plan(client).json()["routes"]
+    body = live_ask("환승 적은 걸로 없어?")
+    r = body["result"]
+    assert [x["name"] for x in r["routes"]] == [x["name"] for x in routes]
+    if len(routes) > 1:
+        assert routes[1]["name"] in body["answer"] and "길찾기에서 골라" in body["answer"]
+    else:
+        assert "하나뿐" in body["answer"]

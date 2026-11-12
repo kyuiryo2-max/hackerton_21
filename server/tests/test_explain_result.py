@@ -135,55 +135,112 @@ def test_AI에게는_시와_분만_보냄(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "intents, result, ok",
+    "intents, results, ok",
     [
-        ([{"intent": "next_vehicle"}], {"intent": "next_vehicle"}, True),
-        ([{"intent": "stopover_check"}], {"intent": "stopover_check"}, True),
-        ([{"intent": "time_left"}], {"intent": "time_left"}, True),
-        # 하지 않은 일을 말할 수 있는 질문은 정해진 문장
-        ([{"intent": "change_todo"}], {"intent": "change_todo"}, False),
-        ([{"intent": "change_route"}], {"intent": "change_route"}, False),
-        ([{"intent": "place_info"}], {"intent": "place_info"}, False),
-        # "늦어요" 경고를 빼먹을 수 있어서 정해진 문장
-        ([{"intent": "running_late"}], {"intent": "running_late"}, False),
-        # 질문이 두 개면 앞 질문 답을 빠뜨려서 정해진 문장
-        ([{"intent": "running_late"}, {"intent": "next_vehicle"}], {"intent": "next_vehicle"}, False),
+        # 11/12부터 모든 질문 종류에 AI 문장을 써요 (내용은 _ai_content_ok가 검사)
+        ([{"intent": "next_vehicle"}], {"intent": "next_vehicle", "minutes": 12}, True),
+        ([{"intent": "stopover_check"}], {"intent": "stopover_check", "feasible": True}, True),
+        ([{"intent": "time_left"}], {"intent": "time_left", "minutes": 8}, True),
+        ([{"intent": "change_todo"}], {"intent": "change_todo", "todo_id": 3}, True),
+        ([{"intent": "change_route"}], {"intent": "change_route", "route": "2115"}, True),
+        ([{"intent": "place_info"}], {"intent": "place_info", "place": None}, True),
+        ([{"intent": "running_late"}], {"intent": "running_late", "on_time": False}, True),
+        ([{"intent": "unsupported"}], {"intent": "unsupported"}, True),
+        # 질문 두 개도 결과 목록을 함께 줘요
+        ([{"intent": "running_late"}, {"intent": "next_vehicle"}],
+         [{"intent": "running_late"}, {"intent": "next_vehicle", "minutes": 3}], True),
+        # 계산을 못 한 안내는 정해진 문장 그대로
+        ([{"intent": "next_vehicle"}], {"intent": "next_vehicle", "available": False}, False),
+        ([{"intent": "next_vehicle"}], {"intent": "next_vehicle", "minutes": None}, False),
+        ([{"intent": "change_todo"}], {"intent": "change_todo", "todo_id": None}, False),
     ],
 )
-def test_AI_문장은_안전한_질문_하나일_때만(intents, result, ok):
-    assert assistant._ai_sentence_ok(intents, result) is ok
+def test_AI_문장을_쓰는_경우(intents, results, ok):
+    assert assistant._ai_sentence_ok(intents, results) is ok
 
 
-def test_할_일_변경은_AI를_켜도_정해진_문장(tmp_path, monkeypatch):
-    """AI가 "삭제했습니다"처럼 하지 않은 일을 말하지 않게, 할 일 변경은 AI 문장을 쓰지 않아요."""
+@pytest.mark.parametrize(
+    "answer, results, ok",
+    [
+        ("CU에 들러도 괜찮아요.", [{"intent": "stopover_check", "feasible": True}], True),
+        # "부족해요" 경고를 빼먹으면 안 돼요 (11/11 측정에서 발견한 오류)
+        ("다이소에 들르실 수 있어요.", [{"intent": "stopover_check", "feasible": False}], False),
+        ("지금 들르기엔 시간이 부족해요.", [{"intent": "stopover_check", "feasible": False}], True),
+        ("15분 늦으셔도 9시 9분에 도착하실 수 있습니다.", [{"intent": "running_late", "on_time": False}], False),
+        ("10분 늦으면 9시 9분에 도착해서 늦어요.", [{"intent": "running_late", "on_time": False}], True),
+        ("근처에서 꽃집을 찾지 못했어요.", [{"intent": "place_info", "place": None}], True),
+        ("근처에 꽃집이 있어요.", [{"intent": "place_info", "place": None}], False),
+        # 하지 않은 일을 말하면 안 돼요 (11/11 "커피 구매 일정을 삭제했습니다")
+        ("커피 구매 일정을 삭제했습니다. 다음 버스는 12분 뒤예요.", [{"intent": "next_vehicle", "minutes": 12}], False),
+        ("경로를 6호선으로 변경했어요.", [{"intent": "change_route"}], False),
+        # 할 일 변경은 실제로 한 일이라 괜찮아요
+        ("커피 사기는 이번 이동에서 뺄게요.", [{"intent": "change_todo", "todo_id": 3}], True),
+        ("가" * 201, [{"intent": "unsupported"}], False),
+    ],
+)
+def test_AI_문장_내용_검사(answer, results, ok):
+    assert assistant._ai_content_ok(answer, results) is ok
+
+
+def test_내용_검사에_걸리면_기본_답변(monkeypatch):
+    monkeypatch.setattr(llm, "_chat_json", lambda s, u: {"answer": "다이소에 들르실 수 있어요."})
+    result = {"intent": "stopover_check", "feasible": False, "place": {"name": "다이소"}}
+    base = "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
+    answer = llm.explain_result("다이소 들러도 돼?", result, base,
+                                check=lambda a: assistant._ai_content_ok(a, [result]))
+    assert answer == base
+
+
+def test_AI에게_기본_답변을_초안으로_보냄(monkeypatch):
+    sent = {}
+
+    def fake_chat(system, user):
+        sent["user"] = user
+        return {"answer": "알겠어요, 커피 사기는 이번엔 뺄게요."}
+    monkeypatch.setattr(llm, "_chat_json", fake_chat)
+    llm.explain_result("커피는 빼 줘", {"intent": "change_todo", "todo_id": 3, "action": "delete"},
+                       "커피 사기는 이번엔 뺄게요.")
+    assert '"draft": "커피 사기는 이번엔 뺄게요."' in sent["user"]
+
+
+def _ai_on(tmp_path, monkeypatch, intents):
     from app import config
     from app.db import database
 
-    # 테스트마다 빈 임시 DB를 만들고 시연 데이터를 넣어요 (GitHub Actions처럼 깨끗한 환경에서도 돌게)
     monkeypatch.setattr(config, "DATABASE_PATH", str(tmp_path / "test.db"))
     database.init_db()
     database.seed_demo_data()
-    called = []
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
-    monkeypatch.setattr(llm, "explain_result", lambda *a, **k: called.append(1) or "네, 삭제했습니다.")
-    monkeypatch.setattr(
-        assistant,
-        "_classify",
-        lambda text, history: {
-            "type": "question",
-            "intents": [{"intent": "change_todo", "todo_text": "커피", "action": "delete", "place_types": [], "delay_minutes": None}],
-            "needs_confirm": False,
-            "question": None,
-            "engine": "ai",
-        },
-    )
+    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+        "type": "question", "intents": intents, "needs_confirm": False, "question": None, "engine": "ai"})
+
+
+def test_할_일_변경도_AI_문장(tmp_path, monkeypatch):
+    _ai_on(tmp_path, monkeypatch, [{"intent": "change_todo", "todo_text": "커피", "action": "delete",
+                                    "place_types": [], "delay_minutes": None}])
+    monkeypatch.setattr(llm, "_chat_json", lambda s, u: {"answer": "알겠어요, 커피 사기는 이번엔 뺄게요."})
     r = assistant.ask("demo", "커피는 안 사도 돼", use_demo=True, explain_with_ai=True)
-    assert not called
-    assert "삭제했습니다" not in r["answer"]
+    assert r["answer"] == "알겠어요, 커피 사기는 이번엔 뺄게요."
 
 
-def test_계산을_못_한_안내는_AI_문장으로_바꾸지_않음():
-    from app.services import assistant
-    intents = [{"intent": "next_vehicle"}]
-    assert assistant._ai_sentence_ok(intents, {"intent": "next_vehicle", "available": False}) is False
-    assert assistant._ai_sentence_ok(intents, {"intent": "next_vehicle", "minutes": 10}) is True
+def test_범위_밖_질문도_AI_문장(tmp_path, monkeypatch):
+    _ai_on(tmp_path, monkeypatch, [{"intent": "unsupported", "place_types": [], "delay_minutes": None}])
+    monkeypatch.setattr(llm, "_chat_json", lambda s, u: {
+        "answer": "점심 메뉴는 골라 드리기 어려워요. 대신 가는 길에 식당에 들를 시간이 있는지는 알려 드릴 수 있어요."})
+    r = assistant.ask("demo", "점심 뭐 먹지?", use_demo=True, explain_with_ai=True)
+    assert r["answer"].startswith("점심 메뉴는")
+
+
+def test_질문_두_개면_결과_목록을_함께_보냄(tmp_path, monkeypatch):
+    _ai_on(tmp_path, monkeypatch, [
+        {"intent": "running_late", "delay_minutes": 10, "place_types": []},
+        {"intent": "next_vehicle", "place_types": [], "delay_minutes": None},
+    ])
+    sent = {}
+
+    def fake_chat(system, user):
+        sent["user"] = user
+        return {"answer": "x"}
+    monkeypatch.setattr(llm, "_chat_json", fake_chat)
+    assistant.ask("demo", "10분 늦을 것 같은데 다음 버스는?", use_demo=True, explain_with_ai=True)
+    assert '"result": [' in sent["user"]

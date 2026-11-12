@@ -349,8 +349,12 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
     options.sort(key=lambda o: (_missed(o, todos, "필수"), _missed(o, todos, None), o.result.total_seconds))
     # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
     best = options[0]
+    summary = [{"rank": i, "name": o.card["name"], "type": o.card["type"], "transfers": o.card["transfers"],
+                "total_min": travel_minutes_from_seconds(o.result.total_seconds),
+                "arrive_at": (now + timedelta(seconds=o.result.total_seconds)).isoformat()}
+               for i, o in enumerate(options, 1)]
     live.remember(user_id, live.LivePlan(planned_at=now, arrive_by=arrive_by, leg=best.leg,
-                                         timing=best.timing, places=dict(best.places)))
+                                         timing=best.timing, places=dict(best.places), routes=summary))
     schedule_out = {
         "destination": {"name": schedule["destination"], "lng": destination[0], "lat": destination[1]},
         "arrive_by": arrive_by.isoformat(),

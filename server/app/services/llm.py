@@ -231,9 +231,10 @@ def numbers_match(answer: str, allowed: set[int]) -> bool:
 
 def explain_result(
     question: str,
-    result: dict,
+    result: dict | list,
     base_answer: str,
     version: str | None = None,
+    check=None,
 ) -> str:
     """#37: AI를 호출하여 자연스러운 설명 문장을 생성하고, numbers_match로 숫자를 대조 검증합니다.
 
@@ -244,7 +245,9 @@ def explain_result(
         return base_answer
 
     allowed = extract_allowed_numbers(result, base_answer)
-    user_payload = json.dumps({"question": question, "result": short_times(result)}, ensure_ascii=False)
+    # draft: 코드가 만든 기본 답변. AI는 이 사실을 유지한 채 말투만 자연스럽게 다듬어요
+    shown = [short_times(r) for r in result] if isinstance(result, list) else short_times(result)
+    user_payload = json.dumps({"question": question, "result": shown, "draft": base_answer}, ensure_ascii=False)
 
     try:
         system_prompt = load_prompt("explain_result", version=version)
@@ -253,10 +256,9 @@ def explain_result(
         if not ai_answer:
             return base_answer
 
-        # 숫자 대조 검증
-        if numbers_match(ai_answer, allowed):
+        # 숫자 대조 검증 + 내용 검사(check, assistant._ai_content_ok)
+        if numbers_match(ai_answer, allowed) and (check is None or check(ai_answer)):
             return ai_answer
-        else:
-            return base_answer
+        return base_answer
     except Exception:
         return base_answer
