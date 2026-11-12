@@ -332,13 +332,38 @@ def test_실제_모드_장소_정보는_정류장_근처_후보(client, live_ask
     assert body["answer"].startswith("가까운 곳은") and "왕복" in body["answer"]
 
 
-def test_실제_모드_다른_경로는_추천한_경로를_알려_줌(client, live_ask):
+def test_실제_모드_다른_경로는_말한_기준으로_가장_좋은_경로(client, live_ask):
     setup_user(client)
     routes = plan(client).json()["routes"]
-    body = live_ask("환승 적은 걸로 없어?")
+    body = live_ask("환승 적은 걸로 없어?")  # 키워드 규칙: preference = transfer
     r = body["result"]
+    assert r["preference"] == "transfer"
     assert [x["name"] for x in r["routes"]] == [x["name"] for x in routes]
-    if len(routes) > 1:
-        assert routes[1]["name"] in body["answer"] and "길찾기에서 골라" in body["answer"]
-    else:
-        assert "하나뿐" in body["answer"]
+    best = min(routes, key=lambda x: x["transfers"])
+    assert best["name"] in body["answer"] and "환승이 가장 적은" in body["answer"]
+
+
+def _ai_says(monkeypatch, intent: dict):
+    """AI 분류 결과를 정해 줘요 (키워드 규칙이 모르는 표현을 시험할 때)."""
+    monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
+    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+        "type": "question", "intents": [{"place_types": [], "delay_minutes": None, **intent}],
+        "needs_confirm": False, "question": None, "engine": "ai"})
+
+
+def test_실제_모드_지금_출발하면_늦어(client, live_ask, monkeypatch):
+    setup_user(client)
+    plan(client)
+    _ai_says(monkeypatch, {"intent": "running_late", "delay_minutes": 0})
+    body = live_ask("지금 출발하면 늦어?")
+    assert body["answer"].startswith("지금 출발하면") and body["answer"].endswith("늦지 않아요.")
+
+
+def test_할_일_완료(client, live_ask, monkeypatch):
+    setup_user(client)
+    todo_id = plan(client).json()["todos"][0]["todo_id"]
+    _ai_says(monkeypatch, {"intent": "change_todo", "action": "done", "todo_text": "우유"})
+    body = live_ask("우유는 샀어")
+    assert body["answer"] == "우유 사기는 완료로 표시할게요."
+    todos = client.get("/api/todos", params={"user_id": "u1"}).json()
+    assert next(t for t in todos if t["id"] == todo_id)["status"] == "완료"

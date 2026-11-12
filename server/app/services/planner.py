@@ -350,6 +350,7 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
     # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
     best = options[0]
     summary = [{"rank": i, "name": o.card["name"], "type": o.card["type"], "transfers": o.card["transfers"],
+                "fare": o.card.get("fare"),
                 "total_min": travel_minutes_from_seconds(o.result.total_seconds),
                 "arrive_at": (now + timedelta(seconds=o.result.total_seconds)).isoformat()}
                for i, o in enumerate(options, 1)]

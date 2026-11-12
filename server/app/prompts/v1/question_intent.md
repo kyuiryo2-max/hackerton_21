@@ -5,9 +5,9 @@
 질문 종류
 - next_vehicle: 다음 버스·지하철 ("다음 버스 언제야?")
 - stopover_check: 가는 길에 들르기 ("편의점 들렀다 가도 돼?", "아 우유 사야 돼") → place_types
-- running_late: 늦어짐 ("10분 늦을 것 같아") → delay_minutes
+- running_late: 늦어짐 ("10분 늦을 것 같아") → delay_minutes. "지금 출발하면 늦어?"처럼 지금 기준으로 늦는지 물으면 delay_minutes는 0
 - time_left: 남은 시간 ("몇 분까지 나가면 돼?")
-- change_todo: 할 일 삭제·중요도 변경 ("약은 안 사도 돼") → todo_text, action ("delete" | "raise" | "lower")
+- change_todo: 할 일 삭제·완료·중요도 변경 ("약은 안 사도 돼", "우유는 샀어") → todo_text, action ("delete" | "done" | "raise" | "lower"). 이미 한 일이면 done
 - place_info: 장소 위치 ("근처 약국 어디야?") → place_types
 - change_route: 경로 기준 변경 ("환승 적은 걸로") → preference ("time" | "transfer" | "fare")
 - unsupported: 위에 해당 없음 ("점심 뭐 먹지?")

@@ -12,6 +12,7 @@
 - running_late: 약속이나 일정에 늦어짐(지각, 밀림, 늦게 출발)을 알림
   - 추출: delay_minutes (지연 분 정수, 예: "10분 늦을 것 같아" → 10, "15분 정도 밀릴 듯" → 15, "5분 늦게 나가는데" → 5)
   - 주의: "N분 늦게 나가/출발해"처럼 늦음이 포함된 경우 time_left가 아니라 running_late다.
+  - "지금 출발하면 늦어?", "지금 나가면 안 늦어?"처럼 지금 기준으로 늦는지 묻는 질문도 running_late이고 delay_minutes는 0이다.
   - 핵심 규칙: 구체적 지연 분이 없는 경우("버스 하나 놓쳤어", "늦을 것 같아")는 delay_minutes를 null로 하고, needs_confirm을 true로 설정하여 question에 "몇 분 늦을 것 같아요?"라고 되묻는다.
 - stopover_check: 이동 경로상 특정 장소나 할 일을 경유할 수 있는지 가능성 문의
   - 추출: place_types (아래 허용 목록에서 선택)
@@ -19,8 +20,9 @@
 - place_info: 장소 자체의 위치뿐만 아니라 "영업시간(마감 시각)", "전화번호" 등 장소 상세 정보 문의
   - 추출: place_types (아래 허용 목록에서 선택)
   - 예: "근처 약국 어디야?", "여기서 제일 가까운 ATM", "그 약국 몇 시에 닫아?" (영업 마감 시각 질문도 place_info다)
-- change_todo: 할 일의 삭제("안 사도 돼", "다음에 할게") 또는 중요도 변경("더 급해")
-  - 추출: action ("delete" | "raise" | "lower"), todo_text
+- change_todo: 할 일의 삭제("안 사도 돼", "다음에 할게"), 완료("샀어", "다녀왔어") 또는 중요도 변경("더 급해")
+  - 추출: action ("delete" | "done" | "raise" | "lower"), todo_text
+  - 예: "우유는 샀어" → action: "done", todo_text: "우유"
   - 예: "약은 안 사도 돼" → action: "delete", todo_text: "약"
   - 예: "선물이 더 급해" → action: "raise", todo_text: "선물"
   - 예: "출력은 학교 가서 할게" → action: "delete", todo_text: "과제 출력"

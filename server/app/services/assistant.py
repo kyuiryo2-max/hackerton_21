@@ -149,6 +149,17 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     return out, "시간이 부족해요. 도착한 뒤에 들르는 걸 추천해요."
 
 
+def _late_answer(delay, board_at, arrive_at, on_time: bool) -> str:
+    """늦어짐 답변. delay가 None이면 차를 놓친 경우, 0이면 "지금 출발하면 늦어?" (11/12)."""
+    when = "지금 차를 놓쳤다면" if delay is None else "지금 출발하면" if delay == 0 else f"{delay}분 늦으면"
+    if board_at is None:
+        return f"{when} 탈 수 있는 차가 없어요."
+    answer = f"{when} {_hhmm(board_at)} 차를 타고 {_hhmm(arrive_at)}에 도착해요."
+    if not on_time:
+        return answer + " 도착 희망 시각보다 늦어요."
+    return answer + (" 늦지 않아요." if delay == 0 else "")
+
+
 def _running_late(item: dict, state: dict) -> tuple[dict, str]:
     """늦은 시간만큼 지난 장면으로 다시 계산해요. 분이 없으면("버스 하나 놓쳤어") 지금 차를 놓친 것으로 봐요."""
     delay = item.get("delay_minutes")
@@ -165,11 +176,7 @@ def _running_late(item: dict, state: dict) -> tuple[dict, str]:
     on_time = result.total_seconds <= demo.deadline_seconds(state["elapsed"])
     out = {"intent": "running_late", "delay_minutes": delay, "missed": delay is None, "on_time": on_time,
            "board_at": board_at and board_at.isoformat(), "arrive_at": arrive_at.isoformat()}
-    when = "지금 차를 놓쳤다면" if delay is None else f"{delay}분 늦으면"
-    if board_at is None:
-        return out, f"{when} 탈 수 있는 차가 없어요."
-    answer = f"{when} {_hhmm(board_at)} 차를 타고 {_hhmm(arrive_at)}에 도착해요."
-    return out, answer if on_time else answer + " 도착 희망 시각보다 늦어요."
+    return out, _late_answer(delay, board_at, arrive_at, on_time)
 
 
 def _time_left(item: dict, state: dict) -> tuple[dict, str]:
@@ -208,9 +215,11 @@ def _change_todo(item: dict, state: dict) -> tuple[dict, str]:
     if state["user_id"] != DEMO_USER_ID:
         if action == "delete":
             repo.update_todo(todo["id"], state["user_id"], status="제외")
+        elif action == "done":  # "우유는 샀어" (11/12)
+            repo.update_todo(todo["id"], state["user_id"], status="완료")
         else:
             repo.update_todo(todo["id"], state["user_id"], importance="필수" if action == "raise" else "선택")
-    words = {"delete": "이번엔 뺄게요", "raise": "필수로 바꿀게요", "lower": "선택으로 바꿀게요"}
+    words = {"delete": "이번엔 뺄게요", "done": "완료로 표시할게요", "raise": "필수로 바꿀게요", "lower": "선택으로 바꿀게요"}
     return {"intent": "change_todo", "todo_id": todo["id"], "action": action}, f"{_josa(todo['text'], '은는')} {words.get(action, '바꿀게요')}."
 
 
@@ -383,11 +392,7 @@ def _live_running_late(item: dict, state: dict) -> tuple[dict, str]:
     on_time = result.total_seconds <= deadline
     out = {"intent": "running_late", "delay_minutes": delay, "missed": delay is None, "on_time": on_time,
            "board_at": board_at and board_at.isoformat(), "arrive_at": arrive_at.isoformat()}
-    when = "지금 차를 놓쳤다면" if delay is None else f"{delay}분 늦으면"
-    if board_at is None:
-        return out, f"{when} 탈 수 있는 차가 없어요."
-    answer = f"{when} {_hhmm(board_at)} 차를 타고 {_hhmm(arrive_at)}에 도착해요."
-    return out, answer if on_time else answer + " 도착 희망 시각보다 늦어요."
+    return out, _late_answer(delay, board_at, arrive_at, on_time)
 
 
 def _live_included(plan: live.LivePlan, user_id: str) -> list[tuple[StopCandidate, dict]]:
@@ -427,13 +432,33 @@ def _live_change_route(item: dict, state: dict) -> tuple[dict, str]:
     if ctx is None:
         return _no_plan("change_route")
     routes = ctx[0].routes
-    others = routes[1:]
-    out = {"intent": "change_route", "route": routes[0]["name"] if routes else None, "routes": routes}
-    if not others:
+    pref = item.get("preference")
+    out = {"intent": "change_route", "route": routes[0]["name"] if routes else None, "preference": pref,
+           "routes": routes}
+    if len(routes) < 2:
         return out, "추천한 경로가 하나뿐이에요. 다른 경로는 없어요."
-    parts = [f"{r['name']}{'번' if r['name'].isdigit() else ''}({r['total_min']}분, 환승 {r['transfers']}번)"
-             for r in others]
+    if pref in PREFERENCE_KEYS:
+        # 사용자가 말한 기준(환승 적은·빠른·싼)으로 가장 좋은 경로를 알려 줘요. 같으면 추천 순서
+        key, word = PREFERENCE_KEYS[pref]
+        best = min(routes, key=lambda r: (r.get(key) is None, r.get(key) or 0, r["rank"]))
+        if best["rank"] == 1:
+            return out, f"지금 추천한 {_route_name(best)} 경로가 {word} 경로예요."
+        return out, (f"{word} 경로는 {_route_name(best)}({_route_detail(best)})예요. 길찾기에서 골라 주세요.")
+    parts = [f"{_route_name(r)}({_route_detail(r)})" for r in routes[1:]]
     return out, f"다른 경로는 {', '.join(parts)}이 있어요. 길찾기에서 골라 주세요."
+
+
+PREFERENCE_KEYS = {"transfer": ("transfers", "환승이 가장 적은"), "time": ("total_min", "가장 빠른"),
+                   "fare": ("fare", "요금이 가장 싼")}
+
+
+def _route_name(r: dict) -> str:
+    return f"{r['name']}번" if r["name"].isdigit() else r["name"]
+
+
+def _route_detail(r: dict) -> str:
+    detail = f"{r['total_min']}분, 환승 {r['transfers']}번"
+    return detail + (f", {r['fare']:,}원" if r.get("fare") else "")
 
 
 LIVE_HANDLERS = {

@@ -104,7 +104,8 @@
   - `demo=false`(실제 모드, #59, 11/12): 교통 질문 6종 모두 마지막 실시간 계획(`/api/plan`, 1시간 안)의 1번 경로로, 실시간 도착을 다시 물어 계산한다. 계획 뒤 지난 시간만큼 정류장으로 걸어갔다고 보고 판단한다(추정)
     - `running_late`: 늦는 분만큼 시각을 미뤄 다시 계산. 분이 없으면 지금 차를 놓친 것으로 봄
     - `stopover_check`·`place_info`: 그 경로의 탑승 정류장 근처에서 찾음. `place_info`는 `places[]`(최대 3곳, `round_trip_min`)도 줌
-    - `change_route`: `routes[]`(추천한 경로 요약)를 알려 주기만 하고 경로를 바꾸지 않음. 바꾸는 건 길찾기 화면
+    - `change_route`: `routes[]`(추천한 경로 요약)를 알려 주기만 하고 경로를 바꾸지 않음. 바꾸는 건 길찾기 화면. `preference`(환승·시간·요금)가 있으면 그 기준으로 가장 좋은 경로를 알려 줌
+    - `running_late`의 `delay_minutes: 0`은 "지금 출발하면 늦어?" ("늦지 않아요"까지 답함), `change_todo`의 `action: done`은 "우유는 샀어" → 상태 완료
     - 계획이 없거나 1시간이 지났으면 `{"intent", "available": false}` 와 "먼저 길찾기에서 경로를 추천받아 주세요"
 - `answer` (AI 답변 문장, #37, 11/12 모든 질문 종류로 확대): `EXPLAIN_WITH_AI=true`면 코드가 만든 기본 답변을 초안(`draft`)으로 AI에 주고, AI 문장이 아래 검사를 모두 통과할 때만 쓴다. 하나라도 걸리면 기본 답변
   - 숫자: 계산 결과와 초안에 있는 숫자만 (`llm.numbers_match`)
