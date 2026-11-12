@@ -6,7 +6,12 @@ import '../providers/todo_controller.dart';
 class TodoScreen extends StatelessWidget {
   const TodoScreen({super.key});
 
-  Future<void> _showTodoDialog(BuildContext context, {TodoItem? existing}) async {
+  Future<void> _showTodoDialog(BuildContext context, {TodoItem? existing}) =>
+      showTodoDialog(context, existing: existing);
+
+  /// 할 일 추가·수정 창. 저장된 할 일을 돌려주고, 취소·실패면 null.
+  /// (할 일·일정 탭에서도 같은 창을 써요)
+  static Future<TodoItem?> showTodoDialog(BuildContext context, {TodoItem? existing}) async {
     // Obtain the notifier before opening the dialog. Do not depend on a
     // dialog's BuildContext after it has been removed from the tree.
     final todoController = TodoScope.of(context);
@@ -14,25 +19,29 @@ class TodoScreen extends StatelessWidget {
       context: context,
       builder: (_) => _TodoFormDialog(existing: existing),
     );
-    if (result == null) return;
+    if (result == null) return null;
 
     try {
-    if (existing == null) {
-      await todoController.addTodo(
-        title: result.title,
-        minutes: result.minutes,
-        requiresTravel: result.placeType != null,
-        placeType: result.placeType,
-      );
-    } else {
-      await todoController.updateTodo(existing.copyWith(
+      if (existing == null) {
+        return await todoController.addTodo(
+          title: result.title,
+          minutes: result.minutes,
+          requiresTravel: result.placeType != null,
+          placeType: result.placeType,
+        );
+      }
+      final updated = existing.copyWith(
         title: result.title,
         estimatedMinutes: result.minutes,
-      ), placeType: result.placeType);
-    }
+      );
+      await todoController.updateTodo(updated, placeType: result.placeType);
+      return updated;
     } catch (error) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('할 일 서버 저장 실패: $error')));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('할 일 서버 저장 실패: $error')));
+      }
+      return null;
     }
   }
 
@@ -76,8 +85,10 @@ class TodoScreen extends StatelessWidget {
                                     try {
                                       await controller.toggleCompleted(todo);
                                     } catch (e) {
-                                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('할 일 변경 실패: $e')));
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('할 일 변경 실패: $e')));
+                                      }
                                     }
                                   },
                                 ),
@@ -99,8 +110,10 @@ class TodoScreen extends StatelessWidget {
                                       try {
                                         await controller.deleteTodo(todo.id);
                                       } catch (e) {
-                                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('할 일 삭제 실패: $e')));
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('할 일 삭제 실패: $e')));
+                                        }
                                       }
                                     }
                                   },

@@ -5,6 +5,9 @@ import '../services/speech_input_service.dart';
 import '../providers/todo_controller.dart';
 import '../providers/active_route_controller.dart';
 import '../config/api_config.dart';
+import '../models/schedule.dart';
+import '../services/schedule_draft_parser.dart';
+import 'schedule_form_screen.dart';
 
 
 class AssistantScreen extends StatefulWidget {
@@ -40,11 +43,19 @@ class _AssistantScreenState extends State<AssistantScreen> {
     try {
       final response = await _api.ask(message);
       if (!mounted) return;
+      // 일정 추가: 서버가 add_schedule 을 주면 그 값, 아직 모르면(unsupported) 앱이 문장에서 대략 읽어요.
+      final intent = response.result?['intent']?.toString() ??
+          (response.intents.isEmpty ? null : response.intents.first['intent']?.toString());
+      final draft = ScheduleDraft.fromServerResult(response.result) ??
+          (intent == 'unsupported' || intent == null ? ScheduleDraft.parseLocal(message, DateTime.now()) : null);
       setState(() => _history.add(_Message(
-        response.needsConfirm && response.question != null ? response.question! : response.answer,
+        draft != null && !draft.fromServer
+            ? '일정 추가 요청으로 보여요. 아래 내용으로 일정 입력 화면을 열어 드릴게요.'
+            : (response.needsConfirm && response.question != null ? response.question! : response.answer),
         false, todo: _shouldShowTodo(response) ? response.todo : null,
-        intent: response.result?['intent']?.toString(),
+        intent: intent,
         engine: response.engine,
+        schedule: draft,
       )));
       // In real mode /api/ask may have already saved a new todo.
       // Refresh the visible todo list rather than showing an Add button again.
@@ -60,7 +71,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
       }
     } catch (error) {
       if (!mounted) return;
-      setState(() => _history.add(_Message('서버 질문 요청 실패: $error\n시연 질문은 /api/ask 서버 응답만 사용합니다.', false)));
+      final draft = ScheduleDraft.parseLocal(message, DateTime.now());
+      setState(() => _history.add(draft == null
+          ? _Message('서버 질문 요청 실패: $error\n시연 질문은 /api/ask 서버 응답만 사용합니다.', false)
+          : _Message('서버에 연결하지 못했지만 일정 추가 요청으로 보여요. 아래 내용으로 일정 입력 화면을 열어 드릴게요.',
+              false, schedule: draft)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -121,6 +136,34 @@ class _AssistantScreenState extends State<AssistantScreen> {
         );
       }
     }
+  }
+
+  static String _when(DateTime d) {
+    const w = ['월', '화', '수', '목', '금', '토', '일'];
+    return '${d.month}/${d.day}(${w[d.weekday - 1]}) ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _openScheduleDraft(_Message message) async {
+    final d = message.schedule;
+    if (d == null || message.added) return;
+    final saved = await Navigator.push<Schedule>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScheduleFormScreen(
+          initial: Schedule(
+            id: 0,
+            title: d.title,
+            location: d.location,
+            startTime: d.start,
+            endTime: d.end ?? d.start.add(const Duration(hours: 1)),
+          ),
+        ),
+      ),
+    );
+    if (saved == null || !mounted) return;
+    setState(() => message.added = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('「${saved.title}」 일정을 추가했어요. 할 일·일정 탭의 이번 주 일정에서 볼 수 있어요.')));
   }
 
   void _onSpeechStatus(String status) {
@@ -233,6 +276,33 @@ class _AssistantScreenState extends State<AssistantScreen> {
                               label: Text(m.added ? '할 일 추가 완료' : '할 일 목록에 추가'),
                             ),
                           ],
+                          if (!m.mine && m.schedule != null) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF4F2FF),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(m.schedule!.title, style: const TextStyle(fontWeight: FontWeight.w800)),
+                                Text('${_when(m.schedule!.start)}${m.schedule!.timeGuessed ? ' (시각을 못 찾아 기본값)' : ''}'),
+                                if (m.schedule!.location.isNotEmpty) Text('장소: ${m.schedule!.location}'),
+                              ]),
+                            ),
+                            const SizedBox(height: 6),
+                            FilledButton.icon(
+                              onPressed: m.added ? null : () => _openScheduleDraft(m),
+                              icon: const Icon(Icons.edit_calendar),
+                              label: Text(m.added ? '일정 추가 완료' : '확인하고 일정 추가'),
+                            ),
+                            if (!m.schedule!.fromServer)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 4),
+                                child: Text('서버 AI가 아직 일정 추가를 지원하지 않아 앱이 문장에서 대략 읽은 값이에요. 저장 전에 확인해 주세요.',
+                                    style: TextStyle(fontSize: 11, color: Colors.black54)),
+                              ),
+                          ],
                           if (!m.mine && m.intent == 'change_route')
                             const Text('실제 경로 재탐색은 서버 경로 API 지원 후 가능합니다.',
                               style: TextStyle(fontSize: 11, color: Colors.black54)),
@@ -287,6 +357,7 @@ class _Message {
   final Map<String, dynamic>? todo;
   final String? intent;
   final String? engine;
+  final ScheduleDraft? schedule;
   bool added = false;
-  _Message(this.text, this.mine, {this.todo, this.intent, this.engine});
+  _Message(this.text, this.mine, {this.todo, this.intent, this.engine, this.schedule});
 }

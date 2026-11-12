@@ -8,7 +8,10 @@ import '../providers/schedule_controller.dart';
 class ScheduleFormScreen extends StatefulWidget {
   final Schedule? existing;
 
-  const ScheduleFormScreen({super.key, this.existing});
+  /// 새 일정을 만들 때 미리 채워 둘 값 (예: AI 질문에서 읽은 일정). 저장하면 새 일정으로 추가돼요.
+  final Schedule? initial;
+
+  const ScheduleFormScreen({super.key, this.existing, this.initial});
 
   @override
   State<ScheduleFormScreen> createState() => _ScheduleFormScreenState();
@@ -35,46 +38,49 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     super.initState();
 
     final now = DateTime.now();
+    final seed = widget.existing ?? widget.initial;
 
     _titleController = TextEditingController(
-      text: widget.existing?.title ?? '',
+      text: seed?.title ?? '',
     );
 
     _locationController = TextEditingController(
-      text: widget.existing?.location ?? '',
+      text: seed?.location ?? '',
     );
 
-    if (widget.existing?.destinationLatitude != null &&
-        widget.existing?.destinationLongitude != null) {
+    if (seed != null &&
+        seed.destinationLatitude != null &&
+        seed.destinationLongitude != null) {
       _selectedDestination = Place(
-        id: widget.existing!.destinationPlaceId ?? '',
-        name: widget.existing!.location,
-        address: widget.existing!.destinationAddress ?? '',
-        latitude: widget.existing!.destinationLatitude!,
-        longitude: widget.existing!.destinationLongitude!,
+        id: seed.destinationPlaceId ?? '',
+        name: seed.location,
+        address: seed.destinationAddress ?? '',
+        latitude: seed.destinationLatitude!,
+        longitude: seed.destinationLongitude!,
       );
     }
-    _originMode = widget.existing?.originMode == 'place' ? 'place' : 'current';
-    _originController = TextEditingController(text: widget.existing?.originName ?? '');
-    if (widget.existing?.originLatitude != null &&
-        widget.existing?.originLongitude != null) {
+    _originMode = seed?.originMode == 'place' ? 'place' : 'current';
+    _originController = TextEditingController(text: seed?.originName ?? '');
+    if (seed != null &&
+        seed.originLatitude != null &&
+        seed.originLongitude != null) {
       _selectedOrigin = Place(
-        id: widget.existing!.originPlaceId ?? '',
-        name: widget.existing!.originName ?? '출발지',
-        address: widget.existing!.originAddress ?? '',
-        latitude: widget.existing!.originLatitude!,
-        longitude: widget.existing!.originLongitude!,
+        id: seed.originPlaceId ?? '',
+        name: seed.originName ?? '출발지',
+        address: seed.originAddress ?? '',
+        latitude: seed.originLatitude!,
+        longitude: seed.originLongitude!,
       );
     }
     _preparationController = TextEditingController(
-      text: (widget.existing?.preparationMinutes ?? 30).toString(),
+      text: (seed?.preparationMinutes ?? 30).toString(),
     );
 
     _startTime =
-        widget.existing?.startTime ?? now.add(const Duration(hours: 1));
+        seed?.startTime ?? now.add(const Duration(hours: 1));
 
     _endTime =
-        widget.existing?.endTime ?? _startTime.add(const Duration(hours: 1));
+        seed?.endTime ?? _startTime.add(const Duration(hours: 1));
   }
 
   Future<DateTime?> _pickDateTime(DateTime initial) async {

@@ -14,7 +14,9 @@ import '../services/server_plan_service.dart';
 import '../services/server_route_adapter.dart';
 import '../services/place_search_service.dart';
 import 'place_search_screen.dart';
-import 'search_route_results_panel.dart';
+import '../data/offline_demo_data.dart';
+import '../widgets/move_route_planner.dart';
+import 'package:latlong2/latlong.dart';
 import '../providers/active_route_controller.dart';
 
 class NavigationScreen extends StatefulWidget {
@@ -22,8 +24,15 @@ class NavigationScreen extends StatefulWidget {
   final ValueNotifier<Schedule?>? requestedSchedule;
   final String? initialDestination;
   final DateTime? initialArrivalTime;
+  /// 이동 중 AI 도우미 열기
+  final ValueChanged<String?>? onOpenAssistant;
+  /// 할 일·일정 탭 열기
+  final VoidCallback? onOpenPlanner;
+  /// 홈 검색창에서 고른 목적지 (일정 없이 경로 검색)
+  final ValueNotifier<Place?>? requestedDestination;
 
-  const NavigationScreen({super.key, this.selectedWaypoint, this.requestedSchedule, this.initialDestination, this.initialArrivalTime});
+  const NavigationScreen({super.key, this.selectedWaypoint, this.requestedSchedule, this.initialDestination,
+    this.initialArrivalTime, this.onOpenAssistant, this.onOpenPlanner, this.requestedDestination});
 
   @override
   State<NavigationScreen> createState() => _NavigationScreenState();
@@ -82,6 +91,35 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     _lastPlanRefreshRevision = activeRouteController.revision;
     activeRouteController.addListener(_handlePlanRefresh);
     widget.requestedSchedule?.addListener(_handleRequestedSchedule);
+    widget.requestedDestination?.addListener(_handleRequestedDestination);
+  }
+
+  /// 홈 검색창에서 목적지를 고르면: 현재 위치 → 그 목적지, 지금 출발 기준으로 바로 검색해요.
+  Future<void> _handleRequestedDestination() async {
+    final place = widget.requestedDestination?.value;
+    if (place == null || !mounted) return;
+    widget.requestedDestination!.value = null;
+    setState(() {
+      _manualDestination = place;
+      _manualDestinationController.text = place.name;
+      _manualArrival = DateTime.now().add(const Duration(hours: 1));
+      _manualExpanded = true;
+      _manualError = null;
+    });
+    if (_origin == null || _origin!.id != 'device_current_location') {
+      await _useCurrentLocation();
+    }
+    if (!mounted) return;
+    final here = _origin;
+    if (here == null) {
+      setState(() => _manualError = _locationError ?? '현재 위치를 확인하지 못해 출발지를 직접 골라 주세요.');
+      return;
+    }
+    setState(() {
+      _manualOrigin = here;
+      _manualOriginController.text = here.name;
+    });
+    await _loadManualRoutes();
   }
 
   // Plan refresh notifications must be observed even when the Navigation
@@ -332,43 +370,71 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Widget _routePanel({required List<RouteCandidate> routes, required String? selectedId,
     required ValueChanged<String> onSelect, required bool loading, required String? error,
     required String originName, required String destinationName, DateTime? arrival,
-    Place? origin, Place? destination,
+    Place? origin, Place? destination, String? title,
     ActiveRouteSelection? selection}) {
-    return SearchRouteResultsPanel(
-      routes: routes, selectedId: selectedId, onSelect: onSelect,
-      loading: loading, error: error, origin: origin, destination: destination,
-      originName: originName, destinationName: destinationName, desiredArrival: arrival,
-      plan: selection?.plan,
-      referenceTime: selection?.plan == null ? null :
-        DateTime.tryParse('${selection!.plan!.data['now']}'),
-      routeStops: _contextStops(selection?.demoContext),
-      nearbyPlaces: _contextPlaces(selection?.demoContext),
+    final plan = selection?.plan;
+    final planNow = plan == null ? null : DateTime.tryParse('${plan.data['now'] ?? ''}');
+    final todos = TodoScope.of(context).todos;
+    return MoveRoutePlanner(
+      routes: routes,
+      selectedId: selectedId,
+      onSelect: onSelect,
+      plan: plan,
+      title: title ?? '$destinationName 가기',
+      badge: _manualIsActive ? '직접 검색' : (ApiConfig.demoMode ? '시연' : '다음 일정'),
+      originName: originName,
+      destinationName: destinationName,
+      arriveBy: arrival,
+      now: planNow ?? DateTime.now(),
+      isDemo: ApiConfig.demoMode,
+      origin: origin == null ? null : LatLng(origin.latitude, origin.longitude),
+      destination: destination == null ? null : LatLng(destination.latitude, destination.longitude),
+      onManageSchedule: widget.onOpenPlanner,
+      onOpenAssistant: widget.onOpenAssistant,
+      fallbackNeed: (t) {
+        for (final todo in todos) {
+          if (todo.title == t && todo.estimatedMinutes > 0) return todo.estimatedMinutes;
+        }
+        return 5;
+      },
     );
   }
 
-  List<Place> _contextPlaces(dynamic raw) {
-    if (raw is! Map || raw['places'] is! List) return const [];
-    return _contextLocations(raw['places']);
-  }
+  /// 일정이 없을 때 보여 주는 시연 경로 (안암역 → 청량리역, 내장 카카오 샘플 + 시연 계획)
+  late final List<RouteCandidate> _demoRoutes = _routeApi.demoRoutes();
+  String? _demoSelected;
 
-  List<Place> _contextStops(dynamic raw) {
-    if (raw is! Map || raw['route'] is! Map) return const [];
-    return _contextLocations((raw['route'] as Map)['stop_points']);
-  }
-
-  List<Place> _contextLocations(dynamic items) {
-    if (items is! List) return const [];
-    final locations = <Place>[];
-    for (final item in items) {
-      if (item is! Map) continue;
-      final lat = item['lat'] ?? item['latitude'];
-      final lng = item['lng'] ?? item['longitude'];
-      if (lat is! num || lng is! num) continue;
-      locations.add(Place(id: '${item['ars_id'] ?? item['todo_id'] ?? item['name'] ?? ''}',
-        name: '${item['name'] ?? '장소'}', address: '${item['address'] ?? ''}',
-        latitude: lat.toDouble(), longitude: lng.toDouble()));
-    }
-    return locations;
+  Widget _demoPlanner() {
+    final ctx = OfflineDemoData.context;
+    final sched = ctx['schedule'] is Map ? ctx['schedule'] as Map : const {};
+    final loc = ctx['location'] is Map ? ctx['location'] as Map : const {};
+    final dest = sched['destination'] is Map ? sched['destination'] as Map : const {};
+    LatLng? ll(Map m) => m['lat'] is num && m['lng'] is num
+        ? LatLng((m['lat'] as num).toDouble(), (m['lng'] as num).toDouble()) : null;
+    final todos = TodoScope.of(context).todos;
+    return MoveRoutePlanner(
+      routes: _demoRoutes,
+      selectedId: _demoSelected ?? (_demoRoutes.isEmpty ? null : _demoRoutes.first.id),
+      onSelect: (id) => setState(() => _demoSelected = id),
+      plan: ServerPlan(OfflineDemoData.plan),
+      title: '청량리역 가기',
+      badge: '시연',
+      originName: '${loc['name'] ?? '안암역3번출구 정류장'}',
+      destinationName: '${dest['name'] ?? '청량리역'}',
+      arriveBy: DateTime.tryParse('${sched['arrive_by'] ?? ''}'),
+      now: DateTime.tryParse('${ctx['now'] ?? ''}') ?? DateTime.now(),
+      isDemo: true,
+      origin: ll(loc),
+      destination: ll(dest),
+      onManageSchedule: widget.onOpenPlanner,
+      onOpenAssistant: widget.onOpenAssistant,
+      fallbackNeed: (t) {
+        for (final todo in todos) {
+          if (todo.title == t && todo.estimatedMinutes > 0) return todo.estimatedMinutes;
+        }
+        return 5;
+      },
+    );
   }
 
   String _time(DateTime value) => '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
@@ -425,8 +491,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         });
       }
     }
+    // 이동 = 일정(또는 검색한 목적지) 기준 추천 경로 + 대안 비교 + 할 일 적용
     return Scaffold(
-      appBar: AppBar(title: const Text('이동')),
+      appBar: AppBar(title: const Text('이동 · 경로 추천')),
       body: AnimatedBuilder(animation: activeRouteController, builder: (context, _) {
         final active = activeRouteController.active;
         return ListView(padding: const EdgeInsets.all(16), children: [
@@ -452,6 +519,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             onSelect: activeRouteController.select, loading: false, error: null,
             originName: active.origin, destinationName: active.destination,
             arrival: active.arrival, selection: active,
+            title: _manualIsActive ? null : schedule?.title,
             origin: _manualIsActive ? _manualOrigin : _origin,
             destination: _manualIsActive ? _manualDestination : _scheduleDestination),
         ] else if (schedule == null && !ApiConfig.demoMode) ...[
@@ -478,7 +546,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             ]),
           )),
           const SizedBox(height: 10),
-          const DemoRouteCompare(),
+          _demoPlanner(),
         ] else ...[
           Text('다음 일정 · 자동 경로', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
@@ -552,6 +620,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   void dispose() {
     activeRouteController.removeListener(_handlePlanRefresh);
     widget.requestedSchedule?.removeListener(_handleRequestedSchedule);
+    widget.requestedDestination?.removeListener(_handleRequestedDestination);
     _scheduleRequestSerial++;
     _destinationLookupSerial++;
     _manualRequestSerial++;
