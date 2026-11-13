@@ -104,14 +104,21 @@ class RealDataService {
     await _request('DELETE', '/api/schedules/$id', query: {'user_id': userId});
   }
 
-  TodoItem _todoFromServer(Map<String, dynamic> json, {TodoItem? previous}) => TodoItem(
-    id: (json['id'] as num).toInt(),
-    title: '${json['text']}',
-    estimatedMinutes: previous?.estimatedMinutes ?? 10,
-    requiresTravel: (json['place_types'] is List && (json['place_types'] as List).isNotEmpty),
-    isCompleted: json['done'] == true || json['status'] == '완료',
-    placeName: previous?.placeName,
-  );
+  TodoItem _todoFromServer(Map<String, dynamic> json, {TodoItem? previous}) {
+    final types = json['place_types'] is List
+        ? (json['place_types'] as List).whereType<String>().toList() : <String>[];
+    return TodoItem(
+      id: (json['id'] as num).toInt(),
+      title: '${json['text']}',
+      // 머무는 시간은 서버 값 (안 넣으면 서버가 장소 종류로 정해 줘요, 11/13)
+      estimatedMinutes: (json['stay_minutes'] as num?)?.toInt() ?? previous?.estimatedMinutes ?? 5,
+      requiresTravel: types.isNotEmpty,
+      isCompleted: json['done'] == true || json['status'] == '완료',
+      placeName: previous?.placeName,
+      placeTypes: types,
+      important: json['importance'] == '필수',
+    );
+  }
 
   Future<List<TodoItem>> loadTodos({List<TodoItem> previous = const []}) async {
     final raw = await _request('GET', '/api/todos', query: {'user_id': userId});
@@ -132,16 +139,19 @@ class RealDataService {
         : <String>[];
   }
 
-  Future<TodoItem> createTodo({required String title, required int minutes,
-      String? placeType}) async {
-    final places = placeType != null && placeType.isNotEmpty
-        ? <String>[placeType] : await _parsePlaceTypes(title);
+  /// [minutes]가 null 이면 서버가 장소 종류로 머무는 시간을 정해요.
+  /// [placeTypes]가 null 이면 AI(/api/tasks/parse)가 문장을 보고 장소 종류를 붙여요.
+  Future<TodoItem> createTodo({required String title, int? minutes,
+      String? placeType, List<String>? placeTypes, bool important = false}) async {
+    final places = placeTypes ?? (placeType != null && placeType.isNotEmpty
+        ? <String>[placeType] : await _parsePlaceTypes(title));
     // For uncertain classifications, use an empty place list rather than inventing a venue.
     final raw = await _request('POST', '/api/todos', body: {
       'user_id': userId, 'text': title, 'place_types': places,
-      'importance': '선택', 'status': '대기', 'source': '입력',
+      'importance': important ? '필수' : '선택', 'status': '대기', 'source': '입력',
+      if (minutes != null && minutes > 0) 'stay_minutes': minutes.clamp(1, 120),
     });
-    return _todoFromServer(Map<String, dynamic>.from(raw as Map)).copyWith(estimatedMinutes: minutes);
+    return _todoFromServer(Map<String, dynamic>.from(raw as Map));
   }
 
   Future<TodoItem> updateTodo(TodoItem updated, {TodoItem? previous,
@@ -149,14 +159,18 @@ class RealDataService {
     // Explicit place selection takes precedence. Otherwise classify again
     // when the title changes; server stores the updated place_types.
     final titleChanged = previous != null && previous.title != updated.title;
+    final typesChanged = previous != null && previous.placeTypes.join(',') != updated.placeTypes.join(',');
     final places = placeType != null && placeType.isNotEmpty
         ? <String>[placeType]
+        : typesChanged ? updated.placeTypes
         : (titleChanged ? await _parsePlaceTypes(updated.title) : null);
     final raw = await _request('PATCH', '/api/todos/${updated.id}',
         query: {'user_id': userId}, body: {
       'text': updated.title,
       'done': updated.isCompleted,
       if (places != null) 'place_types': places,
+      if (updated.estimatedMinutes > 0) 'stay_minutes': updated.estimatedMinutes.clamp(1, 120),
+      'importance': updated.important ? '필수' : '선택',
     });
     return _todoFromServer(Map<String, dynamic>.from(raw as Map), previous: updated);
   }

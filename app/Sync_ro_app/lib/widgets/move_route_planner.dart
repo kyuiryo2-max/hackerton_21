@@ -105,10 +105,15 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final r = _planRouteFor(route);
     final plan = widget.plan;
     if (r == null || plan == null) return null;
-    // 탑승·도착 시각은 1순위 경로 기준이라 다른 순위에는 붙이지 않아요.
     final rank = (r['rank'] as num?)?.toInt() ?? 1;
     final data = Map<String, dynamic>.from(plan.data)..['routes'] = [r];
-    if (rank != 1) {
+    if (r['depart_at'] != null) {
+      // 11/13부터 서버가 경로마다 같은 기준으로 출발·탑승·도착 시각을 줘요.
+      for (final key in ['basis', 'depart_at', 'board_at', 'arrive_at']) {
+        data[key] = r[key];
+      }
+    } else if (rank != 1) {
+      // 예전 서버: 탑승·도착 시각은 1순위 경로 기준이라 다른 순위에는 붙이지 않아요.
       data.remove('board_at');
       data.remove('arrive_at');
     }
@@ -121,7 +126,32 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     );
   }
 
+  /// 실시간 탑승 정보는 출발 30분 안일 때만 의미가 있어요 (팀 결정 11/13).
+  static const int _realtimeWindow = 30;
+
+  /// 경로 시각: 출발 시각 → 도착 시각, 도착 여유
+  /// 서버 시각이 "지금 출발" 기준이라 도착 목표보다 한참 이르면(예: 내일 일정인데 오늘 08:30 도착),
+  /// 도착 목표에서 거꾸로 계산해 "늦어도 몇 시에 나가면 몇 분 여유"로 다시 맞춰요.
   _RouteTimes _times(RouteCandidate route) {
+    final t = _rawTimes(route);
+    final target = widget.arriveBy;
+    if (target == null) return t;
+    final slack = target.difference(t.arrive).inMinutes;
+    if (slack > _realtimeWindow + _departBuffer) {
+      final dep = target.subtract(Duration(minutes: route.totalMinutes + _departBuffer));
+      return _RouteTimes(dep, dep.add(Duration(minutes: route.totalMinutes)), true);
+    }
+    return t;
+  }
+
+  _RouteTimes _rawTimes(RouteCandidate route) {
+    final r = _planRouteFor(route);
+    final depart = DateTime.tryParse('${r?['depart_at'] ?? ''}');
+    final arrive = DateTime.tryParse('${r?['arrive_at'] ?? ''}');
+    if (depart != null && arrive != null) {
+      // 서버 계산 그대로. 도착 시각에서 거꾸로 계산한 값이면 "(역산)" 표시
+      return _RouteTimes(depart, arrive, r?['basis'] == 'arrive_by');
+    }
     final o = _overviewFor(route);
     if (o != null && o.departure != null && o.arriveAt != null) {
       return _RouteTimes(o.departure!, o.arriveAt!, false);
@@ -165,17 +195,21 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
 
   Future<void> _openTaskPicker() async {
     final tasks = _tasks;
-    final feasible = <(StayTask, StayEval)>[];
+    final feasible = <(StayTask, StayEval, bool)>[];
     var hidden = 0;
     for (final t in tasks) {
       StayEval? best;
+      var early = false;
       for (final r in widget.routes) {
         final evals = _evals(r, t);
         if (evals == null || evals.isEmpty) continue;
-        if (best == null || evals.first.dwell > best.dwell) best = evals.first;
+        if (best == null || evals.first.dwell > best.dwell) {
+          best = evals.first;
+          early = _overviewFor(r)?.leaveEarlier ?? false;
+        }
       }
       if (best != null && best.status != StayStatus.bad) {
-        feasible.add((t, best));
+        feasible.add((t, best, early));
       } else {
         hidden++;
       }
@@ -217,7 +251,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                   ),
                 )
               else
-                for (final (t, e) in feasible)
+                for (final (t, e, early) in feasible)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 5),
                     child: Material(
@@ -243,11 +277,20 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                                     style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                               ]),
                             ),
-                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                              Text('최대 ${e.dwell}분',
-                                  style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
-                              const Text('체류 가능', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                            ]),
+                            // 일정이 멀면: 몇 시에 나가면 들를 수 있는지 / 가까우면: 최대 몇 분 머물 수 있는지
+                            if (early && e.latestDepart != null)
+                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                Text('${KstTime.hm(e.latestDepart)} 출발',
+                                    style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
+                                const Text('이때 나가면 들를 수 있어요',
+                                    style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                              ])
+                            else
+                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                Text('최대 ${e.dwell}분',
+                                    style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
+                                const Text('체류 가능', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                              ]),
                           ]),
                         ),
                       ),
@@ -513,7 +556,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       Text(
         widget.isDemo
             ? '시연 데이터 기준이에요. 실시간 교통 정보가 아니에요.'
-            : '"역산" 표시가 있는 시각은 실시간 도착 정보 없이 소요시간으로 계산한 값이에요.',
+            : '"늦어도"가 붙은 시각은 도착 목표 5분 전에 닿도록 소요시간으로 거꾸로 계산한 값이에요. 실시간 버스 시각은 출발 30분 전부터 반영돼요.',
         style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
       ),
     ]);
@@ -612,7 +655,7 @@ class _RouteCard extends StatelessWidget {
                     Text('${route.totalMinutes}분',
                         style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
                     Text(
-                      '${KstTime.hm(times.depart)} → ${KstTime.hm(times.arrive)}${times.derived ? ' (역산)' : ''}',
+                      '${times.derived ? '늦어도 ' : ''}${KstTime.hm(times.depart)} 출발 → ${KstTime.hm(times.arrive)} 도착',
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ]),

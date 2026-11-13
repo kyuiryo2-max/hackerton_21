@@ -204,7 +204,16 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
       context,
       MaterialPageRoute(builder: (_) => const ScheduleFormScreen()),
     );
-    if (saved != null && mounted) widget.onOpenScheduleRoutes?.call(saved);
+    if (saved == null || !mounted) return;
+    // 저장만 하고 홈에 그대로 있어요. 경로는 원할 때 [경로 보기]로.
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(saved.id == 0
+          ? '「${saved.title}」 매주 반복 일정을 저장했어요. 할 일·일정 탭에서 볼 수 있어요.'
+          : '「${saved.title}」 일정을 저장했어요.'),
+      action: saved.id == 0
+          ? null
+          : SnackBarAction(label: '경로 보기', onPressed: () => widget.onOpenScheduleRoutes?.call(saved)),
+    ));
   }
 
   Future<void> _searchDestination() async {
@@ -510,6 +519,8 @@ class _ModePill extends StatelessWidget {
             Icon(isDemo ? Icons.science_outlined : Icons.person_outline, size: 15, color: tone),
             const SizedBox(width: 4),
             Text(isDemo ? '시연 모드' : '실제 모드', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: tone)),
+            // 눌러서 바꿀 수 있다는 표시
+            Icon(Icons.swap_horiz_rounded, size: 15, color: tone),
           ]),
         ),
       ),

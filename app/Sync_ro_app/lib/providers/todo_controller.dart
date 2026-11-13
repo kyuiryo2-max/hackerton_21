@@ -50,23 +50,30 @@ class TodoController extends ChangeNotifier {
   }
 
   /// 저장된 할 일을 돌려줘요 (할 일·일정 탭에서 날짜를 붙일 때 써요).
+  /// [minutes]가 null 이면 실제 모드에서는 서버가 장소 종류로 머무는 시간을 정해요 (시연 모드는 5분).
   Future<TodoItem> addTodo({
     required String title,
-    required int minutes,
-    required bool requiresTravel,
+    int? minutes,
+    bool requiresTravel = true,
     String? placeName,
     String? placeType,
+    List<String>? placeTypes,
+    bool important = false,
   }) async {
     final nextId = _todos.isEmpty
         ? 1
         : _todos.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
 
+    final types = placeTypes ?? (placeType != null && placeType.isNotEmpty ? [placeType] : const <String>[]);
     final draft = TodoItem(
-      id: nextId, title: title, estimatedMinutes: minutes,
-      requiresTravel: requiresTravel || (placeType?.isNotEmpty ?? false), placeName: placeName,
+      id: nextId, title: title, estimatedMinutes: minutes ?? 5,
+      requiresTravel: requiresTravel || types.isNotEmpty, placeName: placeName,
+      placeTypes: types, important: important,
     );
     final saved = RuntimeMode.instance.isDemo
-        ? draft : await _remote.createTodo(title: title, minutes: minutes, placeType: placeType);
+        ? draft
+        : await _remote.createTodo(title: title, minutes: minutes, placeType: placeType,
+            placeTypes: placeTypes, important: important);
     _todos.add(saved);
 
     await _persist();

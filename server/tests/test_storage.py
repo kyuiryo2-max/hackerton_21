@@ -371,3 +371,14 @@ def test_할_일_머물_시간_저장과_변경(client):
 def test_머물_시간은_1분에서_120분(client):
     res = client.post("/api/todos", json={"user_id": "u1", "text": "꽃 사기", "stay_minutes": 0})
     assert res.status_code == 422
+
+
+def test_머무는_시간을_안_넣으면_장소_종류로_정함(client):
+    """11/13: 사용자가 매번 넣지 않게 장소별 기본값 (편의점 4분, 은행·ATM 10분 …)."""
+    cu = client.post("/api/todos", json={"user_id": "u1", "text": "이어폰 사기", "place_types": ["편의점", "다이소"]}).json()
+    bank = client.post("/api/todos", json={"user_id": "u1", "text": "통장 정리", "place_types": ["은행·ATM"]}).json()
+    none = client.post("/api/todos", json={"user_id": "u1", "text": "생각하기"}).json()
+    assert (cu["stay_minutes"], bank["stay_minutes"], none["stay_minutes"]) == (4, 10, None)
+    mine = client.post("/api/todos", json={"user_id": "u1", "text": "꽃 사기", "place_types": ["꽃집"],
+                                           "stay_minutes": 20}).json()
+    assert mine["stay_minutes"] == 20  # 직접 넣은 값이 먼저

@@ -136,7 +136,20 @@ def _parse_leg(step: dict) -> dict:
         "vehicles": [v.get("name", "") for v in prop.get("vehicles", [])],
         "start": tuple(points[0]) if points else None,  # 구간 시작 좌표
         "end": tuple(points[-1]) if points else None,   # 구간 끝 좌표
+        "points": _thin(points),                        # 지도에 그릴 선 (앱 전송용으로 줄인 좌표)
     }
+
+
+MAX_LEG_POINTS = 40
+
+
+def _thin(points: list) -> list[list[float]]:
+    """좌표가 너무 많으면 고르게 골라 MAX_LEG_POINTS개로 줄여요. 처음과 끝은 꼭 남겨요."""
+    pts = [[float(p[0]), float(p[1])] for p in points if len(p) >= 2]
+    if len(pts) <= MAX_LEG_POINTS:
+        return pts
+    step = (len(pts) - 1) / (MAX_LEG_POINTS - 1)
+    return [pts[round(i * step)] for i in range(MAX_LEG_POINTS)]
 
 
 def parse_transit(data: dict) -> list[dict]:

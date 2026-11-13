@@ -81,9 +81,14 @@ class RouteApiService {
     // POST /api/plan, NOT the legacy sample-only /api/routes/search.
     final service = ServerPlanService();
     try {
+      // 직접 검색(홈 검색창·별도 이동 계획)은 일정이 아니라 고른 목적지로, 지금 출발 기준이에요.
+      // 목적지를 빼먹으면 서버가 가장 가까운 일정으로 계산해서 엉뚱한 길이 나와요 (11/13 발견).
       final plan = await service.fetch(
         originLat: request.originPlace?.latitude,
         originLng: request.originPlace?.longitude,
+        destinationName: request.destinationPlace?.name ?? request.destination,
+        destinationLat: request.destinationPlace?.latitude,
+        destinationLng: request.destinationPlace?.longitude,
       );
       Map<String, dynamic>? demoContext;
       if (ApiConfig.demoMode) {
