@@ -3,7 +3,10 @@
 대중교통·도보 경로는 하루 각 1,000건 한도라서 같은 구간 결과를 잠시 저장해 다시 써요.
 위치는 DB에 저장하지 않는 규칙이라 서버 메모리에만 두고, 재시작하면 사라져요.
 """
+import logging
+import math
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -20,15 +23,62 @@ SAME_POINT_SHIFT = 0.0001           # 왕복 도보 재시도 때 도착 지점�
 
 Coord = tuple[float, float]         # (경도 x, 위도 y)
 
+# 현재 위치가 들어간 호출은 아주 잠깐만 기억해요 (11/13 호출 줄이기).
+# 같은 자리(약 10m 안)에서 새로고침하면 카카오에 다시 묻지 않아요. 서버 메모리에만 두고 5분 뒤 지워요.
+ORIGIN_TTL_SECONDS = 5 * 60
+
+# 도보 한도를 다 쓰면 직선거리로 어림해요 (11/13). 실제 길은 직선보다 돌아가서 1.3배로 쳐요.
+WALK_SPEED_MPS = 1.1                # 시속 약 4km
+WALK_DETOUR_RATIO = 1.3
+KST = timezone(timedelta(hours=9))
+
+log = logging.getLogger(__name__)
+
 _cache: dict[tuple, tuple[float, Any]] = {}
+_quota_blocked_until: dict[str, float] = {}   # API 경로 → 한도가 다시 풀리는 시각 (다음 자정)
 
 
 class KakaoError(Exception):
-    """호출 실패. 오류 문장에 키나 요청 주소를 넣지 않아요."""
+    """호출 실패. 오류 문장에 키나 요청 주소를 넣지 않아요.
+    status: HTTP 상태 코드 (연결 실패면 None)
+    code: 카카오 오류 코드 (예: -10 은 호출 한도 초과)"""
+
+    def __init__(self, message: str, status: int | None = None, code: int | None = None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+    @property
+    def quota_exceeded(self) -> bool:
+        """하루 호출 한도를 다 썼어요. 카카오는 이때도 HTTP 400 으로 답하고 code -10 을 보내요.
+        429(초당 너무 많이 부름)는 잠깐 뒤 풀리는 거라 여기에 넣지 않아요."""
+        return self.status == 400 and self.code == QUOTA_EXCEEDED_CODE
+
+
+QUOTA_EXCEEDED_CODE = -10
+
+
+def _no_route(e: KakaoError) -> bool:
+    """카카오가 400으로 답하면 대개 "이 조건으로는 경로가 없음"이에요 (너무 멀거나 가깝거나, 경유지가 길 위에 없음).
+    계획 전체를 멈출 일은 아니라서 "경로 없음"으로 다뤄요 (11/13).
+    단, 한도 초과(code -10)도 400으로 오는데 이건 경로 없음으로 숨기면 안 돼서 그대로 올려요."""
+    return e.status == 400 and not e.quota_exceeded
 
 
 def clear_cache() -> None:
     _cache.clear()
+    _quota_blocked_until.clear()
+
+
+def _next_midnight_kst() -> float:
+    now = datetime.now(KST)
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return time.time() + (midnight - now).total_seconds()
+
+
+def walk_quota_used_up() -> bool:
+    """오늘 도보 한도를 다 써서 직선거리로 어림하고 있는지"""
+    return _quota_blocked_until.get("/v2/routing/walk", 0) > time.time()
 
 
 def _cache_get(key: tuple) -> Any | None:
@@ -57,6 +107,9 @@ def _client() -> httpx.Client:
 
 
 def _get(path: str, params: dict) -> dict:
+    # 한도를 다 쓴 API는 자정까지 다시 부르지 않아요 (어차피 실패하고 기다리는 시간만 늘어요)
+    if _quota_blocked_until.get(path, 0) > time.time():
+        raise KakaoError("카카오 API 오류: 오늘 호출 한도 초과", status=400, code=QUOTA_EXCEEDED_CODE)
     headers = {"Authorization": f"KakaoAK {config.KAKAO_REST_API_KEY}"}
     try:
         with _client() as client:
@@ -64,7 +117,19 @@ def _get(path: str, params: dict) -> dict:
     except httpx.HTTPError as e:
         raise KakaoError(f"카카오 API 연결 실패: {type(e).__name__}") from None
     if res.status_code != 200:
-        raise KakaoError(f"카카오 API 오류: HTTP {res.status_code}")
+        detail, code = "", None
+        try:
+            body = res.json()
+            detail = str(body.get("msg") or body.get("message") or body.get("code") or "")[:80]
+            code = body.get("code") if isinstance(body.get("code"), int) else None
+        except (ValueError, AttributeError):
+            pass
+        error = KakaoError(f"카카오 API 오류: HTTP {res.status_code}" + (f" ({detail})" if detail else ""),
+                           status=res.status_code, code=code)
+        if error.quota_exceeded:
+            _quota_blocked_until[path] = _next_midnight_kst()
+            log.warning("카카오 %s 오늘 한도 초과. 자정까지 다시 부르지 않아요", path)
+        raise error
     try:
         return res.json()
     except ValueError:
@@ -178,29 +243,37 @@ def parse_transit(data: dict) -> list[dict]:
     return routes
 
 
-def transit_routes(start: Coord, end: Coord, use_cache: bool = True) -> list[dict]:
+def transit_routes(start: Coord, end: Coord, use_cache: bool = True,
+                   ttl_seconds: int = TRANSIT_TTL_SECONDS) -> list[dict]:
     """대중교통 경로 목록. 경로가 없으면 빈 목록이고, 빈 결과는 저장하지 않아요.
 
-    use_cache=False면 저장하지도 꺼내지도 않아요 (사용자 현재 위치가 들어간 호출).
+    use_cache=False면 저장하지도 꺼내지도 않아요.
+    현재 위치가 들어간 호출은 ttl_seconds=ORIGIN_TTL_SECONDS 로 잠깐만 기억해요.
     """
     start, end = _rounded(start), _rounded(end)
     key = ("transit", start, end)
     cached = _cache_get(key) if use_cache else None
     if cached is not None:
         return cached
-    data = _get("/v2/routing/publictraffic", {
-        "start_x": start[0], "start_y": start[1],
-        "end_x": end[0], "end_y": end[1],
-    })
+    try:
+        data = _get("/v2/routing/publictraffic", {
+            "start_x": start[0], "start_y": start[1],
+            "end_x": end[0], "end_y": end[1],
+        })
+    except KakaoError as e:
+        if _no_route(e):
+            return []
+        raise
     if data.get("status") != "OK":
         return []
     routes = parse_transit(data)
     if routes and use_cache:
-        _cache_set(key, routes, TRANSIT_TTL_SECONDS)
+        _cache_set(key, routes, ttl_seconds)
     return routes
 
 
-def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None, use_cache: bool = True) -> int | None:
+def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None, use_cache: bool = True,
+                 ttl_seconds: int = WALK_TTL_SECONDS) -> int | None:
     """도보 시간(초). via는 경유지 최대 5개. 경로를 찾지 못하면 None.
 
     출발과 도착이 같고 경유지가 없으면 호출 없이 0이에요.
@@ -223,15 +296,22 @@ def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None, use_c
     if via:
         params["via_x"] = ",".join(str(c[0]) for c in via)
         params["via_y"] = ",".join(str(c[1]) for c in via)
-    data = _get("/v2/routing/walk", params)
-    if data.get("status") != "OK" and start == end:
-        params["end_x"] = round(end[0] + SAME_POINT_SHIFT, COORD_DIGITS)
+    try:
         data = _get("/v2/routing/walk", params)
+        if data.get("status") != "OK" and start == end:
+            params["end_x"] = round(end[0] + SAME_POINT_SHIFT, COORD_DIGITS)
+            data = _get("/v2/routing/walk", params)
+    except KakaoError as e:
+        if e.quota_exceeded:
+            return _estimate(start, end, via)["seconds"]   # 어림값은 기억하지 않아요
+        if _no_route(e):
+            return None
+        raise
     if data.get("status") != "OK":
         return None
     seconds = data["route"]["properties"]["totalTime"]
     if use_cache:
-        _cache_set(key, seconds, WALK_TTL_SECONDS)
+        _cache_set(key, seconds, ttl_seconds)
     return seconds
 
 
@@ -245,7 +325,26 @@ def _leg_points(leg: dict) -> list[list[float]]:
     return points
 
 
-def walk_route(start: Coord, end: Coord, via: list[Coord] | None = None, use_cache: bool = True) -> dict | None:
+def _straight_m(a: Coord, b: Coord) -> float:
+    """두 좌표(경도, 위도) 사이 직선거리(m, 가까운 거리용 근사)"""
+    dx = (a[0] - b[0]) * 111_320 * math.cos(math.radians((a[1] + b[1]) / 2))
+    dy = (a[1] - b[1]) * 110_540
+    return math.hypot(dx, dy)
+
+
+def _estimate(start: Coord, end: Coord, via: list[Coord]) -> dict:
+    """도보 한도를 다 썼을 때 쓰는 어림값. walk_route 와 같은 모양이고 "estimated": True 가 붙어요.
+    길 모양은 모르니 지도에는 직선으로 그려져요."""
+    stops = [start, *via, end]
+    legs = []
+    for a, b in zip(stops, stops[1:]):
+        seconds = round(_straight_m(a, b) * WALK_DETOUR_RATIO / WALK_SPEED_MPS)
+        legs.append({"seconds": seconds, "points": [list(a), list(b)]})
+    return {"seconds": sum(leg["seconds"] for leg in legs), "legs": legs, "estimated": True}
+
+
+def walk_route(start: Coord, end: Coord, via: list[Coord] | None = None, use_cache: bool = True,
+               ttl_seconds: int = WALK_TTL_SECONDS) -> dict | None:
     """도보 시간과 실제 길 모양 (11/13: 지도에 도보가 직선으로 그려지던 문제).
 
     {"seconds": 전체 초, "legs": [{"seconds": 구간 초, "points": [[경도, 위도], ...]}, ...]}
@@ -266,7 +365,14 @@ def walk_route(start: Coord, end: Coord, via: list[Coord] | None = None, use_cac
     if via:
         params["via_x"] = ",".join(str(c[0]) for c in via)
         params["via_y"] = ",".join(str(c[1]) for c in via)
-    data = _get("/v2/routing/walk", params)
+    try:
+        data = _get("/v2/routing/walk", params)
+    except KakaoError as e:
+        if e.quota_exceeded:
+            return _estimate(start, end, via)              # 어림값은 기억하지 않아요
+        if _no_route(e):
+            return None
+        raise
     if data.get("status") != "OK":
         return None
     route = data["route"]
@@ -274,5 +380,5 @@ def walk_route(start: Coord, end: Coord, via: list[Coord] | None = None, use_cac
             for leg in route.get("legs") or []]
     out = {"seconds": int(route["properties"]["totalTime"]), "legs": legs}
     if use_cache:
-        _cache_set(key, out, WALK_TTL_SECONDS)
+        _cache_set(key, out, ttl_seconds)
     return out

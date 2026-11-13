@@ -131,17 +131,21 @@ def test_지난_일정만_있으면_404(client, world):
     assert (res.status_code, res.json()["error"]["message"]) == (404, "다가오는 일정이 없어요")
 
 
-def test_현재_좌표가_들어간_호출은_캐시하지_않음(client, world, monkeypatch):
+def test_현재_좌표가_들어간_호출은_5분만_기억(client, world, monkeypatch):
+    # 11/13: 새로고침마다 도보를 15번씩 불러 하루 한도(1,000)를 다 써서, 현재 좌표 호출도 5분은 기억해요
     seen = []
     monkeypatch.setattr(planner.kakao, "transit_routes",
-                        lambda s, e, use_cache=True: seen.append(("transit", use_cache)) or world["routes"])
-    monkeypatch.setattr(planner.kakao, "walk_seconds",
-                        lambda s, e, via=None, use_cache=True: seen.append(("walk", s, use_cache)) or (300 if via else 120))
+                        lambda s, e, use_cache=True, ttl_seconds=None: seen.append(("transit", s, ttl_seconds))
+                        or world["routes"])
+    real_walk_route = planner.kakao.walk_route
+    monkeypatch.setattr(planner.kakao, "walk_route",
+                        lambda s, e, via=None, use_cache=True, ttl_seconds=None:
+                        seen.append(("walk", s, ttl_seconds)) or real_walk_route(s, e, via=via))
     setup_user(client)
     plan(client)
     origin = (ORIGIN["lng"], ORIGIN["lat"])
-    assert ("transit", False) in seen
-    assert all(not used for kind, *rest, used in seen if kind == "walk" and rest[0] == origin)
+    from_origin = [ttl for kind, start, ttl in seen if start == origin]
+    assert from_origin and all(ttl == kakao.ORIGIN_TTL_SECONDS for ttl in from_origin)
 
 
 def test_경로가_없으면_404(client, world):
@@ -159,6 +163,18 @@ def test_카카오_실패는_502(client, world, monkeypatch):
     setup_user(client)
     res = plan(client)
     assert (res.status_code, res.json()["error"]["code"]) == (502, "upstream_error")
+
+
+def test_카카오_한도_초과는_503과_안내(client, world, monkeypatch):
+    def used_up(s, e, **kw):
+        raise kakao.KakaoError("카카오 API 오류: HTTP 400 (API limit has been exceeded.)", status=400, code=-10)
+
+    monkeypatch.setattr(planner.kakao, "transit_routes", used_up)
+    setup_user(client)
+    res = plan(client)
+    err = res.json()["error"]
+    assert (res.status_code, err["code"]) == (503, "quota_exceeded")
+    assert "자정" in err["message"]
 
 
 def test_키가_없으면_503(client, world, monkeypatch):
@@ -566,3 +582,33 @@ def test_경유_구간이_하나로_오면_장소에서_나눔():
     points = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]
     to, back, to_pts, back_pts = planner._split_at(points, 300, (1.0, 0.1))
     assert (to, back) == (100, 200) and to_pts[-1] == back_pts[0] == [1.0, 0.0]
+
+
+def test_거쳐_가는_길을_못_찾으면_정류장_왕복으로(client, world, monkeypatch):
+    # 카카오가 출발지 → 가게 → 정류장 길을 못 찾아도(400 → None) 후보가 사라지지 않아요
+    monkeypatch.setattr(planner.kakao, "walk_route", lambda s, e, via=None, **kw: (
+        None if via else {"seconds": 120, "legs": [{"seconds": 120, "points": []}]}))
+    setup_user(client, hours=5)
+    todo = plan(client).json()["todos"][0]
+    assert todo["status"] == "포함" and todo["detour_min"] == 5  # 정류장 왕복 300초
+    assert "walk_to_min" not in todo["place"]
+
+
+def test_목적지가_가까우면_걸어가라고(client, world, monkeypatch):
+    monkeypatch.setattr(planner.kakao, "transit_routes", lambda s, e, **kw: [])
+    res = client.post("/api/plan", json={"user_id": "u", "demo": False, "origin": {"lat": 37.5861, "lng": 127.0291},
+                                         "destination": {"name": "근처", "lat": 37.5871, "lng": 127.0301}})
+    assert res.status_code == 404 and "걸어서" in res.json()["error"]["message"]
+
+
+def test_도보_한도를_다_쓰면_어림값으로_계획하고_표시(client, world, monkeypatch):
+    # 11/13: 도보 한도를 넘어도 경로 추천은 계속 나와야 해요. 앱이 "어림" 표시를 할 수 있게 알려 줘요
+    monkeypatch.setattr(planner.kakao, "walk_quota_used_up", lambda: True)
+    setup_user(client)
+    res = plan(client)
+    assert res.status_code == 200 and res.json()["walk_estimated"] is True
+
+
+def test_평소에는_어림_표시가_없음(client, world):
+    setup_user(client)
+    assert plan(client).json()["walk_estimated"] is False

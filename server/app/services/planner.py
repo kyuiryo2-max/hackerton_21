@@ -426,12 +426,12 @@ def _via_walk(origin: kakao.Coord, stop: kakao.Coord, p: dict, cache: dict) -> d
 
     예전에는 정류장 → 장소 → 정류장 왕복만 재서, 화면에 "현재 위치 → 가게 도보 3분"처럼
     출발지에서 정류장까지 12분 걷는 것이 빠졌어요. 이제 실제로 걷는 순서대로 재요.
-    현재 좌표가 들어가서 메모리에 남기지 않아요 (같은 계획 안에서만 다시 써요).
+    현재 좌표가 들어가서 서버 메모리에 5분만 기억해요 (새로고침 때 카카오 호출을 아끼려고, 11/13).
     """
     key = ("via", origin, stop, p["name"], p["address"])
     if key not in cache:
         place = (p["lng"], p["lat"])
-        r = kakao.walk_route(origin, stop, via=[place], use_cache=False)
+        r = kakao.walk_route(origin, stop, via=[place], ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
         if r is None:
             cache[key] = None
         elif len(r["legs"]) >= 2:
@@ -468,10 +468,14 @@ def _near_place(todo: dict, stop: kakao.Coord, cache: dict,
         if origin is not None and first_walk is not None:
             # 실제 모드: 출발지 → 장소 → 정류장. 경유 시간은 바로 갈 때보다 더 걷는 만큼이에요
             vias = list(pool.map(lambda p: _via_walk(origin, stop, p, cache), nearest))
+            # 출발지에서 거쳐 가는 길을 못 찾으면(카카오 400 등) 예전처럼 정류장 왕복으로 재요 (11/13)
+            backups = list(pool.map(lambda pv: None if pv[1] else _round_trip(stop, pv[0], cache),
+                                    zip(nearest, vias)))
             rows = [{"round_trip_walk_seconds": max(v["to"] + v["back"] - first_walk, 0),
                      "walk_to_seconds": v["to"], "walk_back_seconds": v["back"],
-                     "walk_to_points": v["to_points"], "walk_back_points": v["back_points"]} if v else None
-                    for v in vias]
+                     "walk_to_points": v["to_points"], "walk_back_points": v["back_points"]} if v
+                    else (None if b is None else {"round_trip_walk_seconds": b})
+                    for v, b in zip(vias, backups)]
         else:
             walks = list(pool.map(lambda p: _round_trip(stop, p, cache), nearest))
             rows = [None if w is None else {"round_trip_walk_seconds": w} for w in walks]
@@ -494,8 +498,8 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
     if not legs:
         return None
     first, last = legs[0], legs[-1]
-    # 현재 좌표가 들어간 호출은 메모리에도 남기지 않아요 (PR #29 리뷰)
-    first_route = kakao.walk_route(origin, tuple(first["start"]), use_cache=False)
+    # 현재 좌표가 들어간 호출은 서버 메모리에 5분만 기억해요 (PR #29 리뷰 → 11/13 호출 한도 때문에 바꿈)
+    first_route = kakao.walk_route(origin, tuple(first["start"]), ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
     last_route = kakao.walk_route(tuple(last["end"] or last["start"]), destination)
     first_walk = first_route["seconds"] if first_route else None
     last_walk = last_route["seconds"] if last_route else None
@@ -536,6 +540,17 @@ def _without_stop_times(with_todos: StopResult, direct: StopResult) -> StopResul
         max_stay_seconds=direct.max_stay_seconds,
         has_realtime=direct.has_realtime,
     )
+
+
+NEAR_DESTINATION_M = 700
+
+
+def _straight_m(a: kakao.Coord, b: kakao.Coord) -> float:
+    """두 좌표(경도, 위도) 사이 직선거리(m, 가까운 거리용 근사)"""
+    import math
+    dx = (a[0] - b[0]) * 111_320 * math.cos(math.radians((a[1] + b[1]) / 2))
+    dy = (a[1] - b[1]) * 110_540
+    return math.hypot(dx, dy)
 
 
 def sort_options(options: list[RouteOption], todos: list[dict]) -> None:
@@ -594,14 +609,23 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
 
     todos = [t for t in _todos(user_id, todo_ids) if t["place_types"]]
     try:
-        routes = kakao.transit_routes(origin, dest, use_cache=False)
+        routes = kakao.transit_routes(origin, dest, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
         place_cache: dict = {}
         options = [o for r in routes[:MAX_ROUTES]
                    if (o := _live_option(r, origin, dest, todos, place_cache,
                                          deadline if arrive_by else None))]
     except kakao.KakaoError as e:
+        # Render 로그에서 원인을 볼 수 있게 남겨요 (키·좌표는 오류 문장에 없어요)
+        log.warning("실제 모드 경로 계산 실패: %s", e)
+        if e.quota_exceeded:
+            raise PlanError(503, "quota_exceeded",
+                            "오늘 쓸 수 있는 카카오 경로 조회 횟수를 다 썼어요. 자정이 지나면 다시 돼요. "
+                            "그동안은 시연 모드로 볼 수 있어요.") from None
         raise PlanError(502, "upstream_error", str(e)) from None
     if not options:
+        # 카카오는 너무 가까운 곳(대략 700m 안)이면 대중교통 경로를 주지 않아요 (11/13)
+        if _straight_m(origin, dest) < NEAR_DESTINATION_M:
+            raise PlanError(404, "no_route", "목적지가 가까워서 대중교통 경로가 없어요. 걸어서 가 보세요.")
         raise PlanError(404, "no_route", "대중교통 경로를 찾지 못했어요")
 
     for option in options:
@@ -625,4 +649,7 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         leg=best.leg, timing=best.timing, places=dict(best.places), routes=summary,
         basis=best.times["basis"], depart_at=best.times["depart_at"], total_seconds=best.result.total_seconds,
         has_target=arrive_by is not None))
-    return _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요", explain_todos=False)
+    out = _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요", explain_todos=False)
+    # 오늘 도보 한도를 다 써서 도보 시간을 직선거리로 어림했으면 앱이 알 수 있게 표시해요 (11/13)
+    out["walk_estimated"] = kakao.walk_quota_used_up()
+    return out
