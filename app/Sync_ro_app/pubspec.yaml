@@ -41,6 +41,8 @@ dependencies:
   speech_to_text: ^7.4.0
   geolocator: ^14.0.2
   qr_flutter: ^4.1.0  # 웹에서 "휴대폰으로 열기" QR코드
+  flutter_local_notifications: ^19.4.2  # 일정 준비 시각 휴대폰 알림 (앱만, 웹은 앱 안 안내)
+  timezone: ^0.10.1
 
 dev_dependencies:
   flutter_test:

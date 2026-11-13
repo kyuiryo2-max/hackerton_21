@@ -122,7 +122,9 @@ class StayEval {
     required this.missesVehicle,
     required this.closeLimited,
     this.latestDepart,
-  });
+    this.ample = false,
+    int? maxDwell,
+  }) : maxDwell = maxDwell ?? dwell;
 
   final StayCandidate candidate;
   final StayStatus status;
@@ -141,7 +143,21 @@ class StayEval {
   /// 필요한 시간을 확보하려면 늦어도 이때 출발. 영업시간 때문에 불가능하면 null.
   final DateTime? latestDepart;
 
+  /// 시간이 넉넉해서 추천 머무는 시간([dwell])만큼만 잡고 출발을 늦췄어요.
+  /// 이때 [maxDwell]은 실제로 가능한 최대치(수백 분일 수 있어 화면엔 안 보여요).
+  final bool ample;
+  final int maxDwell;
+
   int get shortBy => need - dwell;
+
+  /// 화면용 머무는 시간 문구: "충분해요" / "최대 6분" / "0분"
+  String get stayLabel => ample ? '충분해요' : (dwell <= 0 ? '0분' : '최대 $dwell분');
+
+  /// 넉넉할 때 잡는 추천 머무는 시간: 짧은 일은 필요 시간의 2배, 긴 일은 1.5배 (최소 필요+3분)
+  static int recommendFor(int need) {
+    final r = need <= 10 ? need * 2 : (need * 1.5).ceil();
+    return math.max(r, need + DepartureOverview.comfortMinutes);
+  }
 }
 
 class DepartureOverview {
@@ -223,10 +239,40 @@ class DepartureOverview {
   }
 
   /// [delayMinutes]만큼 늦게(음수면 일찍) 나갈 때 [candidate]에서 [need]분 머무는 판정.
+  ///
+  /// 머무를 수 있는 시간이 추천 시간(필요의 1.5~2배)보다 많으면 추천 시간만큼만 잡고
+  /// 출발을 그만큼 늦춰요(ample). 수백 분 여유를 그대로 보여 주지 않으려고요.
   StayEval evaluate(StayCandidate candidate, {required int delayMinutes, required int need}) {
+    final (dep, _) = _stayBase;
+    final first = _evaluateAt(candidate, dep.add(Duration(minutes: delayMinutes)), need);
+    final rec = StayEval.recommendFor(need);
+    if (first.dwell <= rec) return first;
+    // 경유지를 나와야 하는 시각에서 거꾸로: 추천 시간 + 가는 도보만큼 전에 출발
+    final mustLeave = first.leavePlace;
+    final later = mustLeave.subtract(Duration(minutes: rec + candidate.walkTo));
+    final shifted = _evaluateAt(candidate, later.isAfter(first.depart) ? later : first.depart, need);
+    if (shifted.dwell < need + comfortMinutes) return first;
+    return StayEval(
+      candidate: shifted.candidate,
+      status: StayStatus.ok,
+      dwell: shifted.dwell,
+      need: need,
+      depart: shifted.depart,
+      arrivePlace: shifted.arrivePlace,
+      waitMinutes: shifted.waitMinutes,
+      leavePlace: shifted.leavePlace,
+      reachStop: shifted.reachStop,
+      missesVehicle: shifted.missesVehicle,
+      closeLimited: shifted.closeLimited,
+      latestDepart: shifted.latestDepart,
+      ample: true,
+      maxDwell: first.dwell,
+    );
+  }
+
+  StayEval _evaluateAt(StayCandidate candidate, DateTime depart, int need) {
     final (dep, spare) = _stayBase;
     final board = boardAt!;
-    final depart = dep.add(Duration(minutes: delayMinutes));
     final arrive = depart.add(Duration(minutes: candidate.walkTo));
 
     // 정류장으로 돌아가기 시작해야 하는 시각 (탈 차 − 여유 − 돌아가는 도보)
@@ -275,7 +321,7 @@ class DepartureOverview {
     final list = task.candidates.map((c) => evaluate(c, delayMinutes: delayMinutes, need: need)).toList();
     list.sort((a, b) {
       final s = a.status.index.compareTo(b.status.index);
-      return s != 0 ? s : b.dwell.compareTo(a.dwell);
+      return s != 0 ? s : b.maxDwell.compareTo(a.maxDwell);
     });
     return list;
   }

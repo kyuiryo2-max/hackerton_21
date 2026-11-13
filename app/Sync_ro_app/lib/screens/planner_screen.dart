@@ -162,7 +162,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       _snack('일정 저장 실패: $e');
       return;
     }
-    if (mounted) widget.onOpenScheduleRoutes?.call(found!);
+    if (mounted) widget.onOpenScheduleRoutes?.call(found);
   }
 
   Future<void> _openRoutine(Routine r) async {
@@ -1139,11 +1139,9 @@ class _TodoEditSheetState extends State<_TodoEditSheet> {
 // ======================================================================
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, this.subtitle, this.actionLabel, this.onAction});
+  const _SectionHeader({required this.title, this.subtitle});
   final String title;
   final String? subtitle;
-  final String? actionLabel;
-  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1156,12 +1154,6 @@ class _SectionHeader extends StatelessWidget {
                 Text(subtitle!, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
             ]),
           ),
-          if (actionLabel != null && onAction != null)
-            TextButton.icon(
-              onPressed: onAction,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: Text(actionLabel!),
-            ),
         ]),
       );
 }

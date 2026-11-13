@@ -203,7 +203,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       for (final r in widget.routes) {
         final evals = _evals(r, t);
         if (evals == null || evals.isEmpty) continue;
-        if (best == null || evals.first.dwell > best.dwell) {
+        if (best == null || evals.first.maxDwell > best.maxDwell) {
           best = evals.first;
           early = _overviewFor(r)?.leaveEarlier ?? false;
         }
@@ -280,16 +280,17 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                             // 일정이 멀면: 몇 시에 나가면 들를 수 있는지 / 가까우면: 최대 몇 분 머물 수 있는지
                             if (early && e.latestDepart != null)
                               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                Text('${KstTime.hm(e.latestDepart)} 출발',
+                                Text('${KstTime.hm(e.ample ? e.depart : e.latestDepart)} 출발',
                                     style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
-                                const Text('이때 나가면 들를 수 있어요',
-                                    style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                Text(e.ample ? '들르기에 충분해요' : '이때 나가면 들를 수 있어요',
+                                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
                               ])
                             else
                               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                Text('최대 ${e.dwell}분',
+                                Text(e.stayLabel,
                                     style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
-                                const Text('체류 가능', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                Text(e.ample ? '추천 ${e.dwell}분 머무르기' : '체류 가능',
+                                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
                               ]),
                           ]),
                         ),
@@ -331,8 +332,8 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     for (final r in widget.routes) {
       final evals = _evals(r, task);
       if (evals == null || evals.isEmpty) continue;
-      if (evals.first.dwell > bestDwell) {
-        bestDwell = evals.first.dwell;
+      if (evals.first.maxDwell > bestDwell) {
+        bestDwell = evals.first.maxDwell;
         bestRoute = r;
       }
     }
@@ -599,7 +600,7 @@ class _RouteCard extends StatelessWidget {
         sideColor = AppTheme.textMuted;
       } else {
         final e = stay!.first;
-        sideValue = e.dwell <= 0 ? '불가' : '최대 ${e.dwell}분';
+        sideValue = e.dwell <= 0 ? '불가' : e.stayLabel;
         sideColor = stayColor(e.status);
       }
     } else {

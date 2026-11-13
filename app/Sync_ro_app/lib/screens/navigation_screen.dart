@@ -1,6 +1,5 @@
 import '../config/api_config.dart';
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 
 import '../models/place.dart';
 import '../models/route_candidate.dart';
@@ -13,6 +12,7 @@ import '../services/route_api_service.dart';
 import '../services/server_plan_service.dart';
 import '../services/server_route_adapter.dart';
 import '../services/place_search_service.dart';
+import '../services/location_access.dart';
 import 'place_search_screen.dart';
 import '../data/offline_demo_data.dart';
 import '../widgets/move_route_planner.dart';
@@ -182,19 +182,8 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     if (_locating) return;
     setState(() { _locating = true; _locationError = null; });
     try {
-      final enabled = await Geolocator.isLocationServiceEnabled();
-      if (!enabled) throw Exception('기기 위치 서비스가 꺼져 있습니다.');
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        throw Exception('위치 권한이 허용되지 않았습니다.');
-      }
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      ).timeout(const Duration(seconds: 15));
+      // 웹(아이폰 Safari 등)에서도 허용 창이 뜨도록 바로 요청해요 (location_access.dart)
+      final position = await LocationAccess.current();
       if (!mounted) return;
       final place = Place(
         id: 'device_current_location', name: '현재 위치', address: '기기 위치',
@@ -208,6 +197,19 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       if (schedule != null && _scheduleDestination != null && !_manualIsActive) {
         await _loadScheduleRoutes(schedule);
       }
+    } on LocationAccessException catch (e) {
+      if (!mounted) return;
+      setState(() => _locationError = '${e.message}. 출발지를 직접 골라도 돼요.');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message),
+        action: SnackBarAction(
+          label: '켜는 방법',
+          onPressed: () => LocationAccess.showHelp(context, e.issue,
+              onRetry: _useCurrentLocation,
+              onWithoutLocation: () => setState(() => _manualExpanded = true),
+              withoutLabel: '출발지를 직접 고르기'),
+        ),
+      ));
     } catch (e) {
       if (mounted) setState(() => _locationError = '현재 위치 확인 실패: $e');
     } finally {
