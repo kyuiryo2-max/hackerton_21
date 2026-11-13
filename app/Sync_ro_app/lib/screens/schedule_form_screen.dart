@@ -53,7 +53,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
     final now = DateTime.now();
     final routine = widget.routine;
-    final seed = widget.existing ?? widget.initial ?? (routine == null ? null : routine.occurrence(routine.nextStart(now)));
+    final seed = widget.existing ?? widget.initial ?? routine?.occurrence(routine.nextStart(now));
     _repeat = routine != null || widget.startRepeating;
     _repeatDays = {...?routine?.weekdays};
 

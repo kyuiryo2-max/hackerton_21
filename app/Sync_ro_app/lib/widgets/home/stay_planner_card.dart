@@ -161,7 +161,9 @@ class StayVerdictCard extends StatelessWidget {
     final String line;
     final actions = <Widget>[];
 
-    if (e.status != StayStatus.bad) {
+    if (e.ample) {
+      line = '경유지를 들르기에 충분해요! 여유 있게 ${e.dwell}분 잡고 ${hm(e.depart)}에 나가면 돼요';
+    } else if (e.status != StayStatus.bad) {
       final latest = e.latestDepart;
       line = latest != null && latest.isAfter(e.depart)
           ? '필요한 ${e.need}분만 쓰면 늦어도 ${hm(latest)}에 출발해도 돼요'
@@ -190,7 +192,7 @@ class StayVerdictCard extends StatelessWidget {
     final b = best;
     final showAlt = b != null &&
         b.candidate.id != e.candidate.id &&
-        (b.status.index < e.status.index || b.dwell > e.dwell + 3);
+        (b.status.index < e.status.index || (!e.ample && b.maxDwell > e.maxDwell + 3));
     final alt = showAlt ? b : null;
 
     final arrival = o.arriveAt;
@@ -237,10 +239,12 @@ class StayVerdictCard extends StatelessWidget {
             Expanded(
               child: _StatBox(
                 label: '머무를 수 있는 시간',
-                value: e.dwell <= 0 ? '0분' : '최대 ${e.dwell}분',
+                value: e.stayLabel,
                 sub: e.status == StayStatus.bad
                     ? '필요 ${e.need}분 · ${e.shortBy}분 부족'
-                    : '필요 ${e.need}분 · ${e.dwell - e.need}분 남음',
+                    : e.ample
+                        ? '필요 ${e.need}분 · 추천 ${e.dwell}분'
+                        : '필요 ${e.need}분 · ${e.dwell - e.need}분 남음',
                 tone: e.status == StayStatus.bad ? color : AppTheme.textStrong,
                 background: staySoft(e.status),
               ),
@@ -271,7 +275,7 @@ class StayVerdictCard extends StatelessWidget {
             decoration: BoxDecoration(color: AppTheme.background, borderRadius: BorderRadius.circular(10)),
             child: Row(children: [
               Expanded(
-                child: Text('더 오래 머물 수 있는 곳: ${alt.candidate.name}, 최대 ${alt.dwell}분',
+                child: Text('더 여유 있는 곳: ${alt.candidate.name}, ${alt.stayLabel}',
                     style: const TextStyle(fontSize: 13)),
               ),
               TextButton(onPressed: onPick == null ? null : () => onPick!(alt.candidate), child: const Text('보기')),
@@ -298,10 +302,16 @@ class StayVerdictCard extends StatelessWidget {
             dot: color, line: color),
         _StepRow(
           time: '',
-          title: e.status == StayStatus.bad ? '${e.need}분 머물면' : '머무르기 최대 ${e.dwell}분',
+          title: e.status == StayStatus.bad
+              ? '${e.need}분 머물면'
+              : e.ample
+                  ? '추천 ${e.dwell}분 머무르기'
+                  : '머무르기 최대 ${e.dwell}분',
           sub: e.status == StayStatus.bad
               ? '${hm(e.leavePlace)}에 나와야 해서 ${withObj(transit)} 놓쳐요'
-              : '필요 ${e.need}분, 남는 시간 ${e.dwell - e.need}분',
+              : e.ample
+                  ? '필요 ${e.need}분 + 여유 ${e.dwell - e.need}분 · 시간은 충분해요'
+                  : '필요 ${e.need}분, 남는 시간 ${e.dwell - e.need}분',
           dot: color,
           line: AppTheme.primary,
         ),
@@ -528,7 +538,7 @@ class StayCandidateTile extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(e.dwell <= 0 ? '0분' : '최대 ${e.dwell}분',
+              Text(e.stayLabel,
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: bad ? color : AppTheme.textStrong)),
               Text(e.missesVehicle ? '탈 차 놓침' : '${hm(overview.arriveAt ?? overview.boardAt)} 도착',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
