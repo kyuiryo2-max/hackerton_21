@@ -54,3 +54,23 @@ def test_키워드_종류는_키워드로_검색(monkeypatch):
 def test_목록에_없는_종류는_거절():
     with pytest.raises(ValueError):
         places.search_by_place_type("우주정거장", (127.0293, 37.5863))
+
+
+def test_병원은_할_일의_진료과로_검색(monkeypatch):
+    # 11/13: "피부과 가기"인데 내과·치과까지 추천하던 문제
+    calls = []
+    monkeypatch.setattr(places.kakao, "search_places", lambda center, **kw: calls.append(kw) or [])
+    places.search_by_place_type("병원", (127.0293, 37.5863), radius_m=300, text="피부과 가기")
+    places.search_by_place_type("병원", (127.0293, 37.5863), radius_m=300, text="정신과 상담")
+    places.search_by_place_type("병원", (127.0293, 37.5863), radius_m=300, text="병원 가기")
+    assert calls == [{"keyword": "피부과", "radius_m": 300, "size": 5},
+                     {"keyword": "정신건강의학과", "radius_m": 300, "size": 5},
+                     {"category": "HP8", "radius_m": 300, "size": 5}]
+
+
+def test_진료과_찾기는_긴_이름부터():
+    assert places.specialty_of("정형외과 물리치료") == "정형외과"
+    assert places.specialty_of("신경외과") == "신경외과"
+    assert places.specialty_of("소아과 예방접종") == "소아청소년과"
+    assert places.specialty_of("감기라 내과") == "내과"
+    assert places.specialty_of("약 사기") is None

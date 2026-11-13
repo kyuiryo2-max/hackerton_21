@@ -12,6 +12,21 @@ class ServerPlan {
   List<Map<String, dynamic>> get todos => (data['todos'] as List? ?? const [])
       .whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   String get explanation => data['explanation']?.toString() ?? '';
+
+  /// 경로 하나만 남긴 계획 (11/13). 서버가 경로마다 준 출발·탑승·도착 시각으로 바꿔요.
+  /// 홈과 이동 탭이 사용자가 고른 같은 경로로 계산하게 하려고요. 그 순위가 없으면 그대로예요.
+  ServerPlan forRank(int rank) {
+    final match = routes.where((r) => (r['rank'] as num?)?.toInt() == rank);
+    if (match.isEmpty) return this;
+    final r = match.first;
+    final out = Map<String, dynamic>.from(data)..['routes'] = [r];
+    if (r['depart_at'] != null) {
+      for (final key in ['basis', 'depart_at', 'board_at', 'arrive_at']) {
+        out[key] = r[key];
+      }
+    }
+    return ServerPlan(out);
+  }
   // 서버가 depart_at(늦어도 출발할 시각, 11/13)을 주면 그 값을 쓰고, 없으면 전체 소요시간으로 역산.
   // basis: arrive_by(도착 시각에서 거꾸로) / realtime(실시간 차) / now(지금 출발)
   String? get basis => data['basis']?.toString();

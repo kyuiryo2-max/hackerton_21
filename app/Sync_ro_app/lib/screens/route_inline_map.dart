@@ -23,7 +23,7 @@ class RouteInlineMap extends StatelessWidget {
     this.routeStops = const [], this.nearbyPlaces = const []});
 
   /// Render a walking route as short grey dashed polylines without plugin-specific patterns.
-  static List<Polyline> walkingDashes(List<LatLng> geometry) {
+  static List<Polyline> walkingDashes(List<LatLng> geometry, {Color color = Colors.grey}) {
     final result = <Polyline>[];
     for (var i = 0; i + 1 < geometry.length; i++) {
       final a = geometry[i], b = geometry[i + 1];
@@ -39,7 +39,7 @@ class RouteInlineMap extends StatelessWidget {
         result.add(Polyline(points: [
           LatLng(a.latitude + (b.latitude - a.latitude) * t1, a.longitude + (b.longitude - a.longitude) * t1),
           LatLng(a.latitude + (b.latitude - a.latitude) * t2, a.longitude + (b.longitude - a.longitude) * t2),
-        ], strokeWidth: 4, color: Colors.grey));
+        ], strokeWidth: 4, color: color));
       }
     }
     return result;

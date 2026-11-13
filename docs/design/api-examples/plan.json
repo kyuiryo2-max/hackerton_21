@@ -56,6 +56,12 @@
               ],
               "max_stay_min": 6,
               "has_realtime": true,
+              "ride_name": "2115번",
+              "next_vehicles_min": [
+                12,
+                20
+              ],
+              "board_in_min": 12,
               "basis": "realtime",
               "depart_at": "2026-11-21T08:34:14+09:00",
               "board_at": "2026-11-21T08:44:00+09:00",

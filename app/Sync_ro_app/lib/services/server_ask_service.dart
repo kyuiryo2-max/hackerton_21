@@ -17,10 +17,12 @@ class ServerAskResponse {
 class ServerAskService {
   ServerAskService({http.Client? client}) : _client = client ?? http.Client();
   final http.Client _client;
-  Future<ServerAskResponse> ask(String text) async {
+  /// [trip]: 이동 중이면 지금 단계와 시각 (11/13, TripPlan.toAskJson). 서버가 그 값으로 답해요.
+  Future<ServerAskResponse> ask(String text, {Map<String, dynamic>? trip}) async {
     final response = await _client.post(ApiConfig.endpoint('/api/ask'),
       headers: {'Content-Type': 'application/json; charset=utf-8'},
-      body: jsonEncode({'user_id': ApiConfig.userId, 'text': text, 'demo': ApiConfig.demoMode}),
+      body: jsonEncode({'user_id': ApiConfig.userId, 'text': text, 'demo': ApiConfig.demoMode,
+        if (trip != null) 'trip': trip}),
     ).timeout(const Duration(seconds: 40));
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));
     if (response.statusCode != 200) {

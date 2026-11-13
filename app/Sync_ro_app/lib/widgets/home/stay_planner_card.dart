@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/app_theme.dart';
 import '../../models/departure_overview.dart';
+import '../../models/route_candidate.dart';
 import '../../services/kst_time.dart';
 
 /// 홈 "경유 판단" 화면 조각들: 판정 카드, 시간 띠, 후보 목록 한 줄.
@@ -138,8 +139,11 @@ class StayVerdictCard extends StatelessWidget {
     this.onSetDelay,
     this.onSetNeed,
     this.onPick,
+    this.rideSegments,
   });
 
+  /// 탑승한 뒤의 구간들 (환승·도보 포함). 있으면 타임라인에 위 경로 카드와 같은 구간을 보여 줘요 (11/13)
+  final List<RouteSegment>? rideSegments;
   final DepartureOverview overview;
   final StayEval eval;
   final StayEval? best;
@@ -329,6 +333,9 @@ class StayVerdictCard extends StatelessWidget {
           late: e.missesVehicle,
           line: AppTheme.textStrong.withValues(alpha: 0.75),
         ),
+        // 탑승 뒤 구간 (환승, 갈아타는 도보, 마지막 도보) — 위 경로 카드의 구간과 같아요
+        if (!e.missesVehicle && o.boardAt != null)
+          ..._rideRows(rideSegments, o.boardAt!),
         _StepRow(
           time: e.missesVehicle ? '' : hm(o.arriveAt),
           title: '${o.destination} 도착',
@@ -339,6 +346,30 @@ class StayVerdictCard extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// 탑승 시각부터 구간 시간을 더해 가며 "17:33 1호선 17분" 같은 줄을 만들어요.
+/// 첫 번째 탈것은 위 "탑승" 줄이 맡아요. 걷기 구간은 "도보 N분"으로 보여 줘요.
+List<Widget> _rideRows(List<RouteSegment>? segs, DateTime boardAt) {
+    if (segs == null || segs.isEmpty) return const [];
+    final firstRide = segs.indexWhere((s) => s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway);
+    if (firstRide < 0) return const [];
+    var t = boardAt.add(Duration(minutes: segs[firstRide].durationMinutes));
+    final rows = <Widget>[];
+    for (final s in segs.skip(firstRide + 1)) {
+      if (s.type == RouteSegmentType.waiting || s.durationMinutes <= 0) continue;
+      final walking = s.type == RouteSegmentType.walking;
+      final name = walking ? '도보' : (s.lineName ?? s.description);
+      final where = [s.startName, s.endName].whereType<String>().where((x) => x.isNotEmpty).join(' → ');
+      rows.add(_StepRow(
+        time: hm(t),
+        title: '$name ${s.durationMinutes}분',
+        sub: where,
+        line: walking ? AppTheme.border : AppTheme.textStrong.withValues(alpha: 0.75),
+      ));
+      t = t.add(Duration(minutes: s.durationMinutes));
+    }
+    return rows;
 }
 
 class _StatBox extends StatelessWidget {

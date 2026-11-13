@@ -233,3 +233,46 @@ def walk_seconds(start: Coord, end: Coord, via: list[Coord] | None = None, use_c
     if use_cache:
         _cache_set(key, seconds, WALK_TTL_SECONDS)
     return seconds
+
+
+def _leg_points(leg: dict) -> list[list[float]]:
+    """도보 구간 하나의 길 모양 좌표 [[경도, 위도], ...] (단계마다 끝점이 다음 시작점과 겹치면 한 번만)."""
+    points: list[list[float]] = []
+    for step in leg.get("steps") or []:
+        for pt in (step.get("path") or {}).get("points") or []:
+            if not points or points[-1] != pt:
+                points.append(pt)
+    return points
+
+
+def walk_route(start: Coord, end: Coord, via: list[Coord] | None = None, use_cache: bool = True) -> dict | None:
+    """도보 시간과 실제 길 모양 (11/13: 지도에 도보가 직선으로 그려지던 문제).
+
+    {"seconds": 전체 초, "legs": [{"seconds": 구간 초, "points": [[경도, 위도], ...]}, ...]}
+    경유지가 있으면 구간이 경유지 수 + 1개예요 (출발 → 경유지 → 도착). 경로를 못 찾으면 None.
+    walk_seconds 와 같은 API를 한 번 불러요.
+    """
+    via = [_rounded(c) for c in via or []]
+    if len(via) > 5:
+        raise ValueError("경유지는 최대 5개예요")
+    start, end = _rounded(start), _rounded(end)
+    if start == end and not via:
+        return {"seconds": 0, "legs": [{"seconds": 0, "points": []}]}
+    key = ("walk_route", start, end, tuple(via))
+    cached = _cache_get(key) if use_cache else None
+    if cached is not None:
+        return cached
+    params: dict = {"start_x": start[0], "start_y": start[1], "end_x": end[0], "end_y": end[1]}
+    if via:
+        params["via_x"] = ",".join(str(c[0]) for c in via)
+        params["via_y"] = ",".join(str(c[1]) for c in via)
+    data = _get("/v2/routing/walk", params)
+    if data.get("status") != "OK":
+        return None
+    route = data["route"]
+    legs = [{"seconds": int((leg.get("properties") or {}).get("time") or 0), "points": _leg_points(leg)}
+            for leg in route.get("legs") or []]
+    out = {"seconds": int(route["properties"]["totalTime"]), "legs": legs}
+    if use_cache:
+        _cache_set(key, out, WALK_TTL_SECONDS)
+    return out

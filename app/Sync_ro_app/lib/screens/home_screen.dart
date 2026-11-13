@@ -209,10 +209,22 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   // ---------- 다음 일정 ----------
 
   DepartureOverview? _overview(Schedule? next) {
-    final active = activeRouteController.active;
+    var active = activeRouteController.active;
+    // 홈은 "다음 일정"을 보여 줘요. 이동 탭에서 다른 일정 경로를 보고 있으면 그 경로는 쓰지 않아요
+    // (11/13: 오늘 일정 제목에 내일 일정 경로가 섞여 나오던 문제)
+    if (active != null && next != null &&
+        ActiveRouteController.tripKey(active.destination, active.arrival) !=
+            ActiveRouteController.tripKey(next.location, next.startTime)) {
+      active = null;
+    }
     if (active != null) {
-      final plan = active.plan;
+      var plan = active.plan;
       if (plan != null) {
+        // 실제 모드: 이동 탭에서 고른 경로로 보여 줘요 (11/13). 시연 계획은 경로가 하나라 그대로예요.
+        final rank = int.tryParse(active.selectedId.replaceFirst('server_', ''));
+        if (!ApiConfig.demoMode && active.selectedId.startsWith('server_') && rank != null) {
+          plan = plan.forRank(rank);
+        }
         return DepartureOverview.fromPlan(
           plan,
           source: ApiConfig.demoMode ? DepartureSource.serverDemo : DepartureSource.serverPlan,
@@ -873,13 +885,28 @@ class _ModePill extends StatelessWidget {
   }
 }
 
-/// 홈에서 보여 줄 경유지 하나: 서버가 포함한(또는 "꼭") 할 일 중 첫 번째, 그중 가장 오래 머물 수 있는 곳.
+/// 홈에서 보여 줄 경유지 하나.
+/// 실제 모드: 이동 탭에서 "이번 이동에 적용한" 할 일이 있을 때만, 고른 경유지로 보여 줘요 (11/13).
+/// 시연 모드: 무대 장면이라 예전처럼 첫 할 일의 가장 오래 머물 수 있는 곳을 바로 보여 줘요.
 ({StayTask task, StayEval eval})? homeStop(DepartureOverview? o) {
   if (o == null || !o.canPlanStay || o.tasks.isEmpty) return null;
-  final task = o.tasks.first;
+  var task = o.tasks.first;
+  String? candidateId;
+  if (!o.isDemo) {
+    final id = activeRouteController.appliedTaskId;
+    // 이 일정(목적지 + 도착 시각)에 적용한 할 일일 때만
+    if (id == null || !activeRouteController.appliedFor(ActiveRouteController.tripKey(o.destination, o.arriveBy))) {
+      return null;
+    }
+    final match = o.tasks.where((t) => t.id == id);
+    if (match.isEmpty) return null;
+    task = match.first;
+    candidateId = activeRouteController.appliedCandidateId;
+  }
   final ranked = o.rank(task, delayMinutes: 0, need: task.needMinutes);
   if (ranked.isEmpty) return null;
-  return (task: task, eval: ranked.first);
+  final eval = ranked.firstWhere((e) => e.candidate.id == candidateId, orElse: () => ranked.first);
+  return (task: task, eval: eval);
 }
 
 class _NextCard extends StatelessWidget {
