@@ -11,6 +11,7 @@ import '../providers/todo_controller.dart';
 import '../services/planner_store.dart';
 import 'detail_screen.dart';
 import 'schedule_form_screen.dart';
+import '../widgets/specialty_chips.dart';
 
 /// 할 일·일정 탭 (11/13 개편, 규리 님 스케치)
 ///
@@ -325,8 +326,17 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
     setState(() => _adding = true);
     try {
       // 장소 종류는 AI가, 머무는 시간은 서버가 장소 종류로 정해요
-      final saved = await TodoScope.of(context).addTodo(title: text);
+      final todos = TodoScope.of(context);
+      var saved = await todos.addTodo(title: text);
       _todoInput.clear();
+      // 병원인데 진료과가 없으면 칩으로 물어봐요 (11/13: 모든 병원을 추천하던 문제)
+      if (mounted && needsSpecialty(saved.title, saved.placeTypes)) {
+        final spec = await askSpecialty(context, saved.title);
+        if (spec != null && spec.isNotEmpty) {
+          saved = saved.copyWith(title: withSpecialty(saved.title, spec));
+          await todos.updateTodo(saved);
+        }
+      }
       if (_newTodoDay != null) await store.setTodoDay(saved.id, _newTodoDay);
       if (saved.placeTypes.isEmpty) {
         _snack('"${saved.title}"에 들를 장소를 찾지 못했어요. 장소 칩을 눌러 골라 주세요.');

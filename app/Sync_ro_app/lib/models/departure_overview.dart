@@ -49,7 +49,13 @@ class StayCandidate {
     this.walkBackMinutes,
     this.openAt,
     this.closeAt,
+    this.pathTo = const [],
+    this.pathBack = const [],
   });
+
+  /// 실제 걷는 길 모양: 출발지 → 이곳, 이곳 → 탑승 정류장 (서버가 줄 때만, 11/13)
+  final List<GeoPoint> pathTo;
+  final List<GeoPoint> pathBack;
 
   final String id;
   final String name;
@@ -220,6 +226,14 @@ class DepartureOverview {
   /// 체류 판정의 기준 출발 시각과 여유(분)
   (DateTime, int) get _stayBase {
     final dep = departure!;
+    if (source == DepartureSource.serverPlan && (leaveEarlier || spareMinutes != null)) {
+      // 실제 모드(11/13): 서버 출발 시각은 경유 없이 바로 갈 때의 "늦어도 출발"이라,
+      // 지금부터 그 시각까지가 경유에 쓸 수 있는 시간이에요.
+      // 출발 시각에서 분 단위로 거꾸로 맞춰서, 홈과 이동 탭이 1분씩 다르게 나오지 않게 해요.
+      final now = DateTime.now();
+      final minutes = now.isBefore(dep) ? dep.difference(now).inMinutes : 0;
+      return (dep.subtract(Duration(minutes: minutes)), minutes);
+    }
     if (spareMinutes != null || !leaveEarlier) return (dep, spareMinutes ?? 0);
     final now = DateTime.now();
     final base = now.isBefore(dep) ? now : dep;
@@ -276,7 +290,12 @@ class DepartureOverview {
     final arrive = depart.add(Duration(minutes: candidate.walkTo));
 
     // 정류장으로 돌아가기 시작해야 하는 시각 (탈 차 − 여유 − 돌아가는 도보)
-    var mustLeave = dep.add(Duration(minutes: spare - candidate.walkBack));
+    // 실제 모드에서 실시간 차가 있으면 탈 차 시각에서 바로 계산해요 (11/13: "최대 7분"인데 버스를 놓친다던 문제)
+    // 실제 모드는 걷는 시간이 "가게 → 탑승 정류장"이라(11/13), 탈 차 시각에서 거꾸로 계산해요.
+    // 일정이 멀어 실시간이 없으면 서버 탑승 시각(바로 갈 때 정류장 도착)까지 가면 돼요.
+    var mustLeave = source == DepartureSource.serverPlan && (spareMinutes != null || leaveEarlier)
+        ? board.subtract(Duration(minutes: (spareMinutes != null ? stopBufferMinutes : 0) + candidate.walkBack))
+        : dep.add(Duration(minutes: spare - candidate.walkBack));
     final openAt = _atClock(dep, candidate.openAt);
     final closeAt = _atClock(dep, candidate.closeAt);
     final start = openAt != null && openAt.isAfter(arrive) ? openAt : arrive;
@@ -362,7 +381,19 @@ class DepartureOverview {
       walkBackMinutes: _int(raw['walk_back_min']),
       openAt: raw['open']?.toString(),
       closeAt: raw['close']?.toString(),
+      pathTo: _path(raw['walk_to_points']),
+      pathBack: _path(raw['walk_back_points']),
     );
+  }
+
+  /// [[경도, 위도], ...] → GeoPoint 목록
+  static List<GeoPoint> _path(dynamic raw) {
+    if (raw is! List) return const [];
+    return [
+      for (final p in raw)
+        if (p is List && p.length >= 2 && p[0] is num && p[1] is num)
+          GeoPoint('', (p[1] as num).toDouble(), (p[0] as num).toDouble()),
+    ];
   }
 
   /// 서버 /api/plan 응답(docs/design/api-examples/plan.json 형식)을 홈 화면 모델로 바꿔요.
@@ -442,7 +473,11 @@ class DepartureOverview {
       routeName: route['name']?.toString(),
       boardStopName: stopsOnRoute.isEmpty ? null : '${stopsOnRoute.first}',
       totalMinutes: _int(route['total_min']),
-      spareMinutes: maxStay == null ? null : maxStay + includedDetour,
+      // 실제 모드(serverPlan) 서버 시간은 11/13부터 경유 없이 바로 갈 때 값이라 경유 도보를 더하지 않아요.
+      // 시연 계획은 서버가 경유를 넣고 계산해서 예전처럼 더해요.
+      spareMinutes: maxStay == null
+          ? null
+          : maxStay + (source == DepartureSource.serverPlan ? 0 : includedDetour),
       // 일정이 멀어서 실시간 차가 없을 때(도착 시각에서 거꾸로): 더 일찍 나가는 걸로 계산
       leaveEarlier: maxStay == null && '${route['basis'] ?? plan.basis ?? ''}' == 'arrive_by',
       tasks: tasks,

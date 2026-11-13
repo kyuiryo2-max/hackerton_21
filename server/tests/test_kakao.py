@@ -255,3 +255,22 @@ def test_저장_개수는_한도를_넘지_않음(api, monkeypatch):
     for i in range(3):
         kakao.walk_seconds((127.0 + i, 37.5), END)
     assert len(kakao._cache) == 2
+
+
+def test_도보_경로는_실제_길_모양을_줌(api):
+    # 11/13: 지도에 도보가 직선으로 그려지던 문제
+    _, responses = api
+    sample = json.loads((Path(__file__).resolve().parents[2] / "data" / "samples" / "kakao_walk.json")
+                        .read_text(encoding="utf-8"))
+    responses["/v2/routing/walk"] = reply(sample)
+    r = kakao.walk_route(START, END, use_cache=False)
+    assert r["seconds"] == 2208 and len(r["legs"]) == 1
+    points = r["legs"][0]["points"]
+    assert len(points) > 10 and points[0] == [127.0292996, 37.5863085]
+    assert all(points[i] != points[i + 1] for i in range(len(points) - 1))  # 겹친 점은 한 번만
+
+
+def test_도보_경로를_못_찾으면_None(api):
+    _, responses = api
+    responses["/v2/routing/walk"] = reply({"status": "TOO_FAR_AWAY"})
+    assert kakao.walk_route(START, END) is None

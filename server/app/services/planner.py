@@ -109,13 +109,22 @@ def _demo_place(todo: dict) -> dict | None:
     return {**place, "stay_seconds": stay_seconds(todo, place["stay_seconds"])}
 
 
-def _explanation(route_name: str, included: list[dict], arrive_at) -> str:
+def _ride_name(card: dict) -> str:
+    """안내 문장에 쓸 노선 이름. 버스는 "2115번", 지하철은 "6호선" 그대로 (11/13: "6호선번" 문제)."""
+    name = card["name"]
+    # 버스 번호(2115, 성북04, 7720·7727)는 숫자로 끝나요. 지하철(6호선, 경의중앙선, GTX-A)은 아니에요
+    is_bus_number = card.get("type") != "SUBWAY" and name[-1:].isdigit()
+    return f"{name}번" if is_bus_number else name
+
+
+def _explanation(card: dict, included: list[dict], arrive_at) -> str:
     """AI 문장(#36)이 붙기 전까지 쓰는 정해진 문장. 숫자는 계산값만 써요."""
     time = f"{arrive_at.hour}시 {arrive_at.minute}분"
+    ride = _ride_name(card)
     if not included:
-        return f"{route_name}번을 타면 {time}에 도착해요."
+        return f"{ride}을 타면 {time}에 도착해요."
     names = ", ".join(t["text"] for t in included)
-    return f"{route_name}번을 타면 {names}까지 하고 {time}에 도착해요."
+    return f"{ride}을 타면 {names}까지 하고 {time}에 도착해요."
 
 
 def _decide(option: RouteOption, todos: list[dict], deadline_seconds: int) -> StopResult:
@@ -128,7 +137,14 @@ def _decide(option: RouteOption, todos: list[dict], deadline_seconds: int) -> St
 
 
 def _place_out(place: dict) -> dict:
-    return {k: place.get(k) for k in ("place_type", "name", "address", "lng", "lat")}
+    out = {k: place.get(k) for k in ("place_type", "name", "address", "lng", "lat")}
+    # 실제 모드: 출발지 → 장소, 장소 → 탑승 정류장 도보 (분)와 길 모양 (11/13)
+    if place.get("walk_to_seconds") is not None:
+        out["walk_to_min"] = travel_minutes_from_seconds(place["walk_to_seconds"])
+        out["walk_back_min"] = travel_minutes_from_seconds(place["walk_back_seconds"])
+        out["walk_to_points"] = place.get("walk_to_points") or []
+        out["walk_back_points"] = place.get("walk_back_points") or []
+    return out
 
 
 def _route_card(rank: int, option: RouteOption) -> dict:
@@ -145,11 +161,28 @@ def _route_card(rank: int, option: RouteOption) -> dict:
         **{k: option.card[k] for k in ("transfers", "fare", "stops")},
         "max_stay_min": None if result.max_stay_seconds is None else wait_minutes_from_seconds(result.max_stay_seconds),
         "has_realtime": result.has_realtime,
+        # 탈 정류장에 곧 오는 차 (실시간일 때만, 계획한 시각 "now" 기준 분) 와 그중 타는 차 (11/13)
+        "ride_name": _ride_name(option.card),
+        **_next_vehicles(timing, result),
         # 경로마다 같은 기준으로 계산한 시각 (11/13). 앱은 순위와 상관없이 이 값을 그대로 보여 주면 돼요
         **_iso_times(option.times),
         # 구간 목록 (걷기·버스·지하철, 분, 타는 곳 → 내리는 곳, 지도에 그릴 좌표)
         "legs": option.card.get("legs", []),
     }
+
+
+NEXT_VEHICLES_SHOWN = 2  # 서울시 버스 실시간은 앞 차 2대만 알려 줘요. 그 뒤는 배차 간격으로 추정한 값이라 안 보여요
+
+
+def _next_vehicles(timing: RouteTiming, result: StopResult) -> dict:
+    """지도앱처럼 "2분 뒤 · 11분 뒤"를 보여 주려고, 곧 오는 차 몇 대와 그중 탈 차를 알려 줘요.
+    실시간이 없으면(일정이 멀거나 정보 없음) 빈 목록이에요."""
+    if not result.has_realtime or not timing.vehicle_seconds:
+        return {"next_vehicles_min": [], "board_in_min": None}
+    soon = sorted(timing.vehicle_seconds)[:NEXT_VEHICLES_SHOWN]
+    board = result.board_seconds
+    return {"next_vehicles_min": [wait_minutes_from_seconds(v) for v in soon],
+            "board_in_min": None if board is None else wait_minutes_from_seconds(board)}
 
 
 def _iso_times(times: dict) -> dict:
@@ -198,7 +231,7 @@ def _stop_buffer(option: RouteOption) -> int:
 
 
 def _response(user_id: str, todos: list[dict], options: list[RouteOption], now: datetime,
-              schedule: dict, missing_reason: str) -> dict:
+              schedule: dict, missing_reason: str, explain_todos: bool = True) -> dict:
     """첫 번째 경로로 할 일 상태를 정하고, 경로 카드는 모두 보여 줘요."""
     best = options[0]
     result = best.result
@@ -245,7 +278,8 @@ def _response(user_id: str, todos: list[dict], options: list[RouteOption], now: 
         "arrive_at": arrive_at.isoformat(),
         "routes": [_route_card(i, o) for i, o in enumerate(options, 1)],
         "todos": todo_rows,
-        "explanation": _explanation(best.card["name"], included, arrive_at),
+        # 실제 모드는 경로 시간에 경유를 넣지 않아서, 안내 문장에도 할 일을 넣지 않아요 (11/13)
+        "explanation": _explanation(best.card, included if explain_todos else [], arrive_at),
     }
 
 
@@ -289,7 +323,8 @@ def _walk_leg(seconds: int, frm: str, to: str, points: list | None) -> dict:
 
 
 def _live_legs(route: dict, origin: kakao.Coord, destination: kakao.Coord,
-               first_walk: int, last_walk: int) -> list[dict]:
+               first_walk: int, last_walk: int,
+               first_points: list | None = None, last_points: list | None = None) -> list[dict]:
     """카카오 구간 전체를 앱이 그리기 쉬운 목록으로 (처음·마지막 도보 포함).
 
     카카오 legs에는 처음·마지막 도보가 없어서 직접 앞뒤에 붙여요.
@@ -298,7 +333,7 @@ def _live_legs(route: dict, origin: kakao.Coord, destination: kakao.Coord,
     transit = [leg for leg in route["legs"] if leg["type"] in TRANSIT_TYPES]
     first, last = transit[0], transit[-1]
     out.append(_walk_leg(first_walk, "출발지", (first["stops"] or [""])[0],
-                         [list(origin), list(first["start"])] if first["start"] else []))
+                         first_points or ([list(origin), list(first["start"])] if first["start"] else [])))
     for leg in route["legs"]:
         if leg["type"] in TRANSIT_TYPES:
             stops = leg["stops"]
@@ -311,7 +346,7 @@ def _live_legs(route: dict, origin: kakao.Coord, destination: kakao.Coord,
             out.append({**_walk_leg(leg["seconds"], prev_stop, "환승", leg.get("points")), "name": "환승 도보"})
     end = last["end"] or last["start"]
     out.append(_walk_leg(last_walk, (last["stops"] or [""])[-1], "도착지",
-                         [list(end), list(destination)] if end else []))
+                         last_points or ([list(end), list(destination)] if end else [])))
     return out
 
 
@@ -351,24 +386,67 @@ def _vehicle_seconds(leg: dict) -> list[int]:
         return []
 
 
-def _search_type(place_type: str, stop: kakao.Coord, cache: dict) -> list[dict]:
-    """정류장 근처에서 장소 종류 하나로 찾은 곳 (가까운 순). 같은 계획 안에서는 다시 부르지 않아요."""
-    key = ("search", place_type, stop)
+def _search_type(place_type: str, stop: kakao.Coord, cache: dict, text: str = "") -> list[dict]:
+    """정류장 근처에서 장소 종류 하나로 찾은 곳 (가까운 순). 같은 계획 안에서는 다시 부르지 않아요.
+    병원은 할 일 문장에 진료과가 있으면 그 진료과만 찾아요 (places.specialty_of)."""
+    spec = places.specialty_of(text) if place_type == "병원" else None
+    key = ("search", place_type, spec, stop)
     if key not in cache:
-        found = places.search_by_place_type(place_type, stop, radius_m=PLACE_RADIUS_M, size=MAX_CANDIDATES)
+        found = places.search_by_place_type(place_type, stop, radius_m=PLACE_RADIUS_M, size=MAX_CANDIDATES, text=text)
         cache[key] = [{**p, "place_type": place_type} for p in found]
     return cache[key]
 
 
 def _round_trip(stop: kakao.Coord, p: dict, cache: dict) -> int | None:
-    """정류장 → 장소 → 정류장 도보(초)."""
+    """정류장 → 장소 → 정류장 도보(초). 출발지를 모를 때(시연 등) 써요."""
     key = ("walk", stop, p["name"], p["address"])
     if key not in cache:
         cache[key] = kakao.walk_seconds(stop, stop, via=[(p["lng"], p["lat"])])
     return cache[key]
 
 
-def _near_place(todo: dict, stop: kakao.Coord, cache: dict) -> dict | None:
+def _split_at(points: list[list[float]], total: int, place: kakao.Coord) -> tuple[int, int, list, list]:
+    """경유 구간이 하나로만 오면, 길에서 장소와 가장 가까운 점을 기준으로 시간을 거리 비율로 나눠요."""
+    if len(points) < 2:
+        half = total // 2
+        return half, total - half, points, points
+
+    def dist(a, b):
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+    cut = min(range(len(points)), key=lambda i: dist(points[i], place))
+    lengths = [dist(points[i], points[i + 1]) for i in range(len(points) - 1)]
+    whole = sum(lengths) or 1
+    to = round(total * sum(lengths[:cut]) / whole)
+    return to, total - to, points[:cut + 1], points[cut:]
+
+
+def _via_walk(origin: kakao.Coord, stop: kakao.Coord, p: dict, cache: dict) -> dict | None:
+    """출발지 → 장소 → 탑승 정류장 도보 (11/13).
+
+    예전에는 정류장 → 장소 → 정류장 왕복만 재서, 화면에 "현재 위치 → 가게 도보 3분"처럼
+    출발지에서 정류장까지 12분 걷는 것이 빠졌어요. 이제 실제로 걷는 순서대로 재요.
+    현재 좌표가 들어가서 메모리에 남기지 않아요 (같은 계획 안에서만 다시 써요).
+    """
+    key = ("via", origin, stop, p["name"], p["address"])
+    if key not in cache:
+        place = (p["lng"], p["lat"])
+        r = kakao.walk_route(origin, stop, via=[place], use_cache=False)
+        if r is None:
+            cache[key] = None
+        elif len(r["legs"]) >= 2:
+            cache[key] = {"to": r["legs"][0]["seconds"], "back": sum(leg["seconds"] for leg in r["legs"][1:]),
+                          "to_points": r["legs"][0]["points"],
+                          "back_points": [pt for leg in r["legs"][1:] for pt in leg["points"]]}
+        else:
+            points = r["legs"][0]["points"] if r["legs"] else []
+            to, back, to_pts, back_pts = _split_at(points, r["seconds"], place)
+            cache[key] = {"to": to, "back": back, "to_points": to_pts, "back_points": back_pts}
+    return cache[key]
+
+
+def _near_place(todo: dict, stop: kakao.Coord, cache: dict,
+                origin: kakao.Coord | None = None, first_walk: int | None = None) -> dict | None:
     """탑승 정류장 근처의 경유 후보 (#62).
 
     할 일의 장소 종류를 모두 찾아 합치고(예: 이어폰 → 편의점·다이소), 직선거리로 가까운 MAX_CANDIDATES곳만
@@ -377,21 +455,30 @@ def _near_place(todo: dict, stop: kakao.Coord, cache: dict) -> dict | None:
     """
     found: dict[tuple, dict] = {}
     for place_type in todo["place_types"]:
-        for p in _search_type(place_type, stop, cache):
+        for p in _search_type(place_type, stop, cache, todo.get("text") or ""):
             found.setdefault((p["name"], p["address"]), p)  # 두 종류에 같은 가게가 나오면 한 번만
     unknown = 10**9  # 거리를 모르면 맨 뒤로
     nearest = sorted(found.values(), key=lambda p: unknown if p.get("distance_m") is None else p["distance_m"])
     nearest = nearest[:MAX_CANDIDATES]
     if not nearest:
         return None
+    stay = stay_seconds(todo)
     # 후보 도보 시간은 서로 상관없어서 동시에 물어봐요 (순서대로 부르면 후보 수만큼 느려져요)
     with ThreadPoolExecutor(max_workers=MAX_CANDIDATES) as pool:
-        walks = list(pool.map(lambda p: _round_trip(stop, p, cache), nearest))
-    stay = stay_seconds(todo)
+        if origin is not None and first_walk is not None:
+            # 실제 모드: 출발지 → 장소 → 정류장. 경유 시간은 바로 갈 때보다 더 걷는 만큼이에요
+            vias = list(pool.map(lambda p: _via_walk(origin, stop, p, cache), nearest))
+            rows = [{"round_trip_walk_seconds": max(v["to"] + v["back"] - first_walk, 0),
+                     "walk_to_seconds": v["to"], "walk_back_seconds": v["back"],
+                     "walk_to_points": v["to_points"], "walk_back_points": v["back_points"]} if v else None
+                    for v in vias]
+        else:
+            walks = list(pool.map(lambda p: _round_trip(stop, p, cache), nearest))
+            rows = [None if w is None else {"round_trip_walk_seconds": w} for w in walks]
     candidates = sorted(
         ({"place_type": p["place_type"], "name": p["name"], "address": p["address"], "lng": p["lng"], "lat": p["lat"],
-          "round_trip_walk_seconds": walk, "stay_seconds": stay}
-         for p, walk in zip(nearest, walks) if walk is not None),
+          "stay_seconds": stay, **row}
+         for p, row in zip(nearest, rows) if row is not None),
         key=lambda c: c["round_trip_walk_seconds"],
     )
     if not candidates:
@@ -408,8 +495,13 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
         return None
     first, last = legs[0], legs[-1]
     # 현재 좌표가 들어간 호출은 메모리에도 남기지 않아요 (PR #29 리뷰)
-    first_walk = kakao.walk_seconds(origin, tuple(first["start"]), use_cache=False)
-    last_walk = kakao.walk_seconds(tuple(last["end"] or last["start"]), destination)
+    first_route = kakao.walk_route(origin, tuple(first["start"]), use_cache=False)
+    last_route = kakao.walk_route(tuple(last["end"] or last["start"]), destination)
+    first_walk = first_route["seconds"] if first_route else None
+    last_walk = last_route["seconds"] if last_route else None
+    # 지도에 도보를 실제 길 모양으로 그리려고 좌표도 받아요 (11/13). 못 받으면 직선
+    first_points = [pt for leg in first_route["legs"] for pt in leg["points"]] if first_route else []
+    last_points = [pt for leg in last_route["legs"] for pt in leg["points"]] if last_route else []
     if first_walk is None or last_walk is None:
         # 도보 경로를 못 찾으면 카카오 총 시간에서 구간 시간을 뺀 나머지를 처음 도보로 봐요
         spare = max((route["kakao_total_seconds"] or 0) - route["moving_seconds"], 0)
@@ -422,16 +514,37 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
                            is_subway=first["type"] == "SUBWAY"),
         card={"type": route["type"], "name": "·".join(first["vehicles"][:3]) or first["guidance"],
               "guidance": first["guidance"], "transfers": route["transfers"], "fare": route["fare_min"],
-              "stops": first["stops"], "legs": _live_legs(route, origin, destination, first_walk, last_walk)},
-        places={t["id"]: _near_place(t, stop, place_cache) for t in todos},
+              "stops": first["stops"],
+              "legs": _live_legs(route, origin, destination, first_walk, last_walk, first_points, last_points)},
+        places={t["id"]: _near_place(t, stop, place_cache, origin, first_walk) for t in todos},
         leg=first,
     )
 
 
-def _missed(option: RouteOption, todos: list[dict], importance: str | None) -> int:
-    """이 경로에서 넣지 못한 할 일 수 (importance가 있으면 그 중요도만)."""
-    included = {d.todo_id for d in option.result.decisions if d.status == "included"}
-    return sum(1 for t in todos if (importance is None or t["importance"] == importance) and t["id"] not in included)
+def _without_stop_times(with_todos: StopResult, direct: StopResult) -> StopResult:
+    """실제 모드 경로 카드: 시간은 할 일 없이 바로 갈 때 값, 할 일 판정(포함/제외)만 할 일을 넣어 본 값.
+
+    앱이 완료 안 한 할 일을 모두 보내서, 사용자가 할 일을 적용하지 않았는데도
+    경로 시간에 경유 시간이 들어가던 문제(41분 → 104분)를 막아요 (11/13).
+    경유지에서 머물 시간은 사용자가 할 일을 적용하면 앱이 이 시간을 기준으로 계산해요.
+    """
+    return StopResult(
+        decisions=with_todos.decisions,
+        board_seconds=direct.board_seconds,
+        total_seconds=direct.total_seconds,
+        direct_total_seconds=direct.direct_total_seconds,
+        max_stay_seconds=direct.max_stay_seconds,
+        has_realtime=direct.has_realtime,
+    )
+
+
+def sort_options(options: list[RouteOption], todos: list[dict]) -> None:
+    """실제 모드 경로 순서: 빠른 경로부터 (11/13).
+
+    할 일을 적용하기 전에는 할 일과 상관없이 빠른 순이에요.
+    할 일을 적용하면 앱이 "들를 수 있는 경로 → 빠른 경로"로 다시 정렬해요.
+    """
+    options.sort(key=lambda o: o.result.total_seconds)
 
 
 def _arrive_by(schedule: dict) -> datetime:
@@ -492,10 +605,13 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         raise PlanError(404, "no_route", "대중교통 경로를 찾지 못했어요")
 
     for option in options:
-        option.result = _decide(option, todos, deadline)
+        direct = decide_stops(option.timing, [], deadline)
+        # 시각은 할 일 없이 바로 갈 때로 계산해요. 먼저 정해야 탑승 시각에 경유 시간이 안 들어가요
+        # (11/13: 할 일을 적용 안 했는데 "대기 57분, 18:23 탑승"으로 나오던 문제)
+        option.result = direct
         _set_times(option, now, arrive_by)
-    # 필수 할 일을 넣을 수 있는 경로 → 할 일을 많이 넣는 경로 → 빨리 도착하는 경로 순이에요
-    options.sort(key=lambda o: (_missed(o, todos, "필수"), _missed(o, todos, None), o.result.total_seconds))
+        option.result = _without_stop_times(_decide(option, todos, deadline), direct)
+    sort_options(options, todos)
     # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
     best = options[0]
     summary = [{"rank": i, "name": o.card["name"], "type": o.card["type"], "transfers": o.card["transfers"],
@@ -509,4 +625,4 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         leg=best.leg, timing=best.timing, places=dict(best.places), routes=summary,
         basis=best.times["basis"], depart_at=best.times["depart_at"], total_seconds=best.result.total_seconds,
         has_target=arrive_by is not None))
-    return _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요")
+    return _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요", explain_todos=False)

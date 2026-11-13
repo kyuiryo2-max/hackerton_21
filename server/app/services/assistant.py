@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from app import config
 from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
-from app.services import demo, live, llm, planner, rules
+from app.services import demo, live, llm, planner, rules, trip
 from app.services.planner import ACTIVE, KST, STATUS, _demo_place
 from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, decide_stops
 from app.services.timecalc import travel_minutes_from_seconds, wait_minutes_from_seconds
@@ -616,8 +616,11 @@ HANDLERS = {
 }
 
 
-def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = None) -> dict:
-    """질문을 분류하고 순서대로 계산해 답해요. 질문과 답변은 messages에 저장해요 (demo 제외)."""
+def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = None,
+        trip_context: trip.TripIn | None = None) -> dict:
+    """질문을 분류하고 순서대로 계산해 답해요. 질문과 답변은 messages에 저장해요 (demo 제외).
+
+    trip_context: 이동 중이면 지금 단계와 시각 (11/13). 남은 시간·다음 차·늦어짐은 이 값으로 답해요."""
     # demo는 부스에서 여러 사람이 함께 써서, 앞사람 질문이 섞이지 않게 기록도 이전 대화도 쓰지 않아요
     keep_history = user_id != DEMO_USER_ID
     history = repo.recent_messages(user_id) if keep_history else []
@@ -628,6 +631,7 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
         repo.add_message(user_id, "user", text, intents)
 
     result, results, answers = None, [], []
+    used_trip = False
     state = {"user_id": user_id, "text": text, "elapsed": 0, "todo": None, "todos": [],
              "stopovers": sum(i["intent"] == "stopover_check" for i in intents)}
     if classified["needs_confirm"]:
@@ -635,7 +639,10 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
     else:
         for item in intents:
             name = item["intent"]
-            if name == "unsupported":
+            by_trip = trip.answer(item, trip_context, text) if trip_context is not None else None
+            if by_trip is not None:
+                (result, answer), used_trip = by_trip, True
+            elif name == "unsupported":
                 result, answer = {"intent": "unsupported"}, UNSUPPORTED_ANSWER
             elif name in NEEDS_TRANSIT and not use_demo:
                 if name in LIVE_HANDLERS:
@@ -660,7 +667,9 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
 
     # #37: AI 답변 문장 생성 및 숫자 대조 검증 (기존 코드 안전망 유지)
     should_explain = explain_with_ai if explain_with_ai is not None else config.EXPLAIN_WITH_AI
-    if should_explain and _ai_ready() and results and not classified["needs_confirm"] and _ai_sentence_ok(intents, results):
+    # 이동 중 단계 답변은 앱 시각으로 만든 짧은 문장이라 AI로 다듬지 않아요
+    if (should_explain and not used_trip and _ai_ready() and results and not classified["needs_confirm"]
+            and _ai_sentence_ok(intents, results)):
         # 질문이 여러 개면 결과 목록을 함께 줘서 AI가 하나의 답으로 이어 말하게 해요
         answer = llm.explain_result(text, results if len(results) > 1 else results[0], answer,
                                     check=lambda a: _ai_content_ok(a, results))

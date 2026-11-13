@@ -263,6 +263,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     }
   }
 
+  /// 경로 카드 기본 순서: 소요 시간이 짧은 순
+  static int _fastestFirst(RouteCandidate a, RouteCandidate b) => a.totalMinutes.compareTo(b.totalMinutes);
+
   Future<void> _loadScheduleRoutes(Schedule schedule) async {
     if (_origin == null || _scheduleDestination == null) return;
     final serial = ++_scheduleRequestSerial;
@@ -284,10 +287,11 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             originLng: _origin!.longitude,
           );
           if (!mounted || serial != _scheduleRequestSerial) return;
+          // 할 일을 적용하기 전에는 빠른 경로부터 보여 줘요 (11/13)
           final routes = [
             for (var i = 0; i < plan.routes.length; i++)
               ServerRouteAdapter.fromPlan(plan.routes[i], i),
-          ];
+          ]..sort(_fastestFirst);
           if (routes.isEmpty) throw StateError('서버에서 추천 가능한 경로가 없습니다.');
           activeRouteController.setSearch(ActiveRouteSelection(
             routes: routes, selectedId: routes.first.id,
@@ -303,7 +307,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
           desiredArrivalTime: schedule.startTime, originPlace: _origin, destinationPlace: _scheduleDestination,
         ));
         if (!mounted || serial != _scheduleRequestSerial) return;
-        final routes = result.routes;
+        final routes = [...result.routes]..sort(_fastestFirst);
         if (routes.isNotEmpty) {
           activeRouteController.setSearch(ActiveRouteSelection(
             routes: routes, selectedId: routes.first.id,
@@ -353,7 +357,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         desiredArrivalTime: _manualArrival!, originPlace: _manualOrigin, destinationPlace: _manualDestination,
       ));
       if (!mounted || serial != _manualRequestSerial) return;
-      final routes = result.routes;
+      final routes = [...result.routes]..sort(_fastestFirst);
       if (routes.isNotEmpty) {
         _manualIsActive = true;
         activeRouteController.setSearch(ActiveRouteSelection(
@@ -373,7 +377,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     required ValueChanged<String> onSelect, required bool loading, required String? error,
     required String originName, required String destinationName, DateTime? arrival,
     Place? origin, Place? destination, String? title,
-    ActiveRouteSelection? selection}) {
+    ActiveRouteSelection? selection, VoidCallback? onRefresh}) {
     final plan = selection?.plan;
     final planNow = plan == null ? null : DateTime.tryParse('${plan.data['now'] ?? ''}');
     final todos = TodoScope.of(context).todos;
@@ -393,6 +397,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       destination: destination == null ? null : LatLng(destination.latitude, destination.longitude),
       onManageSchedule: widget.onOpenPlanner,
       onOpenAssistant: widget.onOpenAssistant,
+      onRefresh: onRefresh,
       fallbackNeed: (t) {
         for (final todo in todos) {
           if (todo.title == t && todo.estimatedMinutes > 0) return todo.estimatedMinutes;
@@ -523,7 +528,13 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             arrival: active.arrival, selection: active,
             title: _manualIsActive ? null : schedule?.title,
             origin: _manualIsActive ? _manualOrigin : _origin,
-            destination: _manualIsActive ? _manualDestination : _scheduleDestination),
+            destination: _manualIsActive ? _manualDestination : _scheduleDestination,
+            // 실시간 정보 새로고침 (11/13): 직접 검색이면 그 검색을, 아니면 다음 일정 경로를 다시 불러와요
+            onRefresh: _manualIsActive
+                ? _loadManualRoutes
+                : (schedule != null && _origin != null && _scheduleDestination != null
+                    ? () => _loadScheduleRoutes(schedule)
+                    : null)),
         ] else if (schedule == null && !ApiConfig.demoMode) ...[
           const Card(child: Padding(padding: EdgeInsets.all(18),
             child: Text('등록된 미래 일정이 없습니다. 일정 탭에서 목적지와 도착 시간을 등록하면 실제 경로를 계산할 수 있어요.'))),

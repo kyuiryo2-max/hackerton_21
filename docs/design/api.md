@@ -82,7 +82,7 @@
   - 카카오 경로 최대 3개. 처음·마지막 도보는 카카오 도보, 첫 탑승 구간은 서울시 버스·지하철 실시간. 실시간 뒤로는 배차 간격으로 1시간까지 이어 붙여 계산
   - 들를 곳은 탑승 정류장 300m 안에서 찾는다. 할 일의 장소 종류를 **모두** 찾아 합치고(예: 이어폰 → 편의점·다이소), 직선거리로 가까운 3곳만 도보 시간을 재서 `candidates`로 보여 준다 (#62, 11/12). 계산은 도보가 가장 짧은 첫 번째 후보로 한다. 후보 도보 시간은 동시에 묻는다
   - 머무는 시간은 할 일의 `stay_minutes`, 없으면 4분
-  - 경로 순서: 필수 할 일을 넣는 경로 → 할 일을 많이 넣는 경로 → 빨리 도착하는 경로. 할 일 상태는 1번 경로 기준
+  - 경로 순서: 빨리 도착하는 경로부터 (11/13). 경로 카드의 시간(`total_min`, 출발·탑승·도착, `max_stay_min`)은 할 일을 넣지 않고 바로 갈 때 값이다. 할 일 판정(포함·제외·후보)은 그대로 주고, 사용자가 할 일을 적용하면 앱이 "들를 수 있는 경로 → 빠른 경로"로 다시 정렬하고 경유 시간을 계산한다. 할 일 상태는 1번 경로 기준
   - 실시간을 못 찾으면 대기 0으로 계산하고 `has_realtime: false`. 근처에 장소가 없으면 시연과 같이 필수 `대기`·선택 `제외`, 저장 안 함
   - 오류: `origin` 없음 422, 일정 없음 404 `not_found`, 경로 없음 404 `no_route`, 키 없음 503, 카카오 실패 502
   - 외부 호출은 한 번에 약 30번(카카오 도보가 가장 많음), 같은 구간을 다시 계산하면 저장값으로 약 10번. 후보 3곳(#62)으로 할 일 하나당 도보가 최대 3번까지 늘어난다
@@ -93,12 +93,22 @@
 - `routes[].legs[]` (11/13): 구간 목록. 처음 도보 → 버스·지하철 → 환승 도보 → … → 마지막 도보
   - `type`(`WALK`/`BUS`/`SUBWAY`), `name`(노선, 도보는 "도보"·"환승 도보"), `from`→`to`(정류장, 처음·끝은 "출발지"·"도착지"), `minutes`, `stop_count`(버스·지하철), `points`(지도에 그릴 `[경도, 위도]` 최대 40개)
 - `routes[]`: 경로 카드 2~3개. `total_min`, `wait_min`, `moving_min`, `transfers`, `fare`, `max_stay_min`(경유지에서 쓸 수 있는 최대 시간, 0이면 경유 불가)
+  - `ride_name`: 안내에 쓰는 노선 이름. 버스는 "2115번", 지하철은 "6호선" (11/13)
+  - `next_vehicles_min`: 탈 정류장에 곧 오는 차 최대 2대(실시간으로 받은 앞 차), 계획한 시각(`now`)부터 몇 분 뒤인지. 실시간이 없으면 `[]` (11/13)
+  - `board_in_min`: 그중 타는 차가 몇 분 뒤인지. 실시간이 없으면 `null`
+  - `legs[]`의 처음·마지막 도보 `points`는 카카오 도보 경로의 실제 길 모양이다. 못 받으면 두 점 직선 (11/13)
+- 실제 모드 `todos[].place`·`candidates[]` 도보 (11/13): `walk_to_min`(출발지 → 장소), `walk_back_min`(장소 → 탑승 정류장), `walk_to_points`·`walk_back_points`(길 모양 [[경도, 위도], ...]). `detour_min`은 바로 갈 때보다 더 걷는 분이다
+- 병원 할 일은 문장에 진료과(피부과, 내과, 치과, 정신과 등)가 있으면 그 진료과만 찾는다 (11/13, `places.SPECIALTIES`)
 - `todos[]`: 할 일마다 `status`(포함/제외/대기)와 들를 장소(`place`, 좌표 `lng`·`lat` 포함). 대기면 `options`를 버튼으로 보여 준다
   - `stay_min`: 머무는 시간(분). 할 일의 `stay_minutes`, 없으면 4분 (시연은 시나리오 값)
   - `candidates[]`: 경유 후보 최대 3곳 (`place_type`, `name`, `address`, `lng`, `lat`, `detour_min`). 첫 번째가 `place`와 같다
 - `explanation`: 지금은 계산값으로 만든 정해진 문장. AI 문장(#36)이 붙으면 숫자가 계산과 다를 때 이 문장으로 바뀐다 (`llm.numbers_match`)
 
 **`/api/ask`** ([ask.json](api-examples/ask.json))
+
+- 이동 중 (11/13): 요청에 `trip`을 붙이면 남은 시간(`time_left`)·다음 차(`next_vehicle`)·늦어짐(`running_late`)을 그 값으로 답한다. 시각은 앱이 계산한 값이고 서버는 뺄셈만 한다. AI 문장 다듬기는 하지 않는다 (`services/trip.py`)
+  - `trip`: `phase`(`to_place` 경유지로 가는 중 / `at_place` 경유지에 있음 / `to_stop` 정류장으로 / `waiting` 차 기다림 / `riding` 타는 중 / `arrived` 도착), `now`, `place_name`, `leave_place_at`, `stop_name`, `board_at`, `ride_name`, `arrive_at`, `destination`, `next_vehicles_min`
+  - `result`에 `phase`와 계산한 `minutes`(또는 `slack_minutes`, `on_time`)가 들어간다
 - `intents`, `needs_confirm`, `question`: json-format.md 2번 그대로
 - `needs_confirm: true` 면 `result: null`, 앱은 `question`을 대화창에 보여 준다
 - `todo`: 들르기 질문으로 저장된 할 일 (`source: 질문`, `importance: 필수`). 아니면 `null`

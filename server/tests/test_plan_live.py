@@ -32,8 +32,13 @@ def world(monkeypatch):
     w = {"routes": ROUTES, "bus": [600, 1200], "places": {"편의점": [CU]}}
     monkeypatch.setattr(planner.kakao, "transit_routes", lambda s, e, **kw: w["routes"])
     monkeypatch.setattr(planner.kakao, "walk_seconds", lambda s, e, via=None, **kw: 300 if via else 120)
+    # 실제 모드 도보: 출발지 → 정류장 120초, 경유하면 출발지 → 장소 150초 + 장소 → 정류장 150초 (11/13)
+    monkeypatch.setattr(planner.kakao, "walk_route", lambda s, e, via=None, **kw: (
+        {"seconds": 300, "legs": [{"seconds": 150, "points": [list(s), [9.0, 9.0]]},
+                                  {"seconds": 150, "points": [[9.0, 9.0], list(e)]}]} if via else
+        {"seconds": 120, "legs": [{"seconds": 120, "points": [list(s), [5.0, 5.0], list(e)]}]}))
     monkeypatch.setattr(planner.places, "search_by_place_type",
-                        lambda t, center, radius_m=300, size=1: w["places"].get(t, []))
+                        lambda t, center, radius_m=300, size=1, **kw: w["places"].get(t, []))
     monkeypatch.setattr(planner.seoul_bus, "match_leg", lambda leg: {"arrival": {
         "first_seconds": w["bus"][0], "second_seconds": w["bus"][1], "interval_minutes": 10}})
     monkeypatch.setattr(planner.seoul_subway, "match_leg", lambda leg: {"trains": [{"seconds": 300}]})
@@ -65,7 +70,9 @@ def test_실시간_경로_카드와_할_일(client, world):
     first = body["routes"][0]
     assert first["first_walk_min"] == 2 and first["has_realtime"] is True
     todo = body["todos"][0]
-    assert (todo["status"], todo["place"]["name"], todo["detour_min"]) == ("포함", "CU 안암역점", 5)
+    # 경유 시간 = 바로 갈 때보다 더 걷는 만큼: 출발지 → CU 150초 + CU → 정류장 150초 − 바로 120초 = 3분 (11/13)
+    assert (todo["status"], todo["place"]["name"], todo["detour_min"]) == ("포함", "CU 안암역점", 3)
+    assert (todo["place"]["walk_to_min"], todo["place"]["walk_back_min"]) == (3, 3)
 
 
 def test_실시간_계산_결과를_할_일에_저장(client, world):
@@ -198,6 +205,16 @@ def walks(world, monkeypatch):
         asked.append(via[0][0])
         return WALK_BY_LNG[via[0][0]]
     monkeypatch.setattr(planner.kakao, "walk_seconds", walk)
+
+    def route(s, e, via=None, **kw):
+        # 실제 모드: 출발지 → 장소 → 정류장. 바로 가는 120초보다 WALK_BY_LNG 만큼 더 걸어요
+        if not via:
+            return {"seconds": 120, "legs": [{"seconds": 120, "points": []}]}
+        asked.append(via[0][0])
+        total = 120 + WALK_BY_LNG[via[0][0]]
+        return {"seconds": total, "legs": [{"seconds": total // 2, "points": []},
+                                           {"seconds": total - total // 2, "points": []}]}
+    monkeypatch.setattr(planner.kakao, "walk_route", route)
     world["places"] = {"편의점": [{**CU, "distance_m": 80}, GS], "다이소": [DAISO]}
     return asked
 
@@ -405,6 +422,32 @@ def test_일정이_멀면_도착_시각에서_거꾸로_출발_시각을_계산(
     assert card["depart_at"] == body["depart_at"]
 
 
+def test_적용_안_한_할_일은_탑승_시각에_안_들어감(client, world):
+    # 11/13: 할 일을 적용 안 했는데 "대기 57분, 18:23 탑승"(도착 17:55보다 늦음)으로 나오던 문제
+    setup_user(client, hours=5)
+    body = plan(client).json()
+    assert body["todos"][0]["status"] == "포함"  # 할 일 판정은 그대로 줘요
+    card = body["routes"][0]
+    depart, board, arrive = (datetime.fromisoformat(card[k]) for k in ("depart_at", "board_at", "arrive_at"))
+    assert board - depart == timedelta(minutes=card["first_walk_min"])  # 처음 도보만
+    assert depart < board < arrive
+
+
+def test_가까운_일정은_곧_오는_차와_탈_차를_알려_줌(client, world):
+    # 11/13: 지도앱처럼 "2분 뒤 · 11분 뒤"를 카드에 보여 주려고
+    setup_user(client)  # 40분 뒤
+    card = next(r for r in plan(client).json()["routes"] if r["type"] == "BUS")
+    assert card["next_vehicles_min"][:2] == [10, 20]  # 가짜 버스: 600초, 1200초
+    assert card["board_in_min"] in card["next_vehicles_min"]
+    assert card["ride_name"].endswith("번")
+
+
+def test_일정이_멀면_곧_오는_차는_비어_있음(client, world):
+    setup_user(client, hours=5)
+    card = plan(client).json()["routes"][0]
+    assert card["next_vehicles_min"] == [] and card["board_in_min"] is None
+
+
 def test_출발이_임박하면_실시간_차로_탈_차를_정함(client, world):
     setup_user(client)  # 40분 뒤
     body = plan(client).json()
@@ -502,3 +545,24 @@ def test_새벽처럼_실시간이_없으면_이유를_안내(client, world, mon
     plan(client)
     answer = client.post("/api/ask", json={"user_id": "u1", "text": "다음 버스 언제야?", "demo": False}).json()["answer"]
     assert answer.startswith("지금은 2115번 실시간 도착 정보가 없어요.") and "마을버스" in answer
+
+
+def test_도보는_실제_길_모양으로_그림(client, world):
+    # 11/13: 출발지 → 정류장 도보가 지도에 직선으로 그려지던 문제
+    setup_user(client)
+    legs = plan(client).json()["routes"][0]["legs"]
+    assert legs[0]["type"] == "WALK" and [5.0, 5.0] in legs[0]["points"]
+
+
+def test_경유지_도보는_출발지에서_가게_가게에서_정류장(client, world):
+    # 11/13: 화면에 "현재 위치 → 가게 도보 3분"으로 나와 출발지 → 정류장 12분이 빠지던 문제
+    setup_user(client, hours=5)
+    place = plan(client).json()["todos"][0]["place"]
+    assert (place["walk_to_min"], place["walk_back_min"]) == (3, 3)
+    assert place["walk_to_points"][-1] == [9.0, 9.0] and place["walk_back_points"][0] == [9.0, 9.0]
+
+
+def test_경유_구간이_하나로_오면_장소에서_나눔():
+    points = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]
+    to, back, to_pts, back_pts = planner._split_at(points, 300, (1.0, 0.1))
+    assert (to, back) == (100, 200) and to_pts[-1] == back_pts[0] == [1.0, 0.0]
