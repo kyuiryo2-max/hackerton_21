@@ -211,7 +211,7 @@ def _ai_on(tmp_path, monkeypatch, intents):
     database.init_db()
     database.seed_demo_data()
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
-    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+    monkeypatch.setattr(assistant, "_classify", lambda text, history, context=None: {
         "type": "question", "intents": intents, "needs_confirm": False, "question": None, "engine": "ai"})
 
 

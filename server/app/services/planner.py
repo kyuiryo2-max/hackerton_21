@@ -499,8 +499,12 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
         return None
     first, last = legs[0], legs[-1]
     # 현재 좌표가 들어간 호출은 서버 메모리에 5분만 기억해요 (PR #29 리뷰 → 11/13 호출 한도 때문에 바꿈)
-    first_route = kakao.walk_route(origin, tuple(first["start"]), ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
-    last_route = kakao.walk_route(tuple(last["end"] or last["start"]), destination)
+    # 처음·마지막 도보도 서로 상관없어서 동시에 물어봐요 (11/14)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_job = pool.submit(kakao.walk_route, origin, tuple(first["start"]),
+                                ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+        last_job = pool.submit(kakao.walk_route, tuple(last["end"] or last["start"]), destination)
+        first_route, last_route = first_job.result(), last_job.result()
     first_walk = first_route["seconds"] if first_route else None
     last_walk = last_route["seconds"] if last_route else None
     # 지도에 도보를 실제 길 모양으로 그리려고 좌표도 받아요 (11/13). 못 받으면 직선
@@ -611,9 +615,13 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
     try:
         routes = kakao.transit_routes(origin, dest, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
         place_cache: dict = {}
-        options = [o for r in routes[:MAX_ROUTES]
-                   if (o := _live_option(r, origin, dest, todos, place_cache,
-                                         deadline if arrive_by else None))]
+        # 추천 경로 3개는 서로 상관없어서 동시에 계산해요 (11/14: 첫 조회가 오래 걸리던 문제).
+        # 경로마다 도보·장소 검색·실시간 도착을 부르는데, 순서대로 하면 경로 수만큼 기다렸어요.
+        with ThreadPoolExecutor(max_workers=MAX_ROUTES) as pool:
+            found = list(pool.map(lambda r: _live_option(r, origin, dest, todos, place_cache,
+                                                         deadline if arrive_by else None),
+                                  routes[:MAX_ROUTES]))
+        options = [o for o in found if o]
     except kakao.KakaoError as e:
         # Render 로그에서 원인을 볼 수 있게 남겨요 (키·좌표는 오류 문장에 없어요)
         log.warning("실제 모드 경로 계산 실패: %s", e)
@@ -648,7 +656,8 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         planned_at=now, arrive_by=arrive_by or now + timedelta(seconds=NOW_TRIP_DEADLINE_SECONDS),
         leg=best.leg, timing=best.timing, places=dict(best.places), routes=summary,
         basis=best.times["basis"], depart_at=best.times["depart_at"], total_seconds=best.result.total_seconds,
-        has_target=arrive_by is not None))
+        has_target=arrive_by is not None, destination=dest,
+        destination_name=schedule_out["destination"]["name"]))
     out = _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요", explain_todos=False)
     # 오늘 도보 한도를 다 써서 도보 시간을 직선거리로 어림했으면 앱이 알 수 있게 표시해요 (11/13)
     out["walk_estimated"] = kakao.walk_quota_used_up()

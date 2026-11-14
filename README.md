@@ -93,7 +93,7 @@ server/                 FastAPI 서버
     routers/            API 주소
     services/
       timecalc.py       출발·준비 시각, 최대로 쓸 수 있는 시간 (외부 호출 없는 계산)
-      llm.py            OpenRouter 호출, 장소 목록 검사, 답변 숫자 대조
+      llm.py            LLM(OpenAI 호환) 호출, 장소 목록 검사, 답변 숫자 대조
       kakao.py          주소, 장소, 대중교통·도보 경로 (같은 구간은 메모리에 잠시 저장)
     prompts/v1/         프롬프트 버전 (v1, v2 …)
     db/database.py      SQLite 테이블, 시연용 데이터 자동 입력
@@ -136,8 +136,19 @@ cp .env.example .env           # 저장소 루트에서. 키 값 채우기
 cd server
 uv sync
 uv run uvicorn app.main:app --reload
-# http://127.0.0.1:8000/health
-# http://127.0.0.1:8000/docs   (API 직접 호출해 보기)
+# http://127.0.0.1:8000/console (브라우저에서 질문·할 일 분석을 눌러 보는 테스트 콘솔)
+# http://127.0.0.1:8000/docs    (API 직접 호출해 보기)
+```
+
+Flutter 앱을 띄우지 않아도 `/console`에서 API를 그대로 눌러 볼 수 있어요. 같은 서버가 페이지를 서빙해서 CORS·mixed content 문제가 없습니다. 답변 위의 `engine` 배지가 `ai`면 모델 호출 성공, `rule`이면 키워드 규칙 폴백이에요.
+
+프롬프트는 v3(`server/app/prompts/v3/`)를 써요. AI 응답을 5초 기다리고, 넘으면 키워드 규칙(`engine: "rule"`)으로 답합니다.
+
+키·모델이 실제로 도는지 확인 (호출 2번, `ai/results/llm_first_call.json`에 기록):
+
+```bash
+cd server
+uv run python ../scripts/check_llm.py
 ```
 
 테스트:
@@ -162,6 +173,27 @@ cd app/Sync_ro_app
 flutter pub get
 flutter run -d chrome --dart-define=API_BASE_URL=http://127.0.0.1:8000
 ```
+
+빌드 결과물을 서버가 같이 서빙하게 할 수도 있어요. 그러면 앱과 API가 같은 주소라 CORS·mixed content가 없어요.
+
+```bash
+cd app/Sync_ro_app
+flutter build web --release --base-href /app/ \
+  --dart-define=API_BASE_URL=http://127.0.0.1:8000 \
+  --dart-define=SYNC_RO_OFFLINE_DEMO=false \
+  --dart-define=SYNC_RO_USE_REAL_PLACES=true
+# 그리고 서버 재시작 → http://127.0.0.1:8000/app
+```
+
+`app/Sync_ro_app/build/web` 이 있을 때만 `/app` 경로가 열려요 (없으면 그냥 404).
+
+> 경로에 한글이 들어 있으면(`...\기본 프로젝트\...`) 셰이더 컴파일러가 죽어서 `flutter build web` 이 실패할 수 있어요. 그럴 때는 ASCII 경로에서 빌드하세요:
+>
+> ```powershell
+> cmd /c mklink /J C:\temp\teumgil "C:\Users\<사용자>\Documents\기본 프로젝트\hackerton_21"
+> cd C:\temp\teumgil\app\Sync_ro_app
+> flutter build web --release --base-href /app/ --dart-define=API_BASE_URL=http://127.0.0.1:8000
+> ```
 
 배포 후에는 서버의 CORS 허용 목록(`server/app/main.py`, 지금은 전체 허용)을 앱 주소로 좁힌다.
 

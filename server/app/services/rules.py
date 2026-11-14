@@ -43,6 +43,54 @@ _DELAY = re.compile(r"(\d+)\s*분")
 _BUY = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:사야|사러|살\s*거)")
 _SKIP = re.compile(r"^(.+?)\s*(?:은|는)?\s*안\s*(?:사도|해도)")
 
+# v3 폴백: 일정/할 일 추가 (AI가 없을 때도 버튼이 뜨게)
+_FUTURE_PREFIX = re.compile(r"^(?:(?:나중에|이따가|이따|오늘|저녁에|밤에|내일|모레|다음에|집\s*가서|집에\s*가서)\s*)+")
+_FUTURE_WORDS = ("나중에", "이따", "저녁에", "내일", "모레", "다음에", "집 가서", "집에 가서")
+_TODO_WORDS = ("사야", "해야", "찾아야", "사기", "하기", "챙겨")
+_SCHEDULE_WORDS = ("일정", "약속", "스케줄", "예약", "스케쥴")
+_SCHEDULE_REQ = ("추가", "등록", "잡아", "넣어", "만들어", "저장", "기억해")
+_SCHEDULE_NOISE = re.compile(
+    r"(오늘|내일|모레|글피|이번\s*주|다음\s*주|[월화수목금토일]요일|오전|오후|아침|점심|저녁|밤|"
+    r"\d{1,2}\s*월|\d{1,2}\s*일|\d{1,2}\s*시(?:\s*\d{1,2}\s*분|\s*반)?|"
+    r"일정|약속|스케줄|스케쥴|예약|추가|등록|잡아|넣어|만들어|저장|기억해|해\s*줘|해줘|줘|좀|에서|으로|에)")
+_SCHEDULE_LOCATION = re.compile(r"([가-힣A-Za-z0-9]{2,}?(?:역|공항|터미널|병원|학교|회사))")
+
+
+# "커피 샀어", "나 이어폰 샀어", "현금 뽑았어" → 할 일 완료 (11/14 사용 테스트: 키워드 규칙이 범위 밖으로 분류)
+_DONE = re.compile(r"^(?:아\s*)?(?:나\s+)?(.+?)\s*(?:은|는|을|를|도)?\s*(?:다\s*)?(?:샀어|샀다|샀음|샀어요|뽑았어|찾았어|부쳤어)\s*[.!~]*$")
+# "환승역에서", "환승하기 전에"는 경로 변경(환승 적은 길)이 아니에요 (인터뷰 P1)
+_TRANSFER_PLACE = re.compile(r"환승\s*(?:역|정류장|하기\s*전|할\s*때|하는\s*곳|전에)")
+_ASK_BUY = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:하나\s*)?사\s*(?:도|가도|고\s*가도|러\s*가도)\s*(?:돼|되|될까|괜찮|안\s*늦)")
+_ASK_STOP = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:잠깐\s*)?(?:들러도|들렀다\s*가도|들렀다가\s*가도|들르면|갔다\s*와도|가도)\s*(?:돼|되|될까|괜찮|안\s*늦)")
+
+
+def _clean_draft_text(text: str) -> str:
+    base = re.sub(r"^[가-힣A-Za-z0-9]+에서\s+", "", text.strip())
+    return base.strip()
+
+
+def _schedule_item(text: str) -> dict | None:
+    """키워드 폴백: '… 일정 추가해 줘' → add_schedule 초안 (이름·목적지만)."""
+    if not any(w in text for w in _SCHEDULE_WORDS) or not any(w in text for w in _SCHEDULE_REQ):
+        return None
+    found = _SCHEDULE_LOCATION.search(text)
+    location = found.group(1) if found else ""
+    title = _SCHEDULE_NOISE.sub(" ", text)
+    if location:
+        title = title.replace(location, " ")
+    title = " ".join(title.split()).strip(" .!?~,")
+    return {"intent": "add_schedule", "title": title, "location": location, "place_types": []}
+
+
+def _is_future_todo(text: str) -> bool:
+    """키워드 폴백: '나중에/이따/저녁에 … 사야 해' → add_todo."""
+    return any(w in text for w in _FUTURE_WORDS) and any(w in text for w in _TODO_WORDS)
+
+
+def _todo_item(text: str) -> dict:
+    return {"intent": "add_todo", "text": todo_text(text), "place_types": place_types_in(text),
+            "importance": "필수" if any(w in text for w in REQUIRED_WORDS) else None}
+
 
 def place_types_in(text: str) -> list[str]:
     allowed = set(place_types())
@@ -51,9 +99,28 @@ def place_types_in(text: str) -> list[str]:
 
 
 def todo_text(text: str) -> str:
-    """'아 이어폰 사야 돼' → '이어폰 사기'. 모양을 모르면 원문 그대로예요."""
-    m = _BUY.search(text.strip())
-    return f"{m[1].strip()} 사기" if m and m[1].strip() else text.strip()
+    """'아 이어폰 사야 돼' → '이어폰 사기'. '나중에 약국에서 약 사기' → '약 사기'."""
+    t = _FUTURE_PREFIX.sub("", text.strip())
+    m = _BUY.search(t)
+    if m and m[1].strip():
+        return f"{m[1].strip()} 사기"
+    # 질문형 (11/14): "커피 사도 돼?" → 커피 사기, "편의점 들러도 돼?" → 편의점 들르기
+    m = _ASK_BUY.search(t)
+    if m and m[1].strip():
+        return f"{_clean_draft_text(m[1])} 사기"
+    m = _ASK_STOP.search(t)
+    if m and m[1].strip():
+        return f"{_clean_draft_text(m[1])} 들르기"
+    m = re.search(r"(.+?)\s*사기", t)
+    if m:
+        return f"{_clean_draft_text(m[1])} 사기"
+    m = re.search(r"(.+?)\s*찾아야", t)
+    if m:
+        return f"{_clean_draft_text(m[1])} 찾기"
+    m = re.search(r"(.+?)\s*해야", t)
+    if m:
+        return f"{_clean_draft_text(m[1])} 하기"
+    return t
 
 
 def parse_todo(text: str) -> dict:
@@ -88,22 +155,41 @@ def _intent(name: str, text: str) -> dict:
 
 def classify_question(text: str) -> dict:
     """질문 → 질문 종류 (json-format.md 2번 모양). 장소나 지연 시간이 빠지면 되물어요."""
-    names = [n for n, words in INTENT_WORDS.items() if any(w in text for w in words)]
+    # v3: 일정 추가·나중에 할 일은 다른 키워드보다 먼저 봐요
+    intents: list[dict] = []
+    schedule = _schedule_item(text)
+    if schedule is not None:
+        intents = [schedule]
+    elif _is_future_todo(text):
+        intents = [_todo_item(text)]
+    done = None if intents else _DONE.match(text.strip())
+    if done:
+        intents = [{"intent": "change_todo", "place_types": [], "delay_minutes": None,
+                    "action": "done", "todo_text": done[1].strip()}]
+    names = [] if intents else [n for n, words in INTENT_WORDS.items() if any(w in text for w in words)]
+    if "change_route" in names and _TRANSFER_PLACE.search(text):
+        names.remove("change_route")
+    # "다른 카페도 안 될까?": 장소 종류가 있는데 다른 질문 종류가 안 잡히면 들르기예요 (앞 답변 말고 다른 곳)
+    if not intents and not names and "다른" in text and place_types_in(text):
+        names = ["stopover_check"]
     # "안 사도 돼"는 빼기예요. "사도"만으로 들르기가 잡혔으면 들르기를 지워요
     if "change_todo" in names and "stopover_check" in names and not any(w in text for w in STOPOVER_ONLY):
         names.remove("stopover_check")
     # "몇 분 늦어"는 늦어짐이에요
     if "running_late" in names and "time_left" in names:
         names.remove("time_left")
-    intents = [_intent(n, text) for n in names] or [_intent("unsupported", text)]
+    intents = intents or [_intent(n, text) for n in names] or [_intent("unsupported", text)]
     missing_place = any(i["intent"] in ("stopover_check", "place_info") and not i["place_types"] for i in intents)
     missing_delay = _delay_unknown(intents, text)
-    needs_confirm = missing_place or missing_delay
+    missing_title = any(i["intent"] == "add_schedule" and not i.get("title") for i in intents)
+    needs_confirm = missing_place or missing_delay or missing_title
     question = None
     if missing_place:
         question = "어디를 들르고 싶은지 알려 줄래요?"
     elif missing_delay:
         question = "몇 분 늦을 것 같아요?"
+    elif missing_title:
+        question = "무슨 일정인지 알려 줄래요?"
     return {
         "type": "question",
         "intents": intents,

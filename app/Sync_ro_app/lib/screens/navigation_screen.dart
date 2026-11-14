@@ -138,6 +138,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       // Manual searches have no server schedule id, so do not fabricate a
       // stopover plan; ask the user to run the search again.
       if (_manualIsActive) {
+        activeRouteController.takeReplanFrom();
         activeRouteController.clearSearch();
         setState(() {
           _manualIsActive = false;
@@ -149,6 +150,11 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       final schedule = _explicitSchedule ??
           _nextSchedule(ScheduleScope.of(context).schedules);
       if (schedule == null) return;
+      // 이동 중 경유지를 바꿨으면 이동 중 팝업의 지금 위치(시간 기준)에서 다시 계산해요 (11/14)
+      final from = activeRouteController.takeReplanFrom();
+      if (from != null) {
+        _origin = Place(id: 'trip_point', name: from.name, address: '', latitude: from.lat, longitude: from.lng);
+      }
       if (_origin != null && _scheduleDestination != null) {
         _loadScheduleRoutes(schedule);
       } else if (_origin == null && schedule.originMode != 'place' && !_autoLocating) {
@@ -452,6 +458,19 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     });
   }
 
+  /// 출발지를 현재 위치로 (#51 피드백 2)
+  Future<void> _useCurrentAsManualOrigin() async {
+    await _useCurrentLocation();
+    if (!mounted) return;
+    final here = _origin;
+    if (here == null || here.id != 'device_current_location') return; // 위치를 못 받으면 _useCurrentLocation 이 안내해요
+    setState(() {
+      _manualOrigin = here;
+      _manualOriginController.text = here.name;
+      _manualError = null;
+    });
+  }
+
   Future<void> _pickManualArrival() async {
     final now = DateTime.now();
     final initial = _manualArrival?.isAfter(now) == true ? _manualArrival! : now.add(const Duration(hours: 1));
@@ -751,7 +770,16 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         if (_manualExpanded) ...[
           const SizedBox(height: 8),
           TextField(controller: _manualOriginController, readOnly: true, onTap: () => _pickManualPlace(origin: true), decoration: InputDecoration(labelText: '출발지', prefixIcon: const Icon(Icons.my_location), suffixIcon: IconButton(onPressed: () => _pickManualPlace(origin: true), icon: const Icon(Icons.search)), border: const OutlineInputBorder())),
-          const SizedBox(height: 12),
+          // 현재 위치로 (#51 피드백 2). 출발지↔목적지 바꾸기(피드백 7)는 이동 탭 맨 위 ⇅ 버튼 하나로 (11/14)
+          Row(children: [
+            TextButton.icon(
+              onPressed: _locating ? null : _useCurrentAsManualOrigin,
+              icon: _locating
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.gps_fixed, size: 18),
+              label: const Text('현재 위치로'),
+            ),
+          ]),
           TextField(controller: _manualDestinationController, readOnly: true, onTap: () => _pickManualPlace(origin: false), decoration: InputDecoration(labelText: '목적지', prefixIcon: const Icon(Icons.place), suffixIcon: IconButton(onPressed: () => _pickManualPlace(origin: false), icon: const Icon(Icons.search)), border: const OutlineInputBorder())),
           const SizedBox(height: 12),
           OutlinedButton.icon(onPressed: _pickManualArrival, icon: const Icon(Icons.schedule), label: Text(_manualArrival == null ? '도착 희망시간 선택' : _time(_manualArrival!))),

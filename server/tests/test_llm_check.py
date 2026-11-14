@@ -71,3 +71,64 @@ def test_최근_대화를_AI에_함께_보냄(monkeypatch):
 def test_질문_프롬프트에_되묻기_규칙():
     text = load_prompt("question_intent")
     assert "needs_confirm" in text and "recent_messages" in text
+
+
+def test_응답에_설명이_섞여도_JSON만_꺼냄():
+    out = llm._parse_json_safe('분류 결과입니다. {"intents": [{"intent": "time_left"}]} 이상입니다.')
+    assert out == {"intents": [{"intent": "time_left"}]}
+
+
+def test_json_모드가_거부되면_한_번_더_시도(monkeypatch):
+    """response_format 을 지원하지 않는 모델·게이트웨이는 두 번째 시도로 답을 받아요."""
+    import httpx
+
+    calls = []
+
+    class Resp:
+        def __init__(self, ok, payload):
+            self.ok, self.payload = ok, payload
+
+        def raise_for_status(self):
+            if not self.ok:
+                raise httpx.HTTPStatusError("400", request=None, response=None)
+
+        def json(self):
+            return self.payload
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        if "response_format" in json:
+            return Resp(False, {})
+        return Resp(True, {"choices": [{"message": {"content": '결과: {"intents": []}'}}]})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert llm._chat_json("system", "user") == {"intents": []}
+    assert len(calls) == 2
+    assert "response_format" not in calls[1]
+
+
+def test_요청은_온도_0_json_모드(monkeypatch):
+    """기존 설정 그대로: 온도 0, JSON 모드 (기준 문서 "temperature는 0")."""
+    payload = llm._payload("system", "user", json_mode=True)
+    assert payload["temperature"] == 0
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["model"] == llm.config.LLM_MODEL
+    assert "temperature" in llm._payload("system", "user", json_mode=False)
+
+
+def test_시간_초과면_다시_부르지_않음(monkeypatch):
+    """AI가 5초 안에 답하지 않으면 한 번만 기다리고 키워드 규칙으로 넘어가요 (할 일 63번)."""
+    import httpx
+    import pytest
+
+    calls = []
+
+    def slow_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        raise httpx.ReadTimeout("느림")
+
+    monkeypatch.setattr(httpx, "post", slow_post)
+    monkeypatch.setattr(llm, "_client", lambda: (_ for _ in ()).throw(AssertionError("openai 폴백을 부르면 안 돼요")))
+    with pytest.raises(httpx.TimeoutException):
+        llm._chat_json("system", "user")
+    assert len(calls) == 1

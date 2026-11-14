@@ -63,6 +63,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
       final intent = response.result?['intent']?.toString() ??
           (response.intents.isEmpty ? null : response.intents.first['intent']?.toString());
       final draft = ScheduleDraft.fromServerResult(response.result) ??
+          (response.schedule != null ? ScheduleDraft.fromScheduleMap(response.schedule!) : null) ??
           (intent == 'unsupported' || intent == null ? ScheduleDraft.parseLocal(message, DateTime.now()) : null);
       final goPlace = draft == null && (intent == 'unsupported' || intent == null) ? _destinationIn(message) : null;
       final reply = _Message(
@@ -79,8 +80,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
         savedByServer: !ApiConfig.demoMode && response.todo?['id'] != null,
       );
       setState(() => _history.add(reply));
-      // 들를 수 있다고 답한 할 일은 바로 목록에 넣어요 (되돌리기 가능, 11/14)
-      if (reply.todo != null) await _addSuggestedTodo(reply, auto: true);
+      // 들를 수 있다고 답한 할 일만 바로 목록에 넣어요 (되돌리기 가능, 11/14).
+      // 시간이 부족한 들르기, "나중에 ~해야 해"(add_todo)는 자동으로 넣지 않고 버튼으로 확인받아요.
+      if (reply.todo != null && intent == 'stopover_check' && response.result?['feasible'] == true) {
+        await _addSuggestedTodo(reply, auto: true);
+      }
       if (!mounted) return;
       // In real mode /api/ask may have already saved a new todo.
       // Refresh the visible todo list rather than showing an Add button again.
@@ -119,6 +123,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
     // /api/ask persists generated todos for real users. Never POST them again.
     if (!ApiConfig.demoMode && response.todo?['id'] != null) return false;
     final result = response.result ?? const <String, dynamic>{};
+    // 시간이 부족해도 나중에 할 일로는 남길 수 있어요. 서버가 can_add_todo=true 를 주면 버튼을 보여 줘요.
+    if (result['can_add_todo'] == true) return true;
     // Prefer machine-readable server decision rather than a language heuristic.
     if (result['can_add_todo'] == false || result['feasible'] == false ||
         result['can_stop'] == false || result['status'] == '제외' ||
@@ -312,9 +318,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
         await _finishVoice();
         return;
       }
-      if (!_speechReady) {
-        _speechReady = await _speech.initialize(onStatus: _onSpeechStatus);
-      }
+      // 쓸 때마다 불러서 이 화면의 콜백으로 바꿔요 (이동 중 팝업과 음성 인식을 같이 써요)
+      _speechReady = await _speech.initialize(onStatus: _onSpeechStatus);
       if (!_speechReady) throw Exception('음성 인식이 지원되지 않거나 마이크 권한이 없습니다.');
       _input.clear();
       setState(() => _listening = true);
