@@ -56,6 +56,10 @@ _SCHEDULE_NOISE = re.compile(
 _SCHEDULE_LOCATION = re.compile(r"([가-힣A-Za-z0-9]{2,}?(?:역|공항|터미널|병원|학교|회사))")
 
 
+_ASK_BUY = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:하나\s*)?사\s*(?:도|가도|고\s*가도|러\s*가도)\s*(?:돼|되|될까|괜찮|안\s*늦)")
+_ASK_STOP = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:잠깐\s*)?(?:들러도|들렀다\s*가도|들렀다가\s*가도|들르면|갔다\s*와도|가도)\s*(?:돼|되|될까|괜찮|안\s*늦)")
+
+
 def _clean_draft_text(text: str) -> str:
     base = re.sub(r"^[가-힣A-Za-z0-9]+에서\s+", "", text.strip())
     return base.strip()
@@ -96,6 +100,13 @@ def todo_text(text: str) -> str:
     m = _BUY.search(t)
     if m and m[1].strip():
         return f"{m[1].strip()} 사기"
+    # 질문형 (11/14): "커피 사도 돼?" → 커피 사기, "편의점 들러도 돼?" → 편의점 들르기
+    m = _ASK_BUY.search(t)
+    if m and m[1].strip():
+        return f"{_clean_draft_text(m[1])} 사기"
+    m = _ASK_STOP.search(t)
+    if m and m[1].strip():
+        return f"{_clean_draft_text(m[1])} 들르기"
     m = re.search(r"(.+?)\s*사기", t)
     if m:
         return f"{_clean_draft_text(m[1])} 사기"

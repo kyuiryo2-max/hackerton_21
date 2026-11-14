@@ -228,3 +228,12 @@ def test_들르기와_할일_추가를_한_번에(client, ai):
     assert body["todo"]["text"] == "약 사기"
     assert "들를 수 있어요" in body["answer"]
     assert "약 사기" in body["answer"]
+
+
+def test_질문형_들르기는_할_일_이름을_다듬음():
+    """11/14: '커피 사도 돼?'가 할 일 이름 그대로 저장되던 문제."""
+    from app.services import rules
+    assert rules.todo_text("커피 사도 돼?") == "커피 사기"
+    assert rules.todo_text("편의점 들러도 돼?") == "편의점 들르기"
+    assert rules.todo_text("약국 들렀다 가도 안 늦어?") == "약국 들르기"
+    assert rules.todo_text("아 우유 사야 돼") == "우유 사기"

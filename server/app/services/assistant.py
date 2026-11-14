@@ -188,7 +188,11 @@ def _stop_text(item: dict, state: dict) -> str:
     if state.get("stopovers", 1) > 1 and item["place_types"]:
         return f"{item['place_types'][0]} 들르기"
     # AI 출력에는 들르기 할 일 이름이 없어서 문장에서 다듬어요 ("아 이어폰 사야 돼" → "이어폰 사기")
-    return rules.todo_text(state["text"])
+    text = rules.todo_text(state["text"])
+    if item["place_types"] and (text == state["text"].strip() or text.endswith("?")):
+        # 다듬지 못한 질문 문장을 할 일 이름으로 남기지 않아요 (11/14: 할 일 이름이 "커피 사도 돼?")
+        return f"{item['place_types'][0]} 들르기"
+    return text
 
 
 def _judge_stop(timing, included: list, place: dict, state: dict, deadline: int):

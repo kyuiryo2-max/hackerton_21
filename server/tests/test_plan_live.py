@@ -655,3 +655,11 @@ def test_이동_중_들르기는_저장한_할_일_id를_줌(client, far_plan):
                                       "trip": trip}).json()
     assert r["result"]["feasible"] is True
     assert r["todo"] and r["todo"].get("id")
+
+
+def test_이동_중_들르기_할_일_이름은_질문_문장이_아님(client, far_plan):
+    trip = {"phase": "waiting", "now": datetime.now().astimezone().isoformat(), "stop_name": "정류장",
+            "destination": "목적지", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["todo"]["text"] == "편의점 들르기"
