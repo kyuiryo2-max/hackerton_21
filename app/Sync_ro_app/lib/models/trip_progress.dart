@@ -15,10 +15,34 @@ extension TripPhaseCode on TripPhase {
 }
 
 class TripStep {
-  const TripStep(this.phase, this.start);
+  const TripStep(this.phase, this.start, [this.leg = 0]);
   final TripPhase phase;
   /// 계획상 이 단계가 시작하는 시각
   final DateTime start;
+  /// 몇 번째 탈것 구간의 단계인지 (0 = 첫 차). 정류장으로·기다림·타는 중에만 의미가 있어요
+  final int leg;
+}
+
+/// 갈아타는 다음 탈것 하나 (11/14). 예: 버스에서 내려 1호선으로 환승
+class TripTransfer {
+  const TripTransfer({
+    required this.getOffAt,
+    required this.getOffName,
+    required this.rideName,
+    required this.stopName,
+    required this.reachStop,
+    required this.boardAt,
+  });
+  /// 앞 차에서 내리는 시각·곳
+  final DateTime getOffAt;
+  final String getOffName;
+  /// "1호선", "2115번"
+  final String rideName;
+  /// 갈아탈 정류장·역
+  final String stopName;
+  /// 갈아탈 곳에 걸어서 닿는 시각
+  final DateTime reachStop;
+  final DateTime boardAt;
 }
 
 /// 이동 하나의 계획 시각들. 숫자는 모두 앱 계산값(경로 카드·경유 계산)이에요.
@@ -35,6 +59,7 @@ class TripPlan {
     this.arrivePlace,
     this.leavePlace,
     this.vehicleTimes = const [],
+    this.transfers = const [],
   });
 
   final DateTime depart;
@@ -52,6 +77,8 @@ class TripPlan {
   final DateTime? leavePlace;
   /// 탈 정류장에 곧 오는 차 시각 (실시간이 있을 때만)
   final List<DateTime> vehicleTimes;
+  /// 첫 차 다음에 갈아탈 차들 (버스 → 1호선이면 1개). 없으면 한 번에 가는 경로
+  final List<TripTransfer> transfers;
 
   bool get hasStop => placeName != null && arrivePlace != null && leavePlace != null;
 
@@ -64,6 +91,13 @@ class TripPlan {
       TripStep(TripPhase.toStop, depart),
     TripStep(TripPhase.waiting, reachStop.isAfter(boardAt) ? boardAt : reachStop),
     TripStep(TripPhase.riding, boardAt),
+    // 갈아타기: 내려서 다음 정류장·역으로 걷고, 기다렸다가, 다시 타요 (11/14)
+    for (var i = 0; i < transfers.length; i++) ...[
+      TripStep(TripPhase.toStop, transfers[i].getOffAt, i + 1),
+      TripStep(TripPhase.waiting,
+          transfers[i].reachStop.isAfter(transfers[i].boardAt) ? transfers[i].boardAt : transfers[i].reachStop, i + 1),
+      TripStep(TripPhase.riding, transfers[i].boardAt, i + 1),
+    ],
     TripStep(TripPhase.arrived, arriveAt),
   ]);
 
@@ -74,10 +108,22 @@ class TripPlan {
     final out = <TripStep>[];
     for (final s in raw) {
       final prev = out.isEmpty ? null : out.last.start;
-      out.add(prev != null && s.start.isBefore(prev) ? TripStep(s.phase, prev) : s);
+      out.add(prev != null && s.start.isBefore(prev) ? TripStep(s.phase, prev, s.leg) : s);
     }
     return out;
   }
+
+  /// leg 번째 차의 이름·정류장·탑승 시각 (0 = 첫 차)
+  String rideOf(int leg) => leg == 0 ? rideName : transfers[leg - 1].rideName;
+  String stopOf(int leg) => leg == 0 ? stopName : transfers[leg - 1].stopName;
+  DateTime boardOf(int leg) => leg == 0 ? boardAt : transfers[leg - 1].boardAt;
+  DateTime reachOf(int leg) => leg == 0 ? reachStop : transfers[leg - 1].reachStop;
+
+  /// leg 번째 차가 마지막 차인지 (내리면 목적지 쪽으로 걸어가요)
+  bool isLastLeg(int leg) => leg >= transfers.length;
+
+  /// leg 번째 차에서 내리는 시각. 마지막 차는 목적지 도착 시각을 써요
+  DateTime alightOf(int leg) => isLastLeg(leg) ? arriveAt : transfers[leg].getOffAt;
 
   /// 출발 시각 전인지 (이동 시작을 일찍 눌렀을 때)
   bool beforeDepart(DateTime now) => now.isBefore(depart);
@@ -113,17 +159,19 @@ class TripPlan {
       ];
 
   /// 서버 /api/ask 의 trip 값
-  Map<String, dynamic> toAskJson(TripPhase phase, DateTime now) => {
+  /// 갈아타는 중이면 지금 탈(타고 있는) 차의 정류장·이름·탑승 시각을 보내요 (11/14)
+  Map<String, dynamic> toAskJson(TripPhase phase, DateTime now, [int leg = 0]) => {
         'phase': phase.code,
         'now': _iso(now),
-        if (hasStop) 'place_name': placeName,
-        if (hasStop) 'leave_place_at': _iso(leavePlace!),
-        'stop_name': stopName,
-        'board_at': _iso(boardAt),
-        'ride_name': rideName,
+        if (hasStop && leg == 0) 'place_name': placeName,
+        if (hasStop && leg == 0) 'leave_place_at': _iso(leavePlace!),
+        'stop_name': stopOf(leg),
+        'board_at': _iso(boardOf(leg)),
+        'ride_name': rideOf(leg),
         'arrive_at': _iso(arriveAt),
         'destination': destination,
-        'next_vehicles_min': soonMinutes(now),
+        // 실시간 도착은 첫 차 정류장 것만 있어요
+        'next_vehicles_min': leg == 0 ? soonMinutes(now) : const <int>[],
       };
 
   /// 한국 시간 ISO 8601 (+09:00)

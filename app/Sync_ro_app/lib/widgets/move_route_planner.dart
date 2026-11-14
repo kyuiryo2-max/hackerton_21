@@ -245,6 +245,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final boardAt = given != null && !given.isBefore(reachStop) ? given : reachStop;
     final planNow = DateTime.tryParse('${widget.plan?.data['now'] ?? ''}') ?? widget.now;
     final raw = p?['next_vehicles_min'];
+    final transfers = _transfersOf(segs, boardAt, times.arrive);
     return TripPlan(
       depart: times.depart,
       reachStop: reachStop,
@@ -261,7 +262,52 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           for (final v in raw)
             if (v is num) planNow.add(Duration(minutes: v.toInt())),
       ],
+      transfers: transfers,
     );
+  }
+
+  static bool _isRide(RouteSegment s) => s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway;
+
+  /// 갈아탈 차들 (11/14). 버스 → 1호선처럼 탈것이 두 개 이상이면, 첫 차 탑승 시각부터 구간 시간을 더해
+  /// 내리는 시각 → 걸어서 갈아탈 곳 도착 → 탑승 시각을 차례로 계산해요.
+  /// 이렇게 더한 도착 시각이 카드의 도착 시각과 다르면, 그 차이는 첫 환승 대기 시간으로 맞춰요
+  /// (카드·진행 막대의 도착 시각과 같게 하려고요).
+  static List<TripTransfer> _transfersOf(List<RouteSegment> segs, DateTime boardAt, DateTime arriveAt) {
+    final rides = [for (var i = 0; i < segs.length; i++) if (_isRide(segs[i])) i];
+    if (rides.length < 2) return const [];
+    int sum(int from, int to, RouteSegmentType type) => [
+          for (var i = from; i < to; i++)
+            if (segs[i].type == type) segs[i].durationMinutes,
+        ].fold<int>(0, (a, b) => a + b);
+    final walks = <int>[], waits = <int>[];
+    for (var k = 1; k < rides.length; k++) {
+      walks.add(sum(rides[k - 1] + 1, rides[k], RouteSegmentType.walking));
+      waits.add(sum(rides[k - 1] + 1, rides[k], RouteSegmentType.waiting));
+    }
+    final rideMinutes = [for (final i in rides) segs[i].durationMinutes].fold<int>(0, (a, b) => a + b);
+    final lastWalk = sum(rides.last + 1, segs.length, RouteSegmentType.walking);
+    final planned = rideMinutes + lastWalk + [...walks, ...waits].fold<int>(0, (a, b) => a + b);
+    final slack = arriveAt.difference(boardAt).inMinutes - planned;
+    waits[0] = math.max(0, waits[0] + slack);
+
+    final out = <TripTransfer>[];
+    var t = boardAt.add(Duration(minutes: segs[rides[0]].durationMinutes));
+    for (var k = 1; k < rides.length; k++) {
+      final prev = segs[rides[k - 1]], next = segs[rides[k]];
+      final reach = t.add(Duration(minutes: walks[k - 1]));
+      final board = reach.add(Duration(minutes: waits[k - 1]));
+      final getOff = prev.endName?.trim().isNotEmpty == true ? prev.endName!.trim() : '환승 장소';
+      out.add(TripTransfer(
+        getOffAt: t,
+        getOffName: getOff,
+        rideName: _rideNameOf(null, next),
+        stopName: next.startName?.trim().isNotEmpty == true ? next.startName!.trim() : getOff,
+        reachStop: reach,
+        boardAt: board,
+      ));
+      t = board.add(Duration(minutes: next.durationMinutes));
+    }
+    return out;
   }
 
   /// 안내에 쓸 노선 이름: 서버 ride_name → 버스 번호면 "번"을 붙여요 ("2115" → "2115번", "2호선" 그대로)
@@ -339,7 +385,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final step = plan.steps[i];
     final segs = route.segments;
     List<LatLng> geo(RouteSegment s) => [for (final p in s.geometry) LatLng(p.latitude, p.longitude)];
-    final rideAt = segs.indexWhere((s) => s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway);
+    // 탈것 구간 위치들 (버스 → 1호선이면 2개). 단계의 leg 번째 차를 따라가요 (11/14)
+    final rides = [for (var k = 0; k < segs.length; k++) if (_isRide(segs[k])) k];
+    final leg = step.leg.clamp(0, rides.isEmpty ? 0 : rides.length - 1).toInt();
+    final rideAt = rides.isEmpty ? -1 : rides[leg];
     final place = chosen?.candidate.point == null ? null : LatLng(chosen!.candidate.point!.lat, chosen.candidate.point!.lng);
     final boardPt = rideAt < 0 || segs[rideAt].geometry.isEmpty ? null : geo(segs[rideAt]).first;
     switch (step.phase) {
@@ -350,6 +399,14 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       case TripPhase.atPlace:
         return ([if (place != null) place], 1);
       case TripPhase.toStop:
+        if (step.leg > 0 && rideAt >= 0) {
+          // 환승 걷기: 앞 차와 이번 차 사이 도보 구간. 없으면 앞 차 끝 → 이번 차 시작
+          final prevRide = rides[leg - 1];
+          final walk = [for (var k = prevRide + 1; k < rideAt; k++) if (segs[k].type == RouteSegmentType.walking) ...geo(segs[k])];
+          final prevGeo = geo(segs[prevRide]);
+          final pts = walk.length >= 2 ? walk : [if (prevGeo.isNotEmpty) prevGeo.last, if (boardPt != null) boardPt];
+          return (pts, _fraction(now, step.start, plan.reachOf(step.leg)));
+        }
         final back = [for (final p in chosen?.candidate.pathBack ?? const <GeoPoint>[]) LatLng(p.lat, p.lng)];
         final pts = plan.hasStop
             ? (back.length >= 2 ? back : [if (place != null) place, if (boardPt != null) boardPt])
@@ -358,8 +415,13 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       case TripPhase.waiting:
         return ([if (boardPt != null) boardPt], 1);
       case TripPhase.riding:
-        final pts = [if (rideAt >= 0) for (final s in segs.skip(rideAt)) ...geo(s)];
-        return (pts, _fraction(now, plan.boardAt, plan.arriveAt));
+        // 마지막 차는 내려서 목적지까지 걷는 길까지, 갈아탈 차가 남았으면 이번 차 구간만
+        final last = plan.isLastLeg(step.leg);
+        final pts = [
+          if (rideAt >= 0)
+            for (final s in last ? segs.skip(rideAt) : [segs[rideAt]]) ...geo(s)
+        ];
+        return (pts, _fraction(now, plan.boardOf(step.leg), plan.alightOf(step.leg)));
       case TripPhase.arrived:
         return ([if (widget.destination != null) widget.destination!], 1);
     }
@@ -479,8 +541,8 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           onAsk: (text) async {
             // 질문하는 순간의 단계와 시각을 함께 보내요. 서버는 이 값으로 남은 시간·다음 차·늦어짐을 답해요
             final now = _tripClock;
-            final phase = trip.steps[_tripIndex(trip)].phase;
-            final res = await _askService.ask(text, trip: trip.toAskJson(phase, now));
+            final step = trip.steps[_tripIndex(trip)];
+            final res = await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
             await _afterTodoChange(res);
             return _tripReply(res);
           },
