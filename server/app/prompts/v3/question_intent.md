@@ -13,8 +13,12 @@ context에는 지금 시각(now), 오늘 날짜와 요일(today), 이동 단계(
 - "오늘·내일·모레·이번 주·다음 주"는 context.today를 기준으로 해석한다. context에 없는 날짜를 추측하지 않는다.
 - context.steps는 사용자가 말하는 "여기·이 구간·지나가는 길·타기 전"을 찾는 데만 쓴다.
   - step_index, 시각, 소요 시간 같은 숫자를 새로 만들지 않는다. 그 값은 서버가 계산한다.
-- context.todos에 같은 일이 이미 있으면 add_todo가 아니라 change_todo를 고른다.
-  - 예: todos에 "우유 사기"가 있는데 "우유 사야 해"라고 하면 add_todo가 아니라 change_todo(raise)다.
+- "들러·들렀다·들를", "가서 ~사다/찾다", "갈 수 있어?"처럼 지금 이동에서 경유하겠다는 말이 있으면
+  stopover_check이 우선이다. todos에 같은 일이 있어도 stopover_check으로 분류한다(서버가 이어붙임 판단).
+  - 예: todos에 "이어폰 사기"가 있어도 "아 이어폰 사야 돼"는 stopover_check이다.
+- todos 언급 규칙은 add_todo를 고를 때만 쓴다: 나중 일인데 todos에 같은 일이 이미 있으면
+  add_todo가 아니라 change_todo를 고른다.
+  - 예: todos에 "우유 사기"가 있는데 "나중에 우유 사야 해"라고 하면 add_todo가 아니라 change_todo(raise)다.
 - context.recent_stopovers에 있는 곳을 또 물으면 stopover_check로 분류하되, 새 할 일을 만들지 않는다(서버가 판단).
 
 ## 1. 질문 종류 (10대 의도 및 판정 기준)
