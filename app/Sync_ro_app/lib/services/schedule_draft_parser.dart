@@ -22,18 +22,27 @@ class ScheduleDraft {
   final bool timeGuessed;
 
   /// 서버 응답 result → 초안. 모양: {"intent":"add_schedule","schedule":{"title","location","start_time","end_time"}}
+  /// 서버는 일정 이름·목적지만 주고 날짜·시각은 안 줄 수 있어요. 그때는 한 시간 뒤를 기본값으로 채우고
+  /// timeGuessed=true 로 표시해서 화면에서 사용자가 바꾸게 해요.
   static ScheduleDraft? fromServerResult(Map<String, dynamic>? result) {
     if (result == null || result['intent'] != 'add_schedule') return null;
     final raw = result['schedule'];
     if (raw is! Map) return null;
+    return fromScheduleMap(raw);
+  }
+
+  /// 일정 초안 맵 {"title","location"} → 일정 입력 화면용. 시각이 없어도 돼요.
+  static ScheduleDraft? fromScheduleMap(Map<dynamic, dynamic> raw) {
     final start = DateTime.tryParse('${raw['start_time'] ?? raw['arrive_by'] ?? ''}');
-    if (start == null) return null;
+    final guessed = start == null;
+    final base = (start ?? DateTime.now().add(const Duration(hours: 1))).toLocal();
     return ScheduleDraft(
       title: '${raw['title'] ?? '새 일정'}',
       location: '${raw['location'] ?? raw['place_name'] ?? ''}',
-      start: start.toLocal(),
+      start: base,
       end: DateTime.tryParse('${raw['end_time'] ?? ''}')?.toLocal(),
       fromServer: true,
+      timeGuessed: guessed,
     );
   }
 

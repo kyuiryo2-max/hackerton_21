@@ -12,9 +12,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Phase = Literal["to_place", "at_place", "to_stop", "waiting", "riding", "arrived"]
+StepKind = Literal["walk", "wait", "ride", "stay"]
 
 PHASE_LABEL = {
     "to_place": "경유지로 가는 중",
@@ -26,6 +27,116 @@ PHASE_LABEL = {
 }
 
 TRIP_INTENTS = {"time_left", "next_vehicle", "running_late"}
+
+
+class TripStep(BaseModel):
+    """상세 경로 한 구간 (v3). 앱이 경로 카드의 구간과 시각을 그대로 보내요.
+
+    kind: walk(도보) / wait(대기) / ride(탑승) / stay(경유지 체류)
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    index: int = Field(ge=0)
+    kind: StepKind
+    start: datetime | None = None
+    end: datetime | None = None
+    minutes: int | None = Field(default=None, ge=0)
+    # `from` 은 파이썬 예약어라 이름을 바꿔 받아요
+    from_name: str | None = Field(default=None, alias="from")
+    to: str | None = None
+    at: str | None = None
+    line: str | None = None
+
+
+def step_label(step: TripStep) -> str:
+    """사람이 읽는 구간 설명. AI context와 삽입 위치 답변에 같이 써요."""
+    if step.kind == "walk":
+        if step.from_name and step.to:
+            return f"{step.from_name} → {step.to}"
+        return step.to or step.from_name or "걷는 길"
+    if step.kind == "wait":
+        return f"{step.at}에서 대기" if step.at else "대기"
+    if step.kind == "ride":
+        line = f"{step.line} 탑승: " if step.line else "탑승: "
+        if step.from_name and step.to:
+            return f"{line}{step.from_name} → {step.to}"
+        return line.rstrip(": ")
+    if step.kind == "stay":
+        return f"{step.at}에 머무는 중" if step.at else "경유지에 머무는 중"
+    return f"{step.index}번 구간"
+
+
+def _ro(word: str) -> str:
+    """받침에 맞는 '으로/로' (예: 출구로, 정류장으로)."""
+    last = word[-1] if word else ""
+    has_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 > 0
+    if last.isdigit():
+        has_final = last in "013678"
+    return f"{word}으로" if has_final else f"{word}로"
+
+
+def _step_entry(step: TripStep, position: str, label: str, reason: str) -> dict:
+    return {
+        "step_index": step.index,
+        "position": position,          # during | before | after | at
+        "step_kind": step.kind,
+        "step_label": step_label(step),
+        "label": label,
+        "reason": reason,
+    }
+
+
+def _same(a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return False
+    a, b = a.strip(), b.strip()
+    return a == b or a in b or b in a
+
+
+def insert_at(place: dict, trip: TripIn) -> dict | None:
+    """찾은 장소를 상세 경로 어디에 끼울지 정해요 (v3). 숫자는 앱이 보낸 steps 그대로예요.
+
+    우선순위: 지금 경유지에 있음 → 이름이 맞는 구간 → 정류장으로 걷는 길 → 탑승 대기 → 탑승 전.
+    steps가 없거나 이미 탔으면 None (기존 답변 문장 그대로).
+    """
+    steps = trip.steps
+    if not steps or trip.phase in ("riding", "arrived"):
+        return None
+    name = (place or {}).get("name") or ""
+
+    if trip.phase == "at_place":
+        stay = next((s for s in steps if s.kind == "stay"), None)
+        if stay is not None:
+            where = stay.at or trip.place_name or name
+            return _step_entry(stay, "at", f"{where}에 있는 동안", "지금 경유지에 머무는 중이에요")
+
+    for step in steps:
+        if name and any(_same(name, v) for v in (step.from_name, step.to, step.at)):
+            return _step_entry(step, "during", f"{step_label(step)} 구간에", "찾은 장소가 그 구간에 있어요")
+
+    if trip.phase == "waiting":
+        wait = next((s for s in steps if s.kind == "wait"), None)
+        if wait is not None:
+            at = wait.at or trip.stop_name or name
+            return _step_entry(wait, "at", f"{at}에서 기다리는 동안", "지금 탑승 대기 중이에요")
+
+    walks = [s for s in steps if s.kind == "walk" and _same(s.to, trip.stop_name)]
+    if walks:
+        step = walks[-1]
+        at = step.to or trip.stop_name
+        return _step_entry(step, "during", f"{_ro(at)} 걷는 길에", "찾은 장소가 정류장까지 걷는 구간에 있어요")
+
+    waits = [s for s in steps if s.kind == "wait"]
+    if waits:
+        step = waits[0]
+        at = step.at or trip.stop_name or ""
+        return _step_entry(step, "at", f"{at}에서 기다리는 동안", "찾은 장소가 탑승 정류장 근처에 있어요")
+
+    before_ride = [s for s in steps if s.kind == "ride" and s.index > 0]
+    if before_ride:
+        step = steps[before_ride[0].index - 1]
+        return _step_entry(step, "before", f"{step_label(step)} 뒤에", "탑승 전에 들를 수 있어요")
+    return None
 
 
 class TripIn(BaseModel):
@@ -40,6 +151,9 @@ class TripIn(BaseModel):
     arrive_at: datetime | None = None
     destination: str | None = None
     next_vehicles_min: list[int] = Field(default_factory=list, description="탈 정류장에 곧 오는 차 (지금 기준 분)")
+    # 상세 경로 (v3). 없으면 기존과 똑같이 동작해요
+    steps: list[TripStep] = Field(default_factory=list, description="상세 경로 구간 (앱 경로 카드 순서)")
+    current_step: int | None = Field(default=None, ge=0, description="지금 있는 steps index")
 
 
 def _josa(word: str, pair: str) -> str:

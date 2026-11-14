@@ -6,19 +6,26 @@
 """
 import csv
 import json
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
 
 from app import config
 
+log = logging.getLogger(__name__)
+
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 PLACE_TYPES_CSV = Path(__file__).resolve().parents[3] / "data" / "demo" / "place_types.csv"
-PROMPT_VERSION = "v1"
+# v2: 의도·슬롯 추출을 정밀하게 쓴 프롬프트. .env의 LLM_PROMPT_VERSION 으로 v1과 비교할 수 있어요.
+PROMPT_VERSION = config.LLM_PROMPT_VERSION
 
 INTENTS = (
     "next_vehicle", "stopover_check", "running_late", "time_left",
-    "change_todo", "place_info", "change_route", "unsupported",
+    "change_todo", "place_info", "change_route",
+    # v3: 일정·할 일 추가 (저장은 앱 버튼에서)
+    "add_schedule", "add_todo",
+    "unsupported",
 )
 DEFAULT_CONFIRM_QUESTION = "조금만 더 자세히 말해 줄래요?"
 
@@ -36,7 +43,9 @@ def place_types() -> list[str]:
 
 # AI가 응답하지 않을 때 기다리는 최대 시간(초). 넘으면 바로 키워드 규칙으로 넘어가요.
 # 멘토링(11/11): 10초는 사용자에게 너무 김. 측정값은 보통 1~2초, 가장 느린 것 4.5초라 5초로 줄였어요 (할 일 63번).
-LLM_TIMEOUT_SECONDS = 5
+# 기본값은 그대로 5초이고, reasoning 모델처럼 느린 모델을 쓸 때만 .env의 LLM_TIMEOUT_SECONDS 로 늘려요.
+DEFAULT_LLM_TIMEOUT_SECONDS = 5
+LLM_TIMEOUT_SECONDS = config.LLM_TIMEOUT_SECONDS
 
 
 @lru_cache
@@ -52,7 +61,8 @@ def _client():
 
 
 def _parse_json_safe(content: str) -> dict:
-    text = content.strip()
+    """응답에서 JSON 하나를 꺼내요. 코드블록이나 앞뒤 설명이 섞여도 찾아냅니다."""
+    text = (content or "").strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
@@ -60,41 +70,78 @@ def _parse_json_safe(content: str) -> dict:
         if lines and lines[-1].strip().startswith("```"):
             lines = lines[:-1]
         text = "\n".join(lines).strip()
-    return json.loads(text or "{}")
+    try:
+        return json.loads(text or "{}")
+    except json.JSONDecodeError:
+        # response_format 없이 부른 모델은 "설명 + JSON"으로 답할 수 있어요. 첫 { 부터 마지막 } 까지만 봐요.
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(text[start : end + 1])
+
+
+def _payload(system: str, user: str, json_mode: bool) -> dict:
+    payload = {
+        "model": config.LLM_MODEL,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    if config.LLM_TEMPERATURE:
+        # Muse Spark는 기본 1.0에서 가장 잘 동작해서, 값을 정하지 않으면 보내지 않아요
+        try:
+            payload["temperature"] = float(config.LLM_TEMPERATURE)
+        except ValueError:
+            payload["temperature"] = 1.0
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    if config.LLM_REASONING_EFFORT:
+        # Chat Completions 는 reasoning_effort, Responses API 는 reasoning.effort 를 써요
+        payload["reasoning_effort"] = config.LLM_REASONING_EFFORT
+    return payload
+
+
+def _message_text(data: dict) -> str:
+    choices = data.get("choices") or [{}]
+    return ((choices[0].get("message") or {}).get("content") or "").strip()
 
 
 def _chat_json(system: str, user: str) -> dict:
-    # 1. httpx를 통한 직접 호출 (jiter DLL 차단 우회 및 OpenRouter 완벽 지원)
+    """JSON 한 번 받기. 실패하면 response_format 없이 한 번 더 시도해요 (모델·게이트웨이 차이 대응)."""
+    url = f"{config.OPENAI_BASE_URL.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    last_error: Exception | None = None
+    for json_mode in (True, False):
+        try:
+            import httpx
+
+            resp = httpx.post(url, headers=headers, json=_payload(system, user, json_mode),
+                              timeout=LLM_TIMEOUT_SECONDS)
+            resp.raise_for_status()
+            text = _message_text(resp.json())
+            if not text:
+                raise ValueError("AI 응답이 비어 있어요")
+            return _parse_json_safe(text)
+        except Exception as e:  # noqa: BLE001 - 다음 시도로 넘어가요
+            last_error = e
+            log.info("AI 호출 실패 (json_mode=%s): %s", json_mode, type(e).__name__)
+
+    # openai 클라이언트 폴백
     try:
-        import httpx
-
-        headers = {
-            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": config.LLM_MODEL,
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        }
-        base_url = config.OPENAI_BASE_URL.rstrip("/")
-        url = f"{base_url}/chat/completions"
-        resp = httpx.post(url, headers=headers, json=payload, timeout=LLM_TIMEOUT_SECONDS)
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"] or "{}"
-        return _parse_json_safe(content)
+        base = _payload(system, user, True)
+        optional = {k: v for k, v in base.items() if k in ("temperature", "response_format")}
+        effort = base.get("reasoning_effort")
+        resp = _client().chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=base["messages"],
+            extra_body={"reasoning_effort": effort} if effort else None,
+            **optional,
+        )
+        return _parse_json_safe(resp.choices[0].message.content or "{}")
     except Exception:
-        pass
-
-    # 2. openai 클라이언트 폴백
-    resp = _client().chat.completions.create(
-        model=config.LLM_MODEL,
-        temperature=0,
-        response_format={"type": "json_object"},
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-    )
-    return _parse_json_safe(resp.choices[0].message.content or "{}")
+        log.warning("AI 호출 실패, 키워드 규칙으로 넘어가요: %s", type(last_error).__name__)
+        raise last_error from None
 
 
 def parse_todo(text: str) -> dict:
@@ -144,6 +191,10 @@ def normalize_question(out: dict) -> dict:
         intents.append({**item, "place_types": kept})
     needs_confirm = bool(out.get("needs_confirm")) or dropped or not intents
     question = out.get("question") or None
+    # v3: 일정 추가인데 이름이 없으면 되물어요 (장소는 화면에서 입력)
+    if any(i["intent"] == "add_schedule" and not (i.get("title") or "").strip() for i in intents):
+        needs_confirm = True
+        question = question or "무슨 일정인지 알려 줄래요?"
     if needs_confirm and not question:
         question = DEFAULT_CONFIRM_QUESTION
     return {
