@@ -17,8 +17,8 @@ log = logging.getLogger(__name__)
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 PLACE_TYPES_CSV = Path(__file__).resolve().parents[3] / "data" / "demo" / "place_types.csv"
-# v3: 의도·슬롯 추출 정밀 프롬프트 + 일정/할 일 추가. .env의 LLM_PROMPT_VERSION 으로 버전을 바꿀 수 있어요.
-PROMPT_VERSION = config.LLM_PROMPT_VERSION
+# v3: 의도·슬롯 추출 정밀 프롬프트 + 일정/할 일 추가 (#48). 평가는 ai/eval/run.py --prompt 로 따로 바꿔요.
+PROMPT_VERSION = "v3"
 
 INTENTS = (
     "next_vehicle", "stopover_check", "running_late", "time_left",
@@ -43,9 +43,7 @@ def place_types() -> list[str]:
 
 # AI가 응답하지 않을 때 기다리는 최대 시간(초). 넘으면 바로 키워드 규칙으로 넘어가요.
 # 멘토링(11/11): 10초는 사용자에게 너무 김. 측정값은 보통 1~2초, 가장 느린 것 4.5초라 5초로 줄였어요 (할 일 63번).
-# 기본값은 그대로 5초이고, reasoning 모델처럼 느린 모델을 쓸 때만 .env의 LLM_TIMEOUT_SECONDS 로 늘려요.
-DEFAULT_LLM_TIMEOUT_SECONDS = 5
-LLM_TIMEOUT_SECONDS = config.LLM_TIMEOUT_SECONDS
+LLM_TIMEOUT_SECONDS = 5
 
 
 @lru_cache
@@ -84,18 +82,11 @@ def _payload(system: str, user: str, json_mode: bool) -> dict:
     payload = {
         "model": config.LLM_MODEL,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        # 같은 질문에 같은 답 (기준 문서 "temperature는 0")
+        "temperature": 0,
     }
-    if config.LLM_TEMPERATURE:
-        # Muse Spark는 기본 1.0에서 가장 잘 동작해서, 값을 정하지 않으면 보내지 않아요
-        try:
-            payload["temperature"] = float(config.LLM_TEMPERATURE)
-        except ValueError:
-            payload["temperature"] = 1.0
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-    if config.LLM_REASONING_EFFORT:
-        # Chat Completions 는 reasoning_effort, Responses API 는 reasoning.effort 를 써요
-        payload["reasoning_effort"] = config.LLM_REASONING_EFFORT
     return payload
 
 
@@ -105,17 +96,18 @@ def _message_text(data: dict) -> str:
 
 
 def _chat_json(system: str, user: str) -> dict:
-    """JSON 한 번 받기. 실패하면 response_format 없이 한 번 더 시도해요 (모델·게이트웨이 차이 대응)."""
+    """JSON 한 번 받기. 형식 문제로 실패하면 response_format 없이 한 번 더 시도해요 (모델·게이트웨이 차이 대응).
+    시간 초과는 다시 시도하지 않아서 전체 대기가 5초를 넘지 않아요."""
     url = f"{config.OPENAI_BASE_URL.rstrip('/')}/chat/completions"
     headers = {
         "Authorization": f"Bearer {config.OPENAI_API_KEY}",
         "Content-Type": "application/json",
     }
+    import httpx
+
     last_error: Exception | None = None
     for json_mode in (True, False):
         try:
-            import httpx
-
             resp = httpx.post(url, headers=headers, json=_payload(system, user, json_mode),
                               timeout=LLM_TIMEOUT_SECONDS)
             resp.raise_for_status()
@@ -126,17 +118,19 @@ def _chat_json(system: str, user: str) -> dict:
         except Exception as e:  # noqa: BLE001 - 다음 시도로 넘어가요
             last_error = e
             log.info("AI 호출 실패 (json_mode=%s): %s", json_mode, type(e).__name__)
+            if isinstance(e, httpx.TimeoutException):
+                # 시간 초과면 다시 시도하지 않아요. 다시 부르면 5초 제한(할 일 63번)의 2~3배를 기다리게 돼요.
+                log.warning("AI 응답 시간 초과(%g초), 키워드 규칙으로 넘어가요", LLM_TIMEOUT_SECONDS)
+                raise
 
     # openai 클라이언트 폴백
     try:
         base = _payload(system, user, True)
-        optional = {k: v for k, v in base.items() if k in ("temperature", "response_format")}
-        effort = base.get("reasoning_effort")
         resp = _client().chat.completions.create(
             model=config.LLM_MODEL,
             messages=base["messages"],
-            extra_body={"reasoning_effort": effort} if effort else None,
-            **optional,
+            temperature=base["temperature"],
+            response_format=base["response_format"],
         )
         return _parse_json_safe(resp.choices[0].message.content or "{}")
     except Exception:

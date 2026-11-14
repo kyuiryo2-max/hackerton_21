@@ -107,23 +107,28 @@ def test_json_모드가_거부되면_한_번_더_시도(monkeypatch):
     assert "response_format" not in calls[1]
 
 
-def test_요청에_reasoning_effort를_넣고_온도는_비움(monkeypatch):
-    """Meta Model API(Chat Completions)는 reasoning_effort 를 쓰고, 온도는 안 보내는 게 기본이에요."""
-    monkeypatch.setattr(llm.config, "LLM_REASONING_EFFORT", "low")
-    monkeypatch.setattr(llm.config, "LLM_TEMPERATURE", "")
-
+def test_요청은_온도_0_json_모드(monkeypatch):
+    """기존 설정 그대로: 온도 0, JSON 모드 (기준 문서 "temperature는 0")."""
     payload = llm._payload("system", "user", json_mode=True)
-    assert payload["reasoning_effort"] == "low"
-    assert "reasoning" not in payload
-    assert "temperature" not in payload
+    assert payload["temperature"] == 0
     assert payload["response_format"] == {"type": "json_object"}
+    assert payload["model"] == llm.config.LLM_MODEL
+    assert "temperature" in llm._payload("system", "user", json_mode=False)
 
 
-def test_온도를_정하면_그_값을_보냄(monkeypatch):
-    monkeypatch.setattr(llm.config, "LLM_REASONING_EFFORT", "")
-    monkeypatch.setattr(llm.config, "LLM_TEMPERATURE", "0.3")
+def test_시간_초과면_다시_부르지_않음(monkeypatch):
+    """AI가 5초 안에 답하지 않으면 한 번만 기다리고 키워드 규칙으로 넘어가요 (할 일 63번)."""
+    import httpx
+    import pytest
 
-    payload = llm._payload("system", "user", json_mode=False)
-    assert payload["temperature"] == 0.3
-    assert "reasoning_effort" not in payload
-    assert "response_format" not in payload
+    calls = []
+
+    def slow_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        raise httpx.ReadTimeout("느림")
+
+    monkeypatch.setattr(httpx, "post", slow_post)
+    monkeypatch.setattr(llm, "_client", lambda: (_ for _ in ()).throw(AssertionError("openai 폴백을 부르면 안 돼요")))
+    with pytest.raises(httpx.TimeoutException):
+        llm._chat_json("system", "user")
+    assert len(calls) == 1

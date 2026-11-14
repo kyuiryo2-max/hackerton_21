@@ -80,8 +80,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
         savedByServer: !ApiConfig.demoMode && response.todo?['id'] != null,
       );
       setState(() => _history.add(reply));
-      // 들를 수 있다고 답한 할 일은 바로 목록에 넣어요 (되돌리기 가능, 11/14)
-      if (reply.todo != null) await _addSuggestedTodo(reply, auto: true);
+      // 들를 수 있다고 답한 할 일만 바로 목록에 넣어요 (되돌리기 가능, 11/14).
+      // 시간이 부족한 들르기, "나중에 ~해야 해"(add_todo)는 자동으로 넣지 않고 버튼으로 확인받아요.
+      if (reply.todo != null && intent == 'stopover_check' && response.result?['feasible'] == true) {
+        await _addSuggestedTodo(reply, auto: true);
+      }
       if (!mounted) return;
       // In real mode /api/ask may have already saved a new todo.
       // Refresh the visible todo list rather than showing an Add button again.
