@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 PLACE_TYPES_CSV = Path(__file__).resolve().parents[3] / "data" / "demo" / "place_types.csv"
-# v2: 의도·슬롯 추출을 정밀하게 쓴 프롬프트. .env의 LLM_PROMPT_VERSION 으로 v1과 비교할 수 있어요.
+# v3: 의도·슬롯 추출 정밀 프롬프트 + 일정/할 일 추가. .env의 LLM_PROMPT_VERSION 으로 버전을 바꿀 수 있어요.
 PROMPT_VERSION = config.LLM_PROMPT_VERSION
 
 INTENTS = (
