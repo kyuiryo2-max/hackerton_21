@@ -380,7 +380,7 @@ def test_실제_모드_다른_경로는_말한_기준으로_가장_좋은_경로
 def _ai_says(monkeypatch, intent: dict):
     """AI 분류 결과를 정해 줘요 (키워드 규칙이 모르는 표현을 시험할 때)."""
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
-    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+    monkeypatch.setattr(assistant, "_classify", lambda text, history, context=None: {
         "type": "question", "intents": [{"place_types": [], "delay_minutes": None, **intent}],
         "needs_confirm": False, "question": None, "engine": "ai"})
 
@@ -409,7 +409,7 @@ def test_실제_모드_두_곳_모두_들를_수_있으면_하나로_답함(clie
     plan(client)
     monkeypatch.setattr(planner, "_vehicle_seconds", lambda leg: [600, 1200, 1800])  # 두 곳을 들르면 30분 차
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
-    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+    monkeypatch.setattr(assistant, "_classify", lambda text, history, context=None: {
         "type": "question", "needs_confirm": False, "question": None, "engine": "ai",
         "intents": [{"intent": "stopover_check", "place_types": [k], "delay_minutes": None} for k in ("편의점", "약국")]})
     body = live_ask("편의점 들렀다가 약국도 갈 수 있어?")

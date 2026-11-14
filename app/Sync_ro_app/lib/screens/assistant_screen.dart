@@ -63,6 +63,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
       final intent = response.result?['intent']?.toString() ??
           (response.intents.isEmpty ? null : response.intents.first['intent']?.toString());
       final draft = ScheduleDraft.fromServerResult(response.result) ??
+          (response.schedule != null ? ScheduleDraft.fromScheduleMap(response.schedule!) : null) ??
           (intent == 'unsupported' || intent == null ? ScheduleDraft.parseLocal(message, DateTime.now()) : null);
       final goPlace = draft == null && (intent == 'unsupported' || intent == null) ? _destinationIn(message) : null;
       final reply = _Message(
@@ -119,6 +120,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
     // /api/ask persists generated todos for real users. Never POST them again.
     if (!ApiConfig.demoMode && response.todo?['id'] != null) return false;
     final result = response.result ?? const <String, dynamic>{};
+    // 시간이 부족해도 나중에 할 일로는 남길 수 있어요. 서버가 can_add_todo=true 를 주면 버튼을 보여 줘요.
+    if (result['can_add_todo'] == true) return true;
     // Prefer machine-readable server decision rather than a language heuristic.
     if (result['can_add_todo'] == false || result['feasible'] == false ||
         result['can_stop'] == false || result['status'] == '제외' ||

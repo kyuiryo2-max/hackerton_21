@@ -5,11 +5,13 @@
 import logging
 import sqlite3
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -89,3 +91,24 @@ async def http_error(_, exc: StarletteHTTPException):
 def health() -> dict:
     """배포 확인용. 무료 서버를 시연 전에 깨울 때도 이 주소를 열어요."""
     return {"status": "ok"}
+
+
+CONSOLE_HTML = Path(__file__).resolve().parent / "static" / "console.html"
+
+
+@app.get("/", include_in_schema=False)
+def index() -> RedirectResponse:
+    return RedirectResponse("/console")
+
+
+@app.get("/console", include_in_schema=False)
+def console() -> FileResponse:
+    """브라우저에서 바로 눌러 보는 로컬 테스트 콘솔. Flutter 없이 API를 확인할 때 써요."""
+    return FileResponse(CONSOLE_HTML, media_type="text/html; charset=utf-8")
+
+
+# `cd app/Sync_ro_app && flutter build web --base-href /app/` 로 빌드해 두면
+# 같은 서버가 실제 앱 화면도 /app 에서 보여 줘요 (CORS·mixed content 없이).
+FLUTTER_WEB = Path(__file__).resolve().parents[2] / "app" / "Sync_ro_app" / "build" / "web"
+if FLUTTER_WEB.is_dir():
+    app.mount("/app", StaticFiles(directory=FLUTTER_WEB, html=True), name="flutter-web")

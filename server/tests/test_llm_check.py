@@ -71,3 +71,59 @@ def test_최근_대화를_AI에_함께_보냄(monkeypatch):
 def test_질문_프롬프트에_되묻기_규칙():
     text = load_prompt("question_intent")
     assert "needs_confirm" in text and "recent_messages" in text
+
+
+def test_응답에_설명이_섞여도_JSON만_꺼냄():
+    out = llm._parse_json_safe('분류 결과입니다. {"intents": [{"intent": "time_left"}]} 이상입니다.')
+    assert out == {"intents": [{"intent": "time_left"}]}
+
+
+def test_json_모드가_거부되면_한_번_더_시도(monkeypatch):
+    """response_format 을 지원하지 않는 모델·게이트웨이는 두 번째 시도로 답을 받아요."""
+    import httpx
+
+    calls = []
+
+    class Resp:
+        def __init__(self, ok, payload):
+            self.ok, self.payload = ok, payload
+
+        def raise_for_status(self):
+            if not self.ok:
+                raise httpx.HTTPStatusError("400", request=None, response=None)
+
+        def json(self):
+            return self.payload
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        if "response_format" in json:
+            return Resp(False, {})
+        return Resp(True, {"choices": [{"message": {"content": '결과: {"intents": []}'}}]})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert llm._chat_json("system", "user") == {"intents": []}
+    assert len(calls) == 2
+    assert "response_format" not in calls[1]
+
+
+def test_요청에_reasoning_effort를_넣고_온도는_비움(monkeypatch):
+    """Meta Model API(Chat Completions)는 reasoning_effort 를 쓰고, 온도는 안 보내는 게 기본이에요."""
+    monkeypatch.setattr(llm.config, "LLM_REASONING_EFFORT", "low")
+    monkeypatch.setattr(llm.config, "LLM_TEMPERATURE", "")
+
+    payload = llm._payload("system", "user", json_mode=True)
+    assert payload["reasoning_effort"] == "low"
+    assert "reasoning" not in payload
+    assert "temperature" not in payload
+    assert payload["response_format"] == {"type": "json_object"}
+
+
+def test_온도를_정하면_그_값을_보냄(monkeypatch):
+    monkeypatch.setattr(llm.config, "LLM_REASONING_EFFORT", "")
+    monkeypatch.setattr(llm.config, "LLM_TEMPERATURE", "0.3")
+
+    payload = llm._payload("system", "user", json_mode=False)
+    assert payload["temperature"] == 0.3
+    assert "reasoning_effort" not in payload
+    assert "response_format" not in payload

@@ -4,7 +4,7 @@ import '../config/api_config.dart';
 
 class ServerAskResponse {
   const ServerAskResponse({required this.answer, this.question, this.needsConfirm = false,
-    this.todo, this.result, this.intents = const [], this.engine});
+    this.todo, this.result, this.intents = const [], this.engine, this.schedule});
   final String answer;
   final String? question;
   final bool needsConfirm;
@@ -12,6 +12,8 @@ class ServerAskResponse {
   final Map<String, dynamic>? result;
   final List<Map<String, dynamic>> intents;
   final String? engine;
+  /// 일정 초안 (서버 add_schedule). 있으면 일정 입력 화면으로 바로 가요.
+  final Map<String, dynamic>? schedule;
 }
 
 class ServerAskService {
@@ -32,14 +34,20 @@ class ServerAskService {
     if (decoded is! Map<String, dynamic>) throw const FormatException('질문 응답 형식 오류');
     final answer = decoded['answer']?.toString() ?? '';
     if (answer.isEmpty) throw const FormatException('서버에 answer 값이 없습니다.');
+    final resultMap =
+        decoded['result'] is Map ? Map<String, dynamic>.from(decoded['result'] as Map) : null;
+    final scheduleMap = decoded['schedule'] is Map
+        ? Map<String, dynamic>.from(decoded['schedule'] as Map)
+        : (resultMap?['schedule'] is Map ? Map<String, dynamic>.from(resultMap!['schedule'] as Map) : null);
     return ServerAskResponse(answer: answer,
       question: decoded['question']?.toString(),
       needsConfirm: decoded['needs_confirm'] == true,
       todo: decoded['todo'] is Map ? Map<String, dynamic>.from(decoded['todo'] as Map) : null,
-      result: decoded['result'] is Map ? Map<String, dynamic>.from(decoded['result'] as Map) : null,
+      result: resultMap,
       intents: decoded['intents'] is List ? (decoded['intents'] as List).whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e)).toList() : const [],
-      engine: decoded['engine']?.toString());
+      engine: decoded['engine']?.toString(),
+      schedule: scheduleMap);
   }
   void dispose() => _client.close();
 }
