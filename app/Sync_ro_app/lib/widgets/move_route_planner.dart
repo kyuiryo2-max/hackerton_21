@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -22,6 +23,7 @@ import 'trip_panel.dart';
 import '../models/schedule.dart';
 import '../screens/schedule_form_screen.dart';
 import '../services/schedule_draft_parser.dart';
+import '../services/prep_notification_service.dart';
 
 /// 이동 탭 (팀장님 흐름도 기준)
 /// ① 일정 이름 · 출발지 → 목적지   ② 지도 (경로 · 출발지 · 목적지 · 경유 후보)
@@ -112,6 +114,17 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   static const double _gpsOnPathMeters = 120;
   LatLng? _gps;
   double? _gpsHeading;
+
+  // ---------- 경로 이탈 알림 (11/14) ----------
+  /// 걷는 구간: 길에서 이만큼(m) 넘게 떨어지면 이탈. 타는 구간은 노선 좌표가 성글어서 넉넉하게
+  static const double _offWalkMeters = 50;
+  static const double _offRideMeters = 200;
+  /// 위치 오차로 한 번 튀는 건 무시: 연속으로 이만큼 벗어나야 알려요
+  static const int _offFixesNeeded = 2;
+  int _offCount = 0;
+  /// 이번 이탈을 이미 알렸어요 (다시 길로 돌아오면 풀려요)
+  bool _offAlerted = false;
+  static const int _offNotificationId = 9101;
   /// 도착 단계가 되면 잠시 보여 준 뒤 이동을 자동으로 마쳐요 (#51 피드백 4)
   Timer? _arriveEnd;
   static const _arriveShowSeconds = 6;
@@ -148,13 +161,76 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     });
   }
 
-  /// 실제 모드에서 이동을 시작하면 위치를 계속 받아요 (움직일 때 3m마다)
+  /// 실제 모드에서 이동을 시작하면 위치를 계속 받아요 (움직일 때 3m마다).
+  /// 앱(안드로이드·iOS)은 화면이 꺼지거나 다른 앱을 봐도 계속 받아요 (11/14):
+  /// 안드로이드는 "길 안내 중" 알림을 띄워 두고(포그라운드 서비스), iOS는 백그라운드 위치를 켜요.
+  /// 웹은 브라우저가 화면이 열려 있을 때만 위치를 줘요.
+  LocationSettings _gpsSettings() {
+    if (kIsWeb) return const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 3);
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return AndroidSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 3,
+          intervalDuration: const Duration(seconds: 3),
+          foregroundNotificationConfig: const ForegroundNotificationConfig(
+            notificationTitle: 'Sync-ro 길 안내 중',
+            notificationText: '경로를 벗어나면 알려 드릴게요',
+            enableWakeLock: true,
+          ),
+        );
+      case TargetPlatform.iOS:
+        return AppleSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          activityType: ActivityType.fitness,
+          distanceFilter: 3,
+          pauseLocationUpdatesAutomatically: false,
+          showBackgroundLocationIndicator: true,
+          allowBackgroundLocationUpdates: true,
+        );
+      default:
+        return const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 3);
+    }
+  }
+
+  /// 화면이 꺼져도 위치를 받으려면 "항상 허용"이 필요해요. 이동을 시작할 때 한 번만 설명하고 물어봐요.
+  static bool _askedBackground = false;
+  Future<void> _askBackgroundLocation() async {
+    if (kIsWeb || _askedBackground) return;
+    if (defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS) return;
+    try {
+      final now = await Geolocator.checkPermission();
+      if (now != LocationPermission.whileInUse || !mounted) return;
+      _askedBackground = true;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('화면이 꺼져도 길 안내를 받을까요?'),
+          content: const Text('휴대폰 화면을 끄거나 다른 앱을 봐도 내 위치를 따라가고, '
+              '경로를 벗어나면 알림으로 알려 드려요. 다음 창에서 위치를 "항상 허용"으로 골라 주세요.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('화면 켤 때만')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('항상 허용하기')),
+          ],
+        ),
+      );
+      if (ok == true) await Geolocator.requestPermission();
+    } catch (_) {}
+  }
+
   void _startGps() {
     _stopGps();
     if (widget.isDemo) return;
+    _askBackgroundLocation().whenComplete(() {
+      if (!mounted || !_tripStarted) return;
+      _listenGps();
+    });
+  }
+
+  void _listenGps() {
     try {
       _gpsSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 3),
+        locationSettings: _gpsSettings(),
       ).listen((p) {
         if (!mounted) return;
         final next = LatLng(p.latitude, p.longitude);
@@ -169,6 +245,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           _gps = next;
           if (heading != null) _gpsHeading = heading;
         });
+        _checkOffRoute(next, p.accuracy);
       }, onError: (_) {
         // 위치를 못 받으면 계획 시각 기준 추정으로 돌아가요
         if (mounted) setState(() => _gps = null);
@@ -181,6 +258,106 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     _gpsSub = null;
     _gps = null;
     _gpsHeading = null;
+    _offCount = 0;
+    _offAlerted = false;
+    if (mounted) ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+  }
+
+  /// 내 위치에서 지금 단계의 길까지 가장 가까운 거리(m)
+  static double _distToPath(LatLng p, List<LatLng> path) {
+    if (path.isEmpty) return double.infinity;
+    if (path.length == 1) return _meters(p, path.first);
+    final cos = math.cos(p.latitude * math.pi / 180);
+    var best = double.infinity;
+    for (var i = 0; i + 1 < path.length; i++) {
+      final a = path[i], b = path[i + 1];
+      final ax = a.longitude * cos, ay = a.latitude, bx = b.longitude * cos, by = b.latitude;
+      final px = p.longitude * cos, py = p.latitude;
+      final len = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+      final t = len == 0 ? 0.0 : (((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / len).clamp(0.0, 1.0);
+      final q = LatLng(ay + (by - ay) * t, (ax + (bx - ax) * t) / cos);
+      final d = _meters(p, q);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  /// 경로 이탈: 걷거나 타는 중에 지금 단계의 길(앞뒤 단계 포함)에서 많이 벗어나면 알려요.
+  /// 가게에 있거나 정류장에서 기다리는 중, 도착한 뒤에는 보지 않아요.
+  void _checkOffRoute(LatLng here, double accuracy) {
+    final plan = _tripNow, route = _tripRoute;
+    if (!_tripStarted || plan == null || route == null) return;
+    final index = _tripIndex(plan);
+    final phase = plan.steps[index].phase;
+    if (phase == TripPhase.atPlace || phase == TripPhase.waiting || phase == TripPhase.arrived) {
+      _offCount = 0;
+      return;
+    }
+    final now = _tripClock;
+    // 지금 단계와 바로 앞뒤 단계: 버튼을 늦게 눌렀거나 조금 앞서 걸어도 이탈로 보지 않게
+    var dist = double.infinity;
+    for (var i = math.max(0, index - 1); i <= math.min(plan.steps.length - 1, index + 1); i++) {
+      final d = _distToPath(here, _stepTrack(plan, i, route, _tripChosen, now).$1);
+      if (d < dist) dist = d;
+    }
+    if (dist == double.infinity) return;
+    final limit = (phase == TripPhase.riding ? _offRideMeters : _offWalkMeters) + math.min(accuracy, 50);
+    if (dist <= limit * 0.6) {
+      // 길로 돌아왔어요
+      _offCount = 0;
+      if (_offAlerted) {
+        _offAlerted = false;
+        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+      }
+      return;
+    }
+    if (dist <= limit) return;
+    _offCount++;
+    if (_offCount < _offFixesNeeded || _offAlerted) return;
+    _offAlerted = true;
+    _alertOffRoute(here, dist);
+  }
+
+  void _alertOffRoute(LatLng here, double dist) {
+    final meters = (dist / 10).round() * 10;
+    // 화면이 꺼져 있거나 다른 앱을 보고 있으면 휴대폰 알림으로
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (state != null && state != AppLifecycleState.resumed) {
+      PrepNotificationService.instance.showNow(
+        id: _offNotificationId,
+        title: '경로를 벗어났어요',
+        body: '추천 경로에서 약 ${meters}m 떨어졌어요. 눌러서 지금 위치에서 다시 찾아보세요.',
+      );
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(MaterialBanner(
+      backgroundColor: AppTheme.warnSoft,
+      leading: const Icon(Icons.wrong_location_rounded, color: AppTheme.warn),
+      content: Text('경로를 벗어났어요 · 추천 경로에서 약 ${meters}m'),
+      actions: [
+        TextButton(
+          onPressed: () => messenger.hideCurrentMaterialBanner(),
+          child: const Text('괜찮아요'),
+        ),
+        FilledButton(
+          onPressed: () {
+            messenger.hideCurrentMaterialBanner();
+            _rerouteFrom(here);
+          },
+          child: const Text('지금 위치에서 다시 찾기'),
+        ),
+      ],
+    ));
+  }
+
+  /// 지금 위치에서 목적지까지 다시 계산하고, 새 경로가 오면 이동을 그 자리에서 다시 시작해요
+  void _rerouteFrom(LatLng here) {
+    _offCount = 0;
+    _offAlerted = false;
+    _restartTripOnPlan = true;
+    activeRouteController.requestPlanRefresh(
+        from: (lat: here.latitude, lng: here.longitude, name: '지금 위치'));
   }
 
   static double _meters(LatLng a, LatLng b) {
@@ -1372,7 +1549,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
         liveDot: track?.dot,
         liveHeading: track?.heading,
         passedPath: track?.passed ?? const [],
-        height: trip == null ? 260 : 560,
+        // 이동 중: 내 위치(없으면 지금 있을 것 같은 곳)를 따라가며 크게 (11/14)
+        followPoint: trip == null ? null : (track?.dot ?? widget.origin),
+        height: trip == null ? 340 : 560,
       ),
       ),
       if (stopChoices.isNotEmpty)

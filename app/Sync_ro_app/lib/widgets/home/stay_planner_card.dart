@@ -4,6 +4,7 @@ import '../../config/app_theme.dart';
 import '../../models/departure_overview.dart';
 import '../../models/route_candidate.dart';
 import '../../services/kst_time.dart';
+import '../route_compare_map.dart';
 
 /// 홈 "경유 판단" 화면 조각들: 판정 카드, 시간 띠, 후보 목록 한 줄.
 
@@ -336,16 +337,17 @@ class StayVerdictCard extends StatelessWidget {
                   '${e.closeLimited ? ' (${e.candidate.closeAt} 마감)' : ''}',
           line: AppTheme.border,
         ),
-        _StepRow(
-          time: hm(o.boardAt),
-          title: '$transit 탑승',
-          sub: e.missesVehicle ? '이 시각까지 정류장에 못 가요' : '정류장 여유 ${DepartureOverview.stopBufferMinutes}분 포함',
-          late: e.missesVehicle,
-          line: AppTheme.textStrong.withValues(alpha: 0.75),
+        // 탑승부터 도착 전까지: 네이버 지도처럼 노선 표시 · 승차 · N개 정류장 이동 · 하차 · 도보 (11/14)
+        ..._journeyRows(
+          segs: rideSegments,
+          boardAt: o.boardAt,
+          transit: transit,
+          missesVehicle: e.missesVehicle,
+          soon: o.nextVehiclesAt(now),
+          waitMinutes: o.waitMinutes,
+          boardStop: o.boardStopName,
+          destination: o.destination,
         ),
-        // 탑승 뒤 구간 (환승, 갈아타는 도보, 마지막 도보) — 위 경로 카드의 구간과 같아요
-        if (!e.missesVehicle && o.boardAt != null)
-          ..._rideRows(rideSegments, o.boardAt!),
         _StepRow(
           time: e.missesVehicle ? '' : hm(o.arriveAt),
           title: '${o.destination} 도착',
@@ -358,28 +360,129 @@ class StayVerdictCard extends StatelessWidget {
   }
 }
 
-/// 탑승 시각부터 구간 시간을 더해 가며 "17:33 1호선 17분" 같은 줄을 만들어요.
-/// 첫 번째 탈것은 위 "탑승" 줄이 맡아요. 걷기 구간은 "도보 N분"으로 보여 줘요.
-List<Widget> _rideRows(List<RouteSegment>? segs, DateTime boardAt) {
-    if (segs == null || segs.isEmpty) return const [];
-    final firstRide = segs.indexWhere((s) => s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway);
-    if (firstRide < 0) return const [];
-    var t = boardAt.add(Duration(minutes: segs[firstRide].durationMinutes));
-    final rows = <Widget>[];
-    for (final s in segs.skip(firstRide + 1)) {
-      if (s.type == RouteSegmentType.waiting || s.durationMinutes <= 0) continue;
-      final walking = s.type == RouteSegmentType.walking;
-      final name = walking ? '도보' : (s.lineName ?? s.description);
-      final where = [s.startName, s.endName].whereType<String>().where((x) => x.isNotEmpty).join(' → ');
+/// 노선 표시 (네이버 지도의 "262", "1호선" 칸)
+class _LineBadge extends StatelessWidget {
+  const _LineBadge(this.name, this.color);
+  final String name;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
+        child: Text(name, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800)),
+      );
+}
+
+/// 탑승부터 도착 전까지 구간마다 줄을 만들어요 (11/14, 네이버 지도 길찾기처럼).
+///   [262] 서울역버스환승센터 승차  · 8분 뒤 · 13분 뒤 · 15개 정류장 이동 · 31분
+///   청량리수산시장 하차
+///   도보 2분 · 청량리수산시장 → 청량리역
+/// 구간 정보가 없으면 예전처럼 "○○ 탑승" 한 줄만 보여 줘요.
+List<Widget> _journeyRows({
+  required List<RouteSegment>? segs,
+  required DateTime? boardAt,
+  required String transit,
+  required bool missesVehicle,
+  required List<int> soon,
+  int? waitMinutes,
+  required String? boardStop,
+  required String destination,
+}) {
+  final bufferSub = missesVehicle ? '이 시각까지 정류장에 못 가요' : '정류장 여유 ${DepartureOverview.stopBufferMinutes}분 포함';
+  final firstRide = segs == null
+      ? -1
+      : segs.indexWhere((s) => s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway);
+  if (segs == null || boardAt == null || firstRide < 0) {
+    return [
+      _StepRow(
+        time: hm(boardAt),
+        title: '$transit 탑승',
+        sub: bufferSub,
+        late: missesVehicle,
+        line: AppTheme.textStrong.withValues(alpha: 0.75),
+      ),
+    ];
+  }
+  final rows = <Widget>[];
+  var t = boardAt;
+  var pendingWait = 0;
+  var first = true;
+  for (final s in segs.skip(firstRide)) {
+    if (s.type == RouteSegmentType.waiting) {
+      if (!first) pendingWait += s.durationMinutes; // 환승 대기
+      continue;
+    }
+    if (s.type == RouteSegmentType.walking) {
+      if (s.durationMinutes <= 0) continue;
+      final to = (s.endName == null || s.endName!.isEmpty || s.endName == '도착지') ? destination : s.endName!;
+      final from = s.startName ?? '';
       rows.add(_StepRow(
-        time: hm(t),
-        title: '$name ${s.durationMinutes}분',
-        sub: where,
-        line: walking ? AppTheme.border : AppTheme.textStrong.withValues(alpha: 0.75),
+        time: '',
+        title: '도보 ${s.durationMinutes}분',
+        sub: from.isEmpty ? to : '$from → $to',
+        dot: Colors.white,
+        dotBorder: AppTheme.textMuted,
+        line: AppTheme.border,
       ));
       t = t.add(Duration(minutes: s.durationMinutes));
+      continue;
     }
-    return rows;
+    // 탈것
+    t = t.add(Duration(minutes: pendingWait));
+    final color = RouteCompareMap.segmentColor(s);
+    final name = (s.lineName == null || s.lineName!.isEmpty) ? (s.type == RouteSegmentType.bus ? '버스' : '지하철') : s.lineName!;
+    final unit = s.type == RouteSegmentType.subway ? '역' : '정류장';
+    final move = s.stopCount != null && s.stopCount! > 0
+        ? '${s.stopCount}개 $unit 이동 · ${s.durationMinutes}분'
+        : '${s.durationMinutes}분 이동';
+    final start = s.startName ?? (first ? boardStop : null) ?? '정류장';
+    rows.add(_StepRow(
+      time: hm(t),
+      lead: _LineBadge(name, color),
+      title: '$start 승차',
+      sub: first ? bufferSub : (pendingWait > 0 ? '환승 · 대기 약 $pendingWait분' : '환승'),
+      late: first && missesVehicle,
+      dot: color,
+      line: color,
+      extra: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // 가장 가까운 차가 정류장에 오기까지 (실시간, 없으면 서버 예상 대기)
+        if (first && (soon.isNotEmpty || (waitMinutes != null && waitMinutes > 0)))
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Text(
+                  soon.isNotEmpty
+                      ? (soon.first == 0 ? '가장 가까운 $name 곧 도착' : '가장 가까운 $name ${soon.first}분 뒤 도착')
+                      : '$name 약 $waitMinutes분 뒤 도착 (예상)',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.danger)),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(move, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+        ),
+      ]),
+    ));
+    t = t.add(Duration(minutes: s.durationMinutes));
+    rows.add(_StepRow(
+      time: hm(t),
+      title: '${s.endName ?? '내릴 곳'} 하차',
+      sub: '',
+      dot: Colors.white,
+      dotBorder: color,
+      line: AppTheme.border,
+    ));
+    pendingWait = 0;
+    first = false;
+  }
+  return rows;
 }
 
 class _StatBox extends StatelessWidget {
@@ -448,7 +551,17 @@ class _StepRow extends StatelessWidget {
     this.line,
     this.late = false,
     this.last = false,
+    this.lead,
+    this.extra,
+    this.dotBorder,
   });
+
+  /// 제목 앞에 붙는 노선 표시
+  final Widget? lead;
+  /// 설명 아래 덧붙이는 줄 (실시간 도착, 정류장 수)
+  final Widget? extra;
+  /// 점 테두리 색 (없으면 [dot])
+  final Color? dotBorder;
 
   final String time;
   final String title;
@@ -495,7 +608,7 @@ class _StepRow extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: dot ?? Colors.white,
-                  border: Border.all(color: dot ?? AppTheme.textMuted, width: 2),
+                  border: Border.all(color: dotBorder ?? dot ?? AppTheme.textMuted, width: 2),
                 ),
               ),
             ),
@@ -506,9 +619,16 @@ class _StepRow extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.only(bottom: last ? 0 : 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              if (lead == null)
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700))
+              else
+                Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                  lead!,
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                ]),
               if (sub.isNotEmpty)
                 Text(sub, style: TextStyle(fontSize: 13, color: late ? AppTheme.danger : AppTheme.textMuted)),
+              if (extra != null) extra!,
             ]),
           ),
         ),

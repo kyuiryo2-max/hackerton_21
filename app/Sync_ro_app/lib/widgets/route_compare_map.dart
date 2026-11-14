@@ -40,7 +40,12 @@ class RouteCompareMap extends StatelessWidget {
     this.liveDot,
     this.liveHeading,
     this.passedPath = const [],
+    this.followPoint,
   });
+
+  /// 이동 중: 이 점(내 위치)을 가운데 두고 크게, 움직이면 따라가요 (내비게이션처럼, 11/14).
+  /// 손으로 지도를 옮기면 잠시(10초) 따라가기를 멈춰요.
+  final LatLng? followPoint;
 
   /// 이동 중 지금 있을 것으로 보이는 곳 (시간 기준 추정, 11/13)
   final LatLng? liveDot;
@@ -389,19 +394,11 @@ class RouteCompareMap extends StatelessWidget {
               child: const Text('경로 좌표가 없어 지도를 그릴 수 없어요', style: TextStyle(color: AppTheme.textMuted)),
             )
           else
-            FlutterMap(
+            _MapView(
               key: ValueKey(cameraKey),
-              options: MapOptions(
-                initialCenter: points.first,
-                initialZoom: 13,
-                initialCameraFit: points.length >= 2
-                    ? CameraFit.coordinates(
-                        coordinates: points,
-                        padding: const EdgeInsets.fromLTRB(40, 56, 40, 40),
-                        maxZoom: 16,
-                      )
-                    : null,
-              ),
+              all: points,
+              start: _startFocus(selected),
+              follow: followPoint,
               children: [
                 MapTiles.layer(),
                 PolylineLayer(polylines: lines),
@@ -426,6 +423,20 @@ class RouteCompareMap extends StatelessWidget {
         ]),
       ),
     );
+  }
+
+  /// 휴대폰에서 처음 보여 줄 출발점 쪽: 출발지, 경유지, 첫 탑승 정류장
+  List<LatLng> _startFocus(RouteCandidate? selected) {
+    final out = <LatLng>[if (origin != null) origin!, if (stopPoint != null) stopPoint!];
+    if (selected != null) {
+      for (final s in selected.segments) {
+        if ((s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway) && s.geometry.isNotEmpty) {
+          out.add(LatLng(s.geometry.first.latitude, s.geometry.first.longitude));
+          break;
+        }
+      }
+    }
+    return out;
   }
 
   static Marker _endMarker(LatLng p, String label, {required bool square}) => Marker(
@@ -502,5 +513,89 @@ class RouteTimeStrip extends StatelessWidget {
         ),
       );
     });
+  }
+}
+
+/// 지도: 평소엔 경로 전체, 이동 중엔 내 위치를 따라가요 (11/14)
+class _MapView extends StatefulWidget {
+  const _MapView({super.key, required this.all, required this.children, this.follow, this.start = const []});
+
+  final List<LatLng> all;
+  /// 휴대폰처럼 좁은 화면에서 처음 보여 줄 출발점 쪽 점들
+  final List<LatLng> start;
+  final LatLng? follow;
+  final List<Widget> children;
+
+  @override
+  State<_MapView> createState() => _MapViewState();
+}
+
+class _MapViewState extends State<_MapView> {
+  static const double _followZoom = 17;
+  final MapController _map = MapController();
+  bool _ready = false;
+  /// 손으로 지도를 옮기면 잠시 따라가기를 멈춰요
+  DateTime? _pausedUntil;
+
+  CameraFit? get _fitAll => _fit(widget.all, 16);
+
+  static CameraFit? _fit(List<LatLng> pts, double maxZoom) => pts.length >= 2
+      ? CameraFit.coordinates(
+          coordinates: pts,
+          padding: const EdgeInsets.fromLTRB(40, 56, 40, 40),
+          maxZoom: maxZoom,
+        )
+      : null;
+
+  @override
+  void didUpdateWidget(covariant _MapView old) {
+    super.didUpdateWidget(old);
+    if (!_ready) return;
+    final f = widget.follow;
+    if (f == null) {
+      // 이동을 마치면 다시 처음 보기 (휴대폰은 출발점 쪽, 넓은 화면은 경로 전체)
+      final phone = MediaQuery.sizeOf(context).width < 600 && widget.start.isNotEmpty;
+      final fit = phone ? _fit(widget.start, 17) : _fitAll;
+      if (old.follow != null && fit != null) _map.fitCamera(fit);
+      return;
+    }
+    if (old.follow == null) {
+      _pausedUntil = null;
+      _map.move(f, _followZoom); // 이동 시작: 내 위치로 크게
+      return;
+    }
+    final paused = _pausedUntil != null && DateTime.now().isBefore(_pausedUntil!);
+    if (!paused && f != old.follow) {
+      final z = _map.camera.zoom;
+      _map.move(f, z < 15 ? _followZoom : z);
+    }
+  }
+
+  @override
+  void dispose() {
+    _map.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final f = widget.follow;
+    // 휴대폰: 이동 전에도 출발점 쪽부터 크게 (11/14)
+    final phoneStart = MediaQuery.sizeOf(context).width < 600 && widget.start.isNotEmpty;
+    return FlutterMap(
+      mapController: _map,
+      options: MapOptions(
+        initialCenter: f ?? (phoneStart ? widget.start.first : widget.all.first),
+        initialZoom: f != null ? _followZoom : (phoneStart ? 16 : 13),
+        initialCameraFit: f != null ? null : (phoneStart ? _fit(widget.start, 17) : _fitAll),
+        onMapReady: () => _ready = true,
+        onPositionChanged: (camera, hasGesture) {
+          if (hasGesture && widget.follow != null) {
+            _pausedUntil = DateTime.now().add(const Duration(seconds: 10));
+          }
+        },
+      ),
+      children: widget.children,
+    );
   }
 }
