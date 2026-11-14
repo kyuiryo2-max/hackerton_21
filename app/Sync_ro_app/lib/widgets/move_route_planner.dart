@@ -297,7 +297,11 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       final reach = t.add(Duration(minutes: walks[k - 1]));
       final board = reach.add(Duration(minutes: waits[k - 1]));
       final getOff = prev.endName?.trim().isNotEmpty == true ? prev.endName!.trim() : '환승 장소';
+      // 갈아탈 곳 좌표: 다음 차 구간의 첫 점, 없으면 앞 차 구간의 끝 점 (환승 지점 들르기 계산용, 11/14)
+      final at = next.geometry.isNotEmpty ? next.geometry.first : (prev.geometry.isNotEmpty ? prev.geometry.last : null);
       out.add(TripTransfer(
+        lat: at?.latitude,
+        lng: at?.longitude,
         getOffAt: t,
         getOffName: getOff,
         rideName: _rideNameOf(null, next),
@@ -562,6 +566,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final todo = res.todo;
     final savedId = widget.isDemo ? null : todo?['id'];
 
+    // 0. 버스 안에서 물은 환승 지점 들르기 (11/14): 아직 내리기 전이라 지금 경로엔 넣지 않고 할 일로 남겨요
+    if (intent == 'stopover_check' && r['feasible'] == true && r['add_now'] == false && savedId != null) {
+      return TripAskReply('${res.answer} 할 일 목록에 남겨 뒀어요. 갈아타는 곳에서 다시 물어보면 경유지로 넣을 수 있어요.');
+    }
     // 1. 들를 수 있는 들르기: 서버가 할 일로 저장해 뒀어요 → 지금 경로에 경유지로 넣을지 물어봐요
     if (intent == 'stopover_check' && r['feasible'] == true && savedId != null) {
       return TripAskReply('${res.answer} 경유지로 추가할까요?', actions: [

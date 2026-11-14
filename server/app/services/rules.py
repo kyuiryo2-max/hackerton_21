@@ -56,6 +56,10 @@ _SCHEDULE_NOISE = re.compile(
 _SCHEDULE_LOCATION = re.compile(r"([가-힣A-Za-z0-9]{2,}?(?:역|공항|터미널|병원|학교|회사))")
 
 
+# "커피 샀어", "나 이어폰 샀어", "현금 뽑았어" → 할 일 완료 (11/14 사용 테스트: 키워드 규칙이 범위 밖으로 분류)
+_DONE = re.compile(r"^(?:아\s*)?(?:나\s+)?(.+?)\s*(?:은|는|을|를|도)?\s*(?:다\s*)?(?:샀어|샀다|샀음|샀어요|뽑았어|찾았어|부쳤어)\s*[.!~]*$")
+# "환승역에서", "환승하기 전에"는 경로 변경(환승 적은 길)이 아니에요 (인터뷰 P1)
+_TRANSFER_PLACE = re.compile(r"환승\s*(?:역|정류장|하기\s*전|할\s*때|하는\s*곳|전에)")
 _ASK_BUY = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:하나\s*)?사\s*(?:도|가도|고\s*가도|러\s*가도)\s*(?:돼|되|될까|괜찮|안\s*늦)")
 _ASK_STOP = re.compile(r"^(?:아\s*맞다|아)?\s*(.+?)\s*(?:잠깐\s*)?(?:들러도|들렀다\s*가도|들렀다가\s*가도|들르면|갔다\s*와도|가도)\s*(?:돼|되|될까|괜찮|안\s*늦)")
 
@@ -158,7 +162,16 @@ def classify_question(text: str) -> dict:
         intents = [schedule]
     elif _is_future_todo(text):
         intents = [_todo_item(text)]
+    done = None if intents else _DONE.match(text.strip())
+    if done:
+        intents = [{"intent": "change_todo", "place_types": [], "delay_minutes": None,
+                    "action": "done", "todo_text": done[1].strip()}]
     names = [] if intents else [n for n, words in INTENT_WORDS.items() if any(w in text for w in words)]
+    if "change_route" in names and _TRANSFER_PLACE.search(text):
+        names.remove("change_route")
+    # "다른 카페도 안 될까?": 장소 종류가 있는데 다른 질문 종류가 안 잡히면 들르기예요 (앞 답변 말고 다른 곳)
+    if not intents and not names and "다른" in text and place_types_in(text):
+        names = ["stopover_check"]
     # "안 사도 돼"는 빼기예요. "사도"만으로 들르기가 잡혔으면 들르기를 지워요
     if "change_todo" in names and "stopover_check" in names and not any(w in text for w in STOPOVER_ONLY):
         names.remove("stopover_check")

@@ -237,3 +237,33 @@ def test_질문형_들르기는_할_일_이름을_다듬음():
     assert rules.todo_text("편의점 들러도 돼?") == "편의점 들르기"
     assert rules.todo_text("약국 들렀다 가도 안 늦어?") == "약국 들르기"
     assert rules.todo_text("아 우유 사야 돼") == "우유 사기"
+
+
+# ---------- 키워드 규칙 보강 (11/14 사용 테스트·인터뷰) ----------
+from app.services import rules as _rules  # noqa: E402
+
+
+def _names(text):
+    return [i["intent"] for i in _rules.classify_question(text)["intents"]]
+
+
+def test_규칙_샀어는_할_일_완료():
+    c = _rules.classify_question("커피 샀어")
+    assert c["intents"][0]["intent"] == "change_todo"
+    assert (c["intents"][0]["action"], c["intents"][0]["todo_text"]) == ("done", "커피")
+    assert _rules.classify_question("나 이어폰 샀어")["intents"][0]["todo_text"] == "이어폰"
+
+
+def test_규칙_다른_카페는_들르기():
+    c = _rules.classify_question("다른 카페도 안 될까?")
+    assert c["intents"][0]["intent"] == "stopover_check" and c["intents"][0]["place_types"] == ["카페"]
+    assert c["needs_confirm"] is False
+
+
+def test_규칙_환승역에서_들르기는_경로_변경이_아님():
+    assert _names("환승역에서 빵집 들렀다 가도 돼?") == ["stopover_check"]
+    assert _names("환승 적은 걸로 바꿔 줘") == ["change_route"]
+
+
+def test_규칙_지각했어는_완료가_아님():
+    assert "change_todo" not in _names("나 지각했어")

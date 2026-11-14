@@ -675,3 +675,87 @@ def test_타는_중_들르기는_목적지에_내려서_들르라고_안내(clie
     assert "청량리역에 내려서" in r["answer"] or "청량리역에 내린 뒤" in r["answer"]
     assert r["result"]["place"]["name"] in r["answer"]
     assert r["todo"]["text"] == "편의점 들르기"
+
+
+# ---------- 인터뷰·사용 테스트 반영 (11/14) ----------
+OTHER_CU = {"name": "GS25 환승점", "address": "서울 종로구 종로 100", "lng": 127.0310, "lat": 37.5870}
+
+
+def _transfer_trip(minutes_to_board: int, phase: str = "waiting") -> dict:
+    """버스 → 1호선 경로에서 1호선으로 갈아타는 곳 (인터뷰 P1·P3)."""
+    now = datetime.now().astimezone().replace(microsecond=0)
+    trip = {"phase": phase, "now": now.isoformat(), "ride_name": "273번" if phase == "riding" else "1호선",
+            "stop_name": "종로3가역", "destination": "시청", "next_vehicles_min": [],
+            "transfer": {"get_off_name": "종로3가", "stop_name": "종로3가역", "lat": 37.5704, "lng": 126.9921,
+                         "ride_name": "1호선",
+                         "get_off_at": (now + timedelta(minutes=1)).isoformat() if phase == "riding" else now.isoformat(),
+                         "reach_at": (now + timedelta(minutes=3)).isoformat() if phase == "riding" else now.isoformat(),
+                         "board_at": (now + timedelta(minutes=minutes_to_board)).isoformat()}}
+    return trip
+
+
+def _trip_ask(client, text, trip):
+    return client.post("/api/ask", json={"user_id": "u1", "text": text, "demo": False, "trip": trip}).json()
+
+
+def test_환승_대기_중_들르기는_갈아탈_곳_근처에서_계산(client, far_plan):
+    r = _trip_ask(client, "편의점 들러도 돼?", _transfer_trip(15))
+    res = r["result"]
+    assert res["at_transfer"] is True and res["feasible"] is True and res["add_now"] is True
+    assert res["place"]["name"] == "CU 안암역점" and res["max_stay_min"] >= 1 and res["return_by"]
+    assert "1호선 타기 전에" in r["answer"] and "종로3가역에 돌아오면 돼요" in r["answer"]
+    # 들를 수 있으면 '포함'으로 저장해서 앱이 [경유지로 추가]를 보여 줘요
+    assert r["todo"]["status"] == "포함" and r["todo"]["id"]
+
+
+def test_환승_전_시간이_부족하면_안내하고_대기로_저장(client, far_plan):
+    r = _trip_ask(client, "편의점 들러도 돼?", _transfer_trip(3))
+    assert r["result"]["feasible"] is False and r["result"]["at_transfer"] is True
+    assert "부족해요" in r["answer"] and r["todo"]["status"] == "대기"
+
+
+def test_첫_차_타는_중이면_갈아타기_전에_들를_수_있는지_미리_알려줌(client, far_plan):
+    r = _trip_ask(client, "편의점 들러도 돼?", _transfer_trip(20, phase="riding"))
+    res = r["result"]
+    assert res["feasible"] is True and res["add_now"] is False  # 아직 버스 안이라 지금 경로에 넣지 않아요
+    assert "종로3가에서 내려 1호선으로 갈아타기 전에" in r["answer"]
+    assert r["todo"]["status"] == "대기"
+
+
+def test_갈아타기_정보가_없으면_타는_중은_예전처럼_도착_후_안내(client, far_plan):
+    trip = {"phase": "riding", "now": datetime.now().astimezone().isoformat(), "ride_name": "2115번",
+            "destination": "청량리역", "next_vehicles_min": []}
+    r = _trip_ask(client, "편의점 들러도 돼?", trip)
+    assert r["result"]["after_arrival"] is True and "at_transfer" not in r["result"]
+
+
+def test_다른_가게를_물으면_앞에서_말한_곳을_빼고_답함(client, world, live_ask):
+    """사용 테스트 1번: "다른 카페 갈래"에 같은 가게만 답하던 문제."""
+    world["places"]["편의점"] = [CU, OTHER_CU]
+    setup_user(client, todos=())
+    plan(client)
+    first = live_ask("편의점 들러도 돼?")
+    assert first["result"]["place"]["name"] == "CU 안암역점"
+    other = live_ask("다른 편의점도 안 될까?")
+    assert other["result"]["intent"] == "stopover_check"
+    assert other["result"]["place"]["name"] == "GS25 환승점"
+    again = live_ask("다른 편의점은 없어?")
+    assert again["result"]["place"] is None and "다른 편의점은 찾지 못했어요" in again["answer"]
+
+
+def test_가는_길에_부족하면_목적지_근처_대안과_출발_전_안내(client, world, live_ask):
+    """인터뷰 P4: 이동 중이 빠듯하면 도착 후·출발 전에 들르기."""
+    setup_user(client, hours=0.2, todos=())  # 12분 뒤 도착이라 들를 시간이 없어요
+    plan(client)
+    r = live_ask("편의점 들러도 돼?")
+    assert r["result"]["feasible"] is False
+    assert r["result"]["after_arrival_place"]["name"] == "CU 안암역점"
+    assert "부족해요" in r["answer"] and "출발 전에 미리" in r["answer"] and "내려서 걸어서" in r["answer"]
+
+
+def test_시연_모드_다른_가게는_한_곳뿐이라고_안내(client, monkeypatch):
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(config, "LLM_MODEL", "")
+    r = client.post("/api/ask", json={"user_id": "demo", "text": "다른 편의점도 안 될까?", "demo": True}).json()
+    assert r["result"]["intent"] == "stopover_check"
+    assert "한 곳뿐이에요" in r["answer"]

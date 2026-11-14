@@ -32,7 +32,12 @@ class TripTransfer {
     required this.stopName,
     required this.reachStop,
     required this.boardAt,
+    this.lat,
+    this.lng,
   });
+  /// 갈아탈 정류장·역 좌표 (경로 구간 좌표에서. 모르면 null → 서버가 환승 지점 들르기를 계산하지 않아요)
+  final double? lat;
+  final double? lng;
   /// 앞 차에서 내리는 시각·곳
   final DateTime getOffAt;
   final String getOffName;
@@ -159,6 +164,20 @@ class TripPlan {
       ];
 
   /// 서버 /api/ask 의 trip 값
+  /// 들르기 질문에 쓸 갈아타기 (11/14, 인터뷰 P1·P3). 환승하러 걷는 중·환승 대기면 지금 갈아탈 곳,
+  /// 갈아탈 차가 남은 차를 타는 중이면 다음에 갈아탈 곳이에요. 좌표를 모르면 null
+  TripTransfer? transferFor(TripPhase phase, int leg) {
+    final TripTransfer? t;
+    if ((phase == TripPhase.toStop || phase == TripPhase.waiting) && leg > 0) {
+      t = transfers[leg - 1];
+    } else if (phase == TripPhase.riding && !isLastLeg(leg)) {
+      t = transfers[leg];
+    } else {
+      t = null;
+    }
+    return t == null || t.lat == null || t.lng == null ? null : t;
+  }
+
   /// 갈아타는 중이면 지금 탈(타고 있는) 차의 정류장·이름·탑승 시각을 보내요 (11/14)
   Map<String, dynamic> toAskJson(TripPhase phase, DateTime now, [int leg = 0]) => {
         'phase': phase.code,
@@ -172,6 +191,17 @@ class TripPlan {
         'destination': destination,
         // 실시간 도착은 첫 차 정류장 것만 있어요
         'next_vehicles_min': leg == 0 ? soonMinutes(now) : const <int>[],
+        if (transferFor(phase, leg) case final t?)
+          'transfer': {
+            'get_off_name': t.getOffName,
+            'get_off_at': _iso(t.getOffAt),
+            'stop_name': t.stopName,
+            'lat': t.lat,
+            'lng': t.lng,
+            'reach_at': _iso(t.reachStop),
+            'board_at': _iso(t.boardAt),
+            'ride_name': t.rideName,
+          },
       };
 
   /// 한국 시간 ISO 8601 (+09:00)

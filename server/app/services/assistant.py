@@ -17,7 +17,8 @@ from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
 from app.services import demo, live, llm, planner, rules, trip
 from app.services.planner import ACTIVE, KST, STATUS, _demo_place
-from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, StopDecision, decide_stops
+from app.services.stopover import (DEFAULT_BUFFER_SECONDS, SUBWAY_MARGIN_SECONDS, StopCandidate, StopDecision,
+                                   decide_stops)
 from app.services.timecalc import travel_minutes_from_seconds, wait_minutes_from_seconds
 
 log = logging.getLogger(__name__)
@@ -277,7 +278,109 @@ def _combine_stops(state: dict, results: list[dict], answers: list[str], intents
     return out
 
 
+# ---------- "다른 카페" · 환승 지점 들르기 · 도착 후 대안 (11/14, 사용 테스트·인터뷰 반영) ----------
+OTHER_WORDS = ("다른", "말고")
+
+
+def _wants_other(state: dict) -> bool:
+    """"다른 카페도 안 될까?", "거기 말고"처럼 앞에서 안내한 곳 말고 다른 곳을 원하는지 (사용 테스트 1번)."""
+    return any(w in state["text"] for w in OTHER_WORDS)
+
+
+def _choose_place(found: dict | None, state: dict) -> tuple[dict | None, bool]:
+    """(고른 장소, 다른 곳이 없어서 못 고름).
+
+    "다른 ○○" 질문이면 최근 답변에서 이미 말한 가게를 빼고 다음으로 가까운 곳을 골라요.
+    최근 대화는 사용자별 messages 기록이에요 (시연 demo는 기록이 없어서 그대로 첫 곳).
+    """
+    if found is None or not _wants_other(state):
+        return found, False
+    said = " ".join(m["text"] for m in state.get("history", []) if m.get("role") == "assistant")
+    candidates = found.get("candidates") or [found]
+    rest = [c for c in candidates if c["name"] not in said]
+    if not rest:
+        return None, True
+    return {**rest[0], "candidates": rest}, False
+
+
+def _not_found(where: str, kind: str, no_other: bool) -> str:
+    if no_other:
+        return f"{where} 근처에서 다른 {_josa(kind, '은는')} 찾지 못했어요."
+    return f"{where} 근처에서 {_josa(kind, '을를')} 찾지 못했어요."
+
+
+def _is_subway(ride_name: str | None) -> bool:
+    name = ride_name or ""
+    return name.endswith("선") or "GTX" in name
+
+
+def _transfer_stop(item: dict, state: dict) -> tuple[dict, str] | None:
+    """갈아타는 곳 근처에서 들르기 (인터뷰 P1 "GTX 타기 전 환승역", P3 "학교 버스 타기 전 편의점").
+
+    앱이 보낸 갈아탈 차 시각(board_at)까지 남은 시간에서 여유(정류장 2분, 지하철 +1분)를 빼고,
+    갈아탈 곳 ↔ 가게 왕복 도보 + 머무는 시간이 들어가면 들를 수 있어요. 계산은 모두 코드가 해요.
+    - 환승하러 걷는 중·환승 대기 중: 들를 수 있으면 할 일을 '포함'으로 저장 → 앱 [경유지로 추가]
+    - 첫 차 타는 중: 내려서 갈아타기 전에 들를 수 있는지 미리 알려 주고, 할 일은 '대기'로 남겨요
+    갈아타기 정보가 없거나 다른 단계면 None (원래 처리).
+    """
+    t = state.get("trip")
+    tr = getattr(t, "transfer", None)
+    if tr is None or t.phase not in ("to_stop", "waiting", "riding") or not item["place_types"]:
+        return None
+    kind = item["place_types"][0]
+    riding = t.phase == "riding"
+    where = tr.stop_name or "갈아탈 곳"
+    ride = tr.ride_name or "다음 차"
+    found = planner._near_place({"place_types": item["place_types"]}, (tr.lng, tr.lat), {})
+    place, no_other = _choose_place(found, state)
+    out = {"intent": "stopover_check", "feasible": False, "at_transfer": True, "add_now": not riding,
+           "place": None, "max_stay_min": None, "board_at": tr.board_at.isoformat(), "return_by": None,
+           "insert_at": None, "can_add_todo": True}
+    if place is None:
+        return out, _not_found(where, kind, no_other)
+    out["place"] = {"name": place["name"], "address": place["address"]}
+    buffer = DEFAULT_BUFFER_SECONDS + (SUBWAY_MARGIN_SECONDS if _is_subway(tr.ride_name) else 0)
+    start = max(t.now, tr.reach_at or tr.get_off_at or t.now)  # 갈아탈 곳에 닿은 뒤부터 쓸 수 있어요
+    free = int((tr.board_at - start).total_seconds()) - buffer
+    walk, stay = place["round_trip_walk_seconds"], place["stay_seconds"]
+    walk_min = travel_minutes_from_seconds(walk // 2)
+    if free >= walk + stay:
+        max_stay = wait_minutes_from_seconds(free - walk)
+        return_by = tr.board_at - timedelta(seconds=buffer)
+        out.update(feasible=True, max_stay_min=max_stay, return_by=return_by.isoformat())
+        _remember_todo(state, item, StopDecision(-1, "ask" if riding else "included"), place, t.now)
+        lead = (f"{tr.get_off_name or where}에서 내려 {trip._ro(ride)} 갈아타기 전에" if riding
+                else f"{ride} 타기 전에")
+        return out, (f"{lead} 걸어서 {walk_min}분 거리의 {place['name']}에 들를 수 있어요. "
+                     f"최대 {max_stay}분 있어도 되고, {_hhmm(return_by)}까지 {where}에 돌아오면 돼요.")
+    _remember_todo(state, item, StopDecision(-1, "ask"), place, t.now)
+    left = wait_minutes_from_seconds(max(free, 0))
+    need = travel_minutes_from_seconds(walk + stay)
+    return out, (f"{ride} 타기 전 여유가 {left}분이라, {place['name']}에 다녀오기(약 {need}분)엔 시간이 부족해요. "
+                 "도착한 뒤에 들르는 걸 추천해요.")
+
+
+def _later_hint(item: dict, state: dict, plan) -> tuple[dict | None, str]:
+    """가는 길에 들르기엔 시간이 부족할 때의 대안 (인터뷰 P4: 출발 전이나 도착 후에 들름).
+
+    목적지 근처 가게를 찾아 "내려서 걸어서 N분 거리의 ○○"으로 구체적으로 알려 주고,
+    다음엔 출발 전에 미리 들르라고 덧붙여요. 목적지를 모르면 문장만 안내해요.
+    """
+    dest = getattr(state.get("trip"), "destination", None) or getattr(plan, "destination_name", "") or "목적지"
+    found = None
+    if item["place_types"] and getattr(plan, "destination", None) is not None:
+        found = planner._near_place({"place_types": item["place_types"]}, plan.destination, {})
+    if not found:
+        return None, "도착한 뒤에 들르거나, 다음엔 출발 전에 미리 들러 두는 걸 추천해요."
+    walk_min = travel_minutes_from_seconds(found["round_trip_walk_seconds"] // 2)
+    return ({"name": found["name"], "address": found["address"]},
+            f"{dest}에 내려서 걸어서 {walk_min}분 거리의 {found['name']}에 들르거나, 다음엔 출발 전에 미리 들러 두는 걸 추천해요.")
+
+
 def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
+    by_transfer = _transfer_stop(item, state)
+    if by_transfer is not None:
+        return by_transfer
     places = {p["place_type"]: p for p in demo.scenario()["places"]}
     place = next((places[t] for t in item["place_types"] if t in places), None)
     if place is None:
@@ -307,8 +410,15 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         if ins is not None:
             return out, (f"{ins['label']} {place['name']}에 들를 수 있어요. "
                          f"최대 {out['max_stay_min']}분 있어도 돼요.")
-        return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
-    return out, _short_answer(place, state)
+        return out, f"{_only_one(item, place, state)}{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
+    return out, _only_one(item, place, state) + _short_answer(place, state)
+
+
+def _only_one(item: dict, place: dict, state: dict) -> str:
+    """시연 지역은 종류마다 가게가 한 곳이라, "다른 카페"를 물으면 그렇다고 먼저 말해요."""
+    if not _wants_other(state) or not item["place_types"]:
+        return ""
+    return f"시연 지역에서는 {_josa(item['place_types'][0], '이가')} {place['name']} 한 곳뿐이에요. "
 
 
 def _late_answer(delay, board_at, arrive_at, on_time: bool | None) -> str:
@@ -525,6 +635,9 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
 
     계획 뒤에 지난 시간만큼 정류장까지 걸어갔다고 보고 처음 도보를 줄여요 (현재 위치를 다시 받지 않아서 추정이에요).
     """
+    by_transfer = _transfer_stop(item, state)
+    if by_transfer is not None:
+        return by_transfer
     ctx = _live_context(state)
     if ctx is None:
         return _no_plan("stopover_check")
@@ -533,12 +646,13 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         # 타는 중이면 중간에 내리라고 하지 않고, 목적지에 내린 뒤 근처에서 들르라고 안내해요 (11/14)
         return _after_arrival_stop(item, state, plan, now)
     stop = tuple(plan.leg["start"])
-    place = planner._near_place({"place_types": item["place_types"]}, stop, {}) if item["place_types"] else None
+    found = planner._near_place({"place_types": item["place_types"]}, stop, {}) if item["place_types"] else None
+    place, no_other = _choose_place(found, state)
     if place is None:
         kind = item["place_types"][0] if item["place_types"] else "들를 곳"
         return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None,
                  "board_at": None, "insert_at": None},
-                f"정류장 근처에서 {_josa(kind, '을를')} 찾지 못했어요.")
+                _not_found("정류장", kind, no_other))
     timing = replace(plan.timing, first_walk_seconds=max(plan.timing.first_walk_seconds - elapsed, 0),
                      vehicle_seconds=vehicles)
     deadline = int((plan.arrive_by - now).total_seconds())
@@ -576,7 +690,13 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
             return out, (f"{ins['label']} {place['name']}에 들를 수 있어요. "
                          f"최대 {out['max_stay_min']}분 있어도 돼요.")
         return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
-    return out, _short_answer(place, state)
+    if state.get("stopovers", 1) > 1:
+        return out, _short_answer(place, state)
+    # 가는 길엔 부족하면 도착 후·출발 전 대안을 구체적으로 (인터뷰 P4)
+    later, hint = _later_hint(item, state, plan)
+    if later is not None:
+        out["after_arrival_place"] = later
+    return out, f"가는 길에 {place['name']}에 들르기엔 시간이 부족해요. {hint}"
 
 
 def _after_arrival_stop(item: dict, state: dict, plan, now) -> tuple[dict, str]:
@@ -585,12 +705,14 @@ def _after_arrival_stop(item: dict, state: dict, plan, now) -> tuple[dict, str]:
     할 일은 저장해 두고(시간이 부족한 들르기처럼 '대기'), 지금 경로에 경유지로 넣지는 않아요.
     """
     kind = item["place_types"][0] if item["place_types"] else "들를 곳"
-    place = planner._near_place({"place_types": item["place_types"]}, plan.destination, {}) if item["place_types"] else None
+    found = planner._near_place({"place_types": item["place_types"]}, plan.destination, {}) if item["place_types"] else None
+    place, no_other = _choose_place(found, state)
     dest_name = getattr(state.get("trip"), "destination", None) or plan.destination_name or "목적지"
     out = {"intent": "stopover_check", "feasible": False, "after_arrival": True, "place": None,
            "max_stay_min": None, "board_at": None, "insert_at": None, "can_add_todo": True}
     if place is None:
-        return out, f"지금은 타고 가는 중이라 내려서 들르기는 어려워요. {_copula(dest_name)} 근처에서도 {_josa(kind, '을를')} 찾지 못했어요."
+        missing = f"다른 {_josa(kind, '은는')}" if no_other else _josa(kind, '을를')
+        return out, f"지금은 타고 가는 중이라 내려서 들르기는 어려워요. {_copula(dest_name)} 근처에서도 {missing} 찾지 못했어요."
     out["place"] = {"name": place["name"], "address": place["address"]}
     walk = place.get("round_trip_walk_seconds")
     walk_min = travel_minutes_from_seconds(walk // 2) if walk else None
@@ -658,7 +780,8 @@ def _live_place_info(item: dict, state: dict) -> tuple[dict, str]:
     plan = ctx[0]
     if item["place_types"]:
         found = planner._near_place({"place_types": item["place_types"]}, tuple(plan.leg["start"]), {})
-        places = (found or {}).get("candidates", [])
+        chosen, _ = _choose_place(found, state)  # "다른 약국 어디야?"면 앞에서 말한 곳을 빼요
+        places = (chosen or {}).get("candidates", [])
     else:
         places = [p for _, p in _live_included(plan, state["user_id"])]
     if not places:
@@ -755,7 +878,7 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
     result, results, answers = None, [], []
     used_trip = False
     state = {"user_id": user_id, "text": text, "elapsed": 0, "todo": None, "todos": [],
-             "drafts": [], "trip": trip_context,
+             "drafts": [], "trip": trip_context, "history": history,
              "stopovers": sum(i["intent"] == "stopover_check" for i in intents)}
     if classified["needs_confirm"]:
         answers.append(classified["question"])
