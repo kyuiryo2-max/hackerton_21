@@ -475,6 +475,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
             final now = _tripClock;
             final phase = trip.steps[_tripIndex(trip)].phase;
             final res = await _askService.ask(text, trip: trip.toAskJson(phase, now));
+            await _afterTodoChange(res);
             return _tripReply(res);
           },
         ),
@@ -518,6 +519,22 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       ]);
     }
     return TripAskReply(res.answer);
+  }
+
+  /// "커피 샀어"·"약은 안 사도 돼"처럼 서버가 할 일을 바꿨으면 할 일 목록을 다시 불러와요 (11/14).
+  /// 완료·제외한 할 일은 지금 경로의 경유지에서도 빼고 경로를 다시 계산해요.
+  Future<void> _afterTodoChange(ServerAskResponse res) async {
+    final r = res.result;
+    if (widget.isDemo || res.needsConfirm || r == null || r['intent'] != 'change_todo' || r['todo_id'] == null) return;
+    await TodoScope.of(context).initialize();
+    if (!mounted) return;
+    final id = '${r['todo_id']}';
+    final trip = _trip;
+    if ((r['action'] == 'done' || r['action'] == 'delete') && activeRouteController.appliedFor(trip)) {
+      final ids = (activeRouteController.appliedTaskId ?? '').split('+').where((x) => x.isNotEmpty && x != id).toList();
+      activeRouteController.setApplied(ids.isEmpty ? null : ids.join('+'), null, trip);
+    }
+    activeRouteController.requestPlanRefresh();
   }
 
   /// 서버가 저장한 할 일을 지금 이동의 경유지로 넣어요. 이미 넣은 곳이 있으면 같이 들러요 ('1+3').

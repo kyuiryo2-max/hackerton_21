@@ -192,6 +192,15 @@ class _TripPanelState extends State<TripPanel> {
       if (message != null) _answer = message;
     });
   }
+  /// 오늘이 아니면 "내일 ", "11/16 "처럼 날짜를 붙여요 (11/14: 내일 일정을 오늘 시작했을 때 시각만 보여 헷갈림)
+  static String _day(DateTime t, DateTime now) {
+    final a = KstTime.toKst(t), b = KstTime.toKst(now);
+    final days = DateTime(a.year, a.month, a.day).difference(DateTime(b.year, b.month, b.day)).inDays;
+    if (days == 0) return '';
+    if (days == 1) return '내일 ';
+    return '${a.month}/${a.day} ';
+  }
+
   ({String title, String sub, String? action}) _status() {
     final p = widget.plan;
     final now = widget.stepNow ?? widget.now;
@@ -205,7 +214,7 @@ class _TripPanelState extends State<TripPanel> {
     // 이동 시작을 일찍 눌렀으면 출발 시각까지 기다리라고 알려 줘요 (11/14 실제 모드)
     if (widget.index == 0 && p.beforeDepart(now) && left(p.depart) >= 1) {
       return (
-        title: '${hm(p.depart)}에 출발하면 돼요',
+        title: '${_day(p.depart, widget.now)}${hm(p.depart)}에 출발하면 돼요',
         sub: '아직 ${left(p.depart)}분 여유 · ${p.hasStop ? '${p.placeName} 들러서 ' : ''}${p.rideName} ${hm(p.boardAt)} 탑승',
         action: '지금 출발했어요',
       );
@@ -251,6 +260,9 @@ class _TripPanelState extends State<TripPanel> {
   Widget build(BuildContext context) {
     final s = _status();
     final progress = widget.plan.progressAt(widget.stepNow ?? widget.now, widget.index);
+    // 위 문장과 같은 기준으로: 단계를 일찍 넘겼으면 출발·도착 시각도 그만큼 당겨서 보여 줘요 (11/14)
+    final early = (widget.stepNow ?? widget.now).difference(widget.now);
+    String label(DateTime t) => '${_day(t.subtract(early), widget.now)}${KstTime.hm(t.subtract(early))}';
     return Material(
       elevation: 6,
       borderRadius: BorderRadius.circular(18),
@@ -307,9 +319,9 @@ class _TripPanelState extends State<TripPanel> {
           }),
           const SizedBox(height: 4),
           Row(children: [
-            Text('${KstTime.hm(widget.plan.depart)} 출발', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+            Text('${label(widget.plan.depart)} 출발', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
             const Spacer(),
-            Text('${KstTime.hm(widget.plan.arriveAt)} 도착', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+            Text('${label(widget.plan.arriveAt)} 도착', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
           ]),
           if (s.action != null) ...[
             const SizedBox(height: 8),
