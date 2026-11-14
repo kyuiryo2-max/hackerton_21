@@ -137,6 +137,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       // Manual searches have no server schedule id, so do not fabricate a
       // stopover plan; ask the user to run the search again.
       if (_manualIsActive) {
+        activeRouteController.clearSearch();
         setState(() {
           _manualIsActive = false;
           _manualExpanded = true;
@@ -269,7 +270,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Future<void> _loadScheduleRoutes(Schedule schedule) async {
     if (_origin == null || _scheduleDestination == null) return;
     final serial = ++_scheduleRequestSerial;
-    activeRouteController.clearSearch();
+    // 지도·경로 카드는 그대로 두고 새 결과가 오면 바꿔요 (다시 찾을 때 화면이 꺼졌다 켜지지 않게, 11/14)
     setState(() { _loadingSchedule = true; _scheduleError = null; });
     try {
       if (!ApiConfig.demoMode) {
@@ -317,7 +318,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       }
     } catch (e) {
       if (mounted && serial == _scheduleRequestSerial) {
-        activeRouteController.clearSearch();
+        // 이전 결과가 있으면 그대로 두고 오류만 알려요
         setState(() => _scheduleError = '$e');
       }
     } finally {
@@ -509,7 +510,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             Expanded(child: Text(_manualIsActive ? '직접 검색한 이동 경로' : '다음 일정의 추천 경로',
                 style: Theme.of(context).textTheme.titleLarge)),
             TextButton.icon(onPressed: () {
-              activeRouteController.clearSearch();
+              // 지우지 않고 새 경로가 오면 바꿔요 (11/14)
               _manualIsActive = false;
               if (schedule != null) {
                 if (_origin == null) {
@@ -522,6 +523,26 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
               }
             }, icon: const Icon(Icons.refresh), label: const Text('다음 일정 경로')),
           ]),
+          // 다시 찾는 중: 지도는 그대로, 위에 진행 표시만
+          AnimatedSize(
+            duration: const Duration(milliseconds: 150),
+            child: (_loadingSchedule || _loadingManual || _locating)
+                ? const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Row(children: [
+                      Expanded(child: LinearProgressIndicator(minHeight: 3)),
+                      SizedBox(width: 8),
+                      Text('경로 다시 찾는 중…', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    ]),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+          if (_scheduleError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('경로를 새로 받지 못했어요: $_scheduleError',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error)),
+            ),
           _routePanel(routes: active.routes, selectedId: active.selectedId,
             onSelect: activeRouteController.select, loading: false, error: null,
             originName: active.origin, destinationName: active.destination,

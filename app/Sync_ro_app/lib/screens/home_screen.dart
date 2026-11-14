@@ -898,9 +898,10 @@ class _ModePill extends StatelessWidget {
     if (id == null || !activeRouteController.appliedFor(ActiveRouteController.tripKey(o.destination, o.arriveBy))) {
       return null;
     }
-    final match = o.tasks.where((t) => t.id == id);
-    if (match.isEmpty) return null;
-    task = match.first;
+    // 여러 곳을 고르면 '1+3' (11/14)
+    final match = o.taskFor(id);
+    if (match == null) return null;
+    task = match;
     candidateId = activeRouteController.appliedCandidateId;
   }
   final ranked = o.rank(task, delayMinutes: 0, need: task.needMinutes);
@@ -944,6 +945,18 @@ class _NextCard extends StatelessWidget {
     final h = total ~/ 60, m = total % 60;
     if (h == 0) return '$m분';
     return m == 0 ? '$h시간' : '$h시간 $m분';
+  }
+
+  /// "버스 12분 뒤 도착 · 다음 20분 뒤" / "정류장 대기 약 5분"
+  String? _vehicleLine(DepartureOverview o) {
+    if (o.isEstimate) return null;
+    final soon = o.nextVehiclesAt(now);
+    if (soon.isNotEmpty) {
+      final first = soon.first == 0 ? '곧 도착' : '${soon.first}분 뒤 도착';
+      return soon.length > 1 ? '다음 차 $first · 그다음 ${soon[1]}분 뒤' : '다음 차 $first';
+    }
+    final w = o.waitMinutes;
+    return w == null || w <= 0 ? null : '정류장 대기 약 $w분 (실시간은 출발 30분 전부터)';
   }
 
   (String, Color) _status(DepartureOverview o, [DateTime? stopDepart]) {
@@ -1137,6 +1150,13 @@ class _NextCard extends StatelessWidget {
                   textAlign: TextAlign.end,
                   style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                 ),
+                // 다음 차 대기 (11/14): 실시간이 있으면 "12분 뒤 · 다음 20분", 없으면 서버 대기 시간
+                if (_vehicleLine(o) != null)
+                  Text(
+                    _vehicleLine(o)!,
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primary),
+                  ),
               ]),
             ),
           ]),

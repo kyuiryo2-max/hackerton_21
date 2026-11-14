@@ -66,8 +66,8 @@ class ActiveRouteController extends ChangeNotifier {
   }
   // Any task/schedule change invalidates a previous recommendation immediately.
   // Do not display stopovers from a plan calculated using deleted tasks.
+  // 화면이 꺼졌다 켜지지 않게 이전 결과는 남겨 두고, 이동 탭이 revision을 보고 바로 다시 받아요 (11/14).
   void requestPlanRefresh() {
-    _active = null;
     _revision++;
     notifyListeners();
   }

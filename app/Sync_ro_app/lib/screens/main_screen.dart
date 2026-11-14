@@ -86,7 +86,18 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _openAssistant([String? question]) => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => AssistantScreen(initialQuestion: question)),
+        MaterialPageRoute(builder: (_) => AssistantScreen(
+              initialQuestion: question,
+              // AI 답변의 버튼: 질문 화면을 닫고 그 화면으로 이동해요 (11/14)
+              onNavigate: ({int? tab, Place? destination}) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+                if (destination != null) {
+                  _searchDestination(destination);
+                } else if (tab != null) {
+                  _onDestinationSelected(tab);
+                }
+              },
+            )),
       );
 
   void _openScheduleRoutes(Schedule schedule) {

@@ -242,7 +242,7 @@ class StayVerdictCard extends StatelessWidget {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
               child: _StatBox(
-                label: '머무를 수 있는 시간',
+                label: e.candidate.isMulti ? '${e.candidate.via.length}곳에서 머무를 시간 (합계)' : '머무를 수 있는 시간',
                 value: e.stayLabel,
                 sub: e.status == StayStatus.bad
                     ? '필요 ${e.need}분 · ${e.shortBy}분 부족'
@@ -301,8 +301,14 @@ class StayVerdictCard extends StatelessWidget {
         // 단계별 시각
         _StepRow(time: hm(e.depart), title: '${originName ?? '현재 위치'} 출발',
             sub: '도보 $approx${e.candidate.walkTo}분', line: AppTheme.primary),
-        _StepRow(time: hm(e.arrivePlace), title: '${e.candidate.name} 도착',
-            sub: e.waitMinutes > 0 ? '${e.candidate.openAt} 오픈까지 ${e.waitMinutes}분 대기' : '바로 이용 가능',
+        _StepRow(
+            time: hm(e.arrivePlace),
+            title: e.candidate.isMulti ? '${e.candidate.via.first.name} 도착' : '${e.candidate.name} 도착',
+            sub: e.candidate.isMulti
+                ? '이어서 ${[for (final c in e.candidate.via.skip(1)) c.name].join(' → ')} (장소 사이 도보 약 ${e.candidate.betweenMinutes}분)'
+                : e.waitMinutes > 0
+                    ? '${e.candidate.openAt} 오픈까지 ${e.waitMinutes}분 대기'
+                    : '바로 이용 가능',
             dot: color, line: color),
         _StepRow(
           time: '',
@@ -320,10 +326,13 @@ class StayVerdictCard extends StatelessWidget {
           line: AppTheme.primary,
         ),
         _StepRow(
-          time: hm(e.leavePlace),
+          // 여러 곳이면 장소 사이를 걷는 시간만큼 지난 뒤 마지막 곳에서 나와요
+          time: hm(e.leavePlace.add(Duration(minutes: e.candidate.betweenMinutes))),
           title: e.status == StayStatus.bad ? '경유지 출발' : '늦어도 이때 출발',
-          sub: '${o.boardStopName ?? '정류장'}까지 도보 $approx${e.candidate.walkBack}분'
-              '${e.closeLimited ? ' (${e.candidate.closeAt} 마감)' : ''}',
+          sub: e.candidate.isMulti
+              ? '${e.candidate.via.last.name}에서 ${o.boardStopName ?? '정류장'}까지 도보 약 ${e.candidate.via.last.walkBack}분'
+              : '${o.boardStopName ?? '정류장'}까지 도보 $approx${e.candidate.walkBack}분'
+                  '${e.closeLimited ? ' (${e.candidate.closeAt} 마감)' : ''}',
           line: AppTheme.border,
         ),
         _StepRow(
