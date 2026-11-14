@@ -92,6 +92,12 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   String? _candidateId;
   final Map<String, int> _needOverride = {};
   bool _tripStarted = false;
+  /// 이동 중 화면을 그릴 때의 경로·경유 후보·계획 (이동 중 질문 버튼이 지금 위치를 계산할 때 써요)
+  RouteCandidate? _tripRoute;
+  StayEval? _tripChosen;
+  TripPlan? _tripNow;
+  /// 이동 중 경유지를 바꿔 다시 계산하면, 새 경로가 오는 대로 이동을 그 자리에서 다시 시작해요
+  bool _restartTripOnPlan = false;
 
   // ---------- 이동 중 (11/13): 시간 기준 단계 + 버튼으로 넘기기 ----------
   DateTime? _tripRealStart;
@@ -522,12 +528,25 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   }
 
   /// "커피 샀어"·"약은 안 사도 돼"처럼 서버가 할 일을 바꿨으면 할 일 목록을 다시 불러와요 (11/14).
-  /// 완료·제외한 할 일은 지금 경로의 경유지에서도 빼고 경로를 다시 계산해요.
+  /// - 이동 중: 경로는 그대로 둬요. 가게 안에서 "샀어"라고 하는 게 보통이라 경로가 맞기 때문이에요.
+  ///   그 가게에 머무는 단계면 "나왔어요"를 누른 것처럼 다음 단계로 넘겨요.
+  /// - 이동 전: 완료·제외한 할 일은 경유지에서 빼고 경로를 다시 계산해요.
   Future<void> _afterTodoChange(ServerAskResponse res) async {
     final r = res.result;
     if (widget.isDemo || res.needsConfirm || r == null || r['intent'] != 'change_todo' || r['todo_id'] == null) return;
     await TodoScope.of(context).initialize();
     if (!mounted) return;
+    final plan = _tripNow;
+    if (_tripStarted && plan != null) {
+      final index = _tripIndex(plan);
+      if (r['action'] == 'done' && plan.steps[index].phase == TripPhase.atPlace) {
+        setState(() {
+          _tripManualIndex = index + 1;
+          _manualAt = _tripClock;
+        });
+      }
+      return;
+    }
     final id = '${r['todo_id']}';
     final trip = _trip;
     if ((r['action'] == 'done' || r['action'] == 'delete') && activeRouteController.appliedFor(trip)) {
@@ -537,16 +556,43 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     activeRouteController.requestPlanRefresh();
   }
 
-  /// 서버가 저장한 할 일을 지금 이동의 경유지로 넣어요. 이미 넣은 곳이 있으면 같이 들러요 ('1+3').
+  /// 이동 중 팝업이 시간으로 보여 주는 지금 위치 (GPS 아님). 지도 위 점과 같은 계산이에요.
+  LatLng? _timelinePoint(TripPlan plan, int index) {
+    final route = _tripRoute;
+    if (route == null) return null;
+    final now = _tripClock;
+    final passed = <LatLng>[];
+    for (var i = 0; i < index; i++) {
+      passed.addAll(_stepTrack(plan, i, route, _tripChosen, now).$1);
+    }
+    final (pts, f) = _stepTrack(plan, index, route, _tripChosen, _stepClock(plan, index, now));
+    passed.addAll(_prefix(pts, f));
+    return passed.isEmpty ? null : passed.last;
+  }
+
+  /// 서버가 저장한 할 일을 경유지로 넣고 다시 계산해요.
+  /// - 이동 전: 이미 넣은 곳과 같이 들러요 ('1+3').
+  /// - 이동 중: 팝업의 지금 위치(시간 기준)에서 목적지까지 다시 계산해요. 이미 들른 곳은 빼고,
+  ///   아직 가는 중인 곳(가게로 걷는 단계)은 같이 들러요. 새 경로가 오면 이동을 처음 단계부터 다시 시작해요.
   Future<String?> _addStopFromAsk(String id) async {
     await TodoScope.of(context).initialize();
     if (!mounted) return null;
     final trip = _trip;
-    final current = activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
+    final TripPlan? plan = _tripStarted ? _tripNow : null;
+    final int? index = plan == null ? null : _tripIndex(plan);
+    final keepOld = plan == null || plan.steps[index!].phase == TripPhase.toPlace;
+    final current = keepOld && activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
     final ids = <String>{...?current?.split('+'), id};
     activeRouteController.setApplied(ids.join('+'), null, trip);
-    activeRouteController.requestPlanRefresh();
-    return '경유지에 넣었어요. 경로를 다시 계산할게요.';
+    if (plan == null || index == null) {
+      activeRouteController.requestPlanRefresh();
+      return '경유지에 넣었어요. 경로를 다시 계산할게요.';
+    }
+    final point = _timelinePoint(plan, index);
+    _restartTripOnPlan = true;
+    activeRouteController.requestPlanRefresh(
+        from: point == null ? null : (lat: point.latitude, lng: point.longitude, name: '이동 중 지금 위치'));
+    return '경유지에 넣었어요. 지금 위치에서 다시 계산할게요.';
   }
 
   Future<String?> _addTodoFromAsk(Map<String, dynamic> raw) async {
@@ -619,6 +665,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       if (!sameTrip) {
         _tripStarted = false;
         _stopTrip();
+      } else if (_restartTripOnPlan && _tripStarted) {
+        // 지금 위치에서 다시 계산한 경로라서, 이동도 새 경로의 처음 단계부터 이어 가요
+        _restartTripOnPlan = false;
+        _startTrip();
       }
     }
   }
@@ -1147,6 +1197,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final ordered = _orderedRoutes(applied);
     _shareApplied();
     final trip = _tripStarted ? _tripPlan(route, applied, chosenEval) : null;
+    _tripRoute = route;
+    _tripChosen = chosenEval;
+    _tripNow = trip;
     final tripIndex = trip == null ? 0 : _tripIndex(trip);
     _maybeAutoEnd(trip, tripIndex);
     final track = trip == null ? null : _tripTrack(trip, tripIndex, route, chosenEval);

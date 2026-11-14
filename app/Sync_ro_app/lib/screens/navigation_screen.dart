@@ -138,6 +138,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       // Manual searches have no server schedule id, so do not fabricate a
       // stopover plan; ask the user to run the search again.
       if (_manualIsActive) {
+        activeRouteController.takeReplanFrom();
         activeRouteController.clearSearch();
         setState(() {
           _manualIsActive = false;
@@ -149,6 +150,11 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       final schedule = _explicitSchedule ??
           _nextSchedule(ScheduleScope.of(context).schedules);
       if (schedule == null) return;
+      // 이동 중 경유지를 바꿨으면 이동 중 팝업의 지금 위치(시간 기준)에서 다시 계산해요 (11/14)
+      final from = activeRouteController.takeReplanFrom();
+      if (from != null) {
+        _origin = Place(id: 'trip_point', name: from.name, address: '', latitude: from.lat, longitude: from.lng);
+      }
       if (_origin != null && _scheduleDestination != null) {
         _loadScheduleRoutes(schedule);
       } else if (_origin == null && schedule.originMode != 'place' && !_autoLocating) {

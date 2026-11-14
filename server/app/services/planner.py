@@ -656,7 +656,8 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         planned_at=now, arrive_by=arrive_by or now + timedelta(seconds=NOW_TRIP_DEADLINE_SECONDS),
         leg=best.leg, timing=best.timing, places=dict(best.places), routes=summary,
         basis=best.times["basis"], depart_at=best.times["depart_at"], total_seconds=best.result.total_seconds,
-        has_target=arrive_by is not None))
+        has_target=arrive_by is not None, destination=dest,
+        destination_name=schedule_out["destination"]["name"]))
     out = _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요", explain_todos=False)
     # 오늘 도보 한도를 다 써서 도보 시간을 직선거리로 어림했으면 앱이 알 수 있게 표시해요 (11/13)
     out["walk_estimated"] = kakao.walk_quota_used_up()

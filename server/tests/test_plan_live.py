@@ -663,3 +663,15 @@ def test_이동_중_들르기_할_일_이름은_질문_문장이_아님(client, 
     r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
                                       "trip": trip}).json()
     assert r["todo"]["text"] == "편의점 들르기"
+
+
+def test_타는_중_들르기는_목적지에_내려서_들르라고_안내(client, far_plan):
+    """11/14: 버스를 타는 중이면 중간에 내리라고 하지 않고 목적지 근처 가게를 알려 줘요."""
+    trip = {"phase": "riding", "now": datetime.now().astimezone().isoformat(), "ride_name": "2115번",
+            "destination": "청량리역", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["result"]["feasible"] is False and r["result"]["after_arrival"] is True
+    assert "청량리역에 내려서" in r["answer"] or "청량리역에 내린 뒤" in r["answer"]
+    assert r["result"]["place"]["name"] in r["answer"]
+    assert r["todo"]["text"] == "편의점 들르기"

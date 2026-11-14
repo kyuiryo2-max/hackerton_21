@@ -17,7 +17,7 @@ from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
 from app.services import demo, live, llm, planner, rules, trip
 from app.services.planner import ACTIVE, KST, STATUS, _demo_place
-from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, decide_stops
+from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, StopDecision, decide_stops
 from app.services.timecalc import travel_minutes_from_seconds, wait_minutes_from_seconds
 
 log = logging.getLogger(__name__)
@@ -529,6 +529,9 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     if ctx is None:
         return _no_plan("stopover_check")
     plan, now, elapsed, vehicles = ctx
+    if getattr(state.get("trip"), "phase", None) == "riding" and plan.destination is not None:
+        # 타는 중이면 중간에 내리라고 하지 않고, 목적지에 내린 뒤 근처에서 들르라고 안내해요 (11/14)
+        return _after_arrival_stop(item, state, plan, now)
     stop = tuple(plan.leg["start"])
     place = planner._near_place({"place_types": item["place_types"]}, stop, {}) if item["place_types"] else None
     if place is None:
@@ -574,6 +577,26 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
                          f"최대 {out['max_stay_min']}분 있어도 돼요.")
         return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
     return out, _short_answer(place, state)
+
+
+def _after_arrival_stop(item: dict, state: dict, plan, now) -> tuple[dict, str]:
+    """버스·지하철을 타는 중의 들르기: 목적지 근처 장소를 찾아 "도착해서 들르면 돼요"로 답해요.
+
+    할 일은 저장해 두고(시간이 부족한 들르기처럼 '대기'), 지금 경로에 경유지로 넣지는 않아요.
+    """
+    kind = item["place_types"][0] if item["place_types"] else "들를 곳"
+    place = planner._near_place({"place_types": item["place_types"]}, plan.destination, {}) if item["place_types"] else None
+    dest_name = getattr(state.get("trip"), "destination", None) or plan.destination_name or "목적지"
+    out = {"intent": "stopover_check", "feasible": False, "after_arrival": True, "place": None,
+           "max_stay_min": None, "board_at": None, "insert_at": None, "can_add_todo": True}
+    if place is None:
+        return out, f"지금은 타고 가는 중이라 내려서 들르기는 어려워요. {_copula(dest_name)} 근처에서도 {_josa(kind, '을를')} 찾지 못했어요."
+    out["place"] = {"name": place["name"], "address": place["address"]}
+    walk = place.get("round_trip_walk_seconds")
+    walk_min = travel_minutes_from_seconds(walk // 2) if walk else None
+    _remember_todo(state, item, StopDecision(todo_id=-1, status="ask"), place, now)
+    where = f"{dest_name}에 내려서 걸어서 {walk_min}분" if walk_min else f"{dest_name}에 내린 뒤"
+    return out, f"지금은 타고 가는 중이라 내려서 들르기보다, {where} 거리의 {place['name']}에 들르는 걸 추천해요."
 
 
 def _live_running_late(item: dict, state: dict) -> tuple[dict, str]:
