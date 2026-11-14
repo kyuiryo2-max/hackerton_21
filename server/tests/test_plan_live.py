@@ -612,3 +612,24 @@ def test_도보_한도를_다_쓰면_어림값으로_계획하고_표시(client,
 def test_평소에는_어림_표시가_없음(client, world):
     setup_user(client)
     assert plan(client).json()["walk_estimated"] is False
+
+
+def test_추천_경로는_동시에_계산해서_빠름(client, world, monkeypatch):
+    # 11/14: 첫 조회가 오래 걸렸어요. 카카오 도보 호출 하나가 0.2초 걸린다고 치면
+    # 순서대로는 경로 3개 × (처음·마지막 도보 2번) = 1.2초 이상, 동시에 하면 0.2초 남짓이에요
+    import time as clock
+    route = dict(world["routes"][0])
+    world["routes"] = [route, dict(route), dict(route)]
+    fake = planner.kakao.walk_route
+
+    def slow(*args, **kw):
+        clock.sleep(0.2)
+        return fake(*args, **kw)
+
+    monkeypatch.setattr(planner.kakao, "walk_route", slow)
+    setup_user(client)
+    started = clock.monotonic()
+    res = plan(client, todo_ids=[])
+    took = clock.monotonic() - started
+    assert res.status_code == 200 and len(res.json()["routes"]) == 3
+    assert took < 0.8, f"{took:.2f}초 걸렸어요"
