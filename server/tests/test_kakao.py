@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 import httpx
@@ -274,3 +275,112 @@ def test_도보_경로를_못_찾으면_None(api):
     _, responses = api
     responses["/v2/routing/walk"] = reply({"status": "TOO_FAR_AWAY"})
     assert kakao.walk_route(START, END) is None
+
+
+def test_카카오가_400이면_경로_없음으로(api):
+    # 11/13 배포 앱: "자동 경로 조회 실패: 카카오 API 오류: HTTP 400" 으로 계획 전체가 멈추던 문제
+    _, responses = api
+    responses["/v2/routing/walk"] = reply({"code": -2, "msg": "too far"}, status=400)
+    responses["/v2/routing/publictraffic"] = reply({"code": -2, "msg": "too close"}, status=400)
+    assert kakao.walk_route(START, END, use_cache=False) is None
+    assert kakao.walk_seconds(START, END, use_cache=False) is None
+    assert kakao.transit_routes(START, END, use_cache=False) == []
+
+
+def test_한도_초과는_경로_없음으로_숨기지_않음(api):
+    # 카카오는 하루 호출 한도를 다 쓰면 HTTP 400 + code -10 으로 답해요
+    _, responses = api
+    responses["/v2/routing/publictraffic"] = reply(
+        {"errorType": "BadRequest", "code": -10, "msg": "API limit has been exceeded."}, status=400)
+    with pytest.raises(kakao.KakaoError) as e:
+        kakao.transit_routes(START, END, use_cache=False)
+    assert e.value.quota_exceeded and "limit" in str(e.value)
+
+
+def test_키_오류는_그대로_알리고_이유를_붙임(api):
+    _, responses = api
+    responses["/v2/routing/walk"] = reply({"msg": "wrong appKey"}, status=401)
+    with pytest.raises(kakao.KakaoError) as e:
+        kakao.walk_route(START, END, use_cache=False)
+    assert e.value.status == 401 and "wrong appKey" in str(e.value)
+
+
+LIMIT = {"errorType": "BadRequest", "code": -10, "msg": "API limit has been exceeded."}
+
+
+def test_도보_한도를_다_쓰면_직선거리로_어림(api):
+    # 11/13 배포: 도보 경로 1,025 / 1,000 으로 한도를 넘어 계획 전체가 멈췄어요
+    _, responses = api
+    responses["/v2/routing/walk"] = reply(LIMIT, status=400)
+    r = kakao.walk_route(START, END, use_cache=False)
+    assert r["estimated"] and len(r["legs"]) == 1
+    straight = kakao._straight_m(kakao._rounded(START), kakao._rounded(END))  # 약 1.7km
+    assert r["seconds"] == round(straight * kakao.WALK_DETOUR_RATIO / kakao.WALK_SPEED_MPS)
+    assert r["legs"][0]["points"] == [list(kakao._rounded(START)), list(kakao._rounded(END))]
+    assert kakao.walk_seconds(START, END, use_cache=False) == r["seconds"]
+    via = kakao.walk_route(START, END, via=[(127.035, 37.584)], use_cache=False)
+    assert via["estimated"] and len(via["legs"]) == 2
+
+
+def test_한도를_다_쓰면_자정까지_다시_부르지_않음(api):
+    calls, responses = api
+    responses["/v2/routing/walk"] = reply(LIMIT, status=400)
+    kakao.walk_route(START, END, use_cache=False)
+    assert kakao.walk_quota_used_up()
+    kakao.walk_route(END, START, use_cache=False)
+    kakao.walk_seconds(START, END, use_cache=False)
+    assert len(calls) == 1                       # 처음 한 번만 카카오에 물었어요
+    kakao.clear_cache()
+    assert not kakao.walk_quota_used_up()
+
+
+def test_어림값은_기억하지_않음(api):
+    # 자정 뒤 한도가 풀리면 바로 진짜 도보 시간을 써야 해요
+    calls, responses = api
+    responses["/v2/routing/walk"] = reply(LIMIT, status=400)
+    assert kakao.walk_route(START, END)["estimated"]
+    kakao._quota_blocked_until.clear()           # 자정이 지났다고 쳐요
+    responses["/v2/routing/walk"] = reply(WALK)
+    assert "estimated" not in kakao.walk_route(START, END)
+
+
+def test_현재_위치_호출은_정한_시간만큼만_기억(api, monkeypatch):
+    calls, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    assert len(calls) == 1                       # 새로고침은 저장한 값을 써요
+    now = time.monotonic()
+    monkeypatch.setattr(kakao.time, "monotonic", lambda: now + kakao.ORIGIN_TTL_SECONDS + 1)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    assert len(calls) == 2                       # 5분이 지나면 다시 물어요
+
+
+def test_만료된_현재_위치는_다시_조회하지_않아도_지워짐(api, monkeypatch):
+    # PR #46 리뷰: "5분 뒤 지움"인데 같은 위치로 다시 조회하지 않으면 1시간 뒤에도 남아 있었어요
+    _, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    assert len(kakao._cache) == 1
+    now = time.monotonic()
+    monkeypatch.setattr(kakao.time, "monotonic", lambda: now + 60 * 60)   # 1시간 뒤
+    assert kakao.sweep_expired() == 1                   # 정리 담당이 1분마다 부르는 함수
+    assert kakao._cache == {}
+
+
+def test_새로_저장할_때_만료된_값을_함께_치움(api, monkeypatch):
+    _, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    now = time.monotonic()
+    monkeypatch.setattr(kakao.time, "monotonic", lambda: now + kakao.ORIGIN_TTL_SECONDS + 1)
+    kakao.walk_route(END, START)                        # 다른 구간 조회
+    assert ("walk_route", kakao._rounded(START), kakao._rounded(END), ()) not in kakao._cache
+    assert len(kakao._cache) == 1
+
+
+def test_정리_담당이_떠_있음(api):
+    _, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    assert kakao._sweeper is not None and kakao._sweeper.is_alive() and kakao._sweeper.daemon
