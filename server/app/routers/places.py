@@ -15,6 +15,28 @@ router = APIRouter(prefix="/api", tags=["장소 검색"])
 SEOUL_CITY_HALL = (126.9780, 37.5665)  # (경도, 위도)
 MAX_RADIUS_M = 20000
 RESULT_SIZE = 10
+STATION_CATEGORY = "SW8"  # 카카오 카테고리: 지하철역
+
+
+def _rank(keyword: str, places: list[dict]) -> list[dict]:
+    """다른 지도 앱처럼 짧은 검색어("강남")면 이름이 딱 맞는 곳·역을 먼저 보여 줘요 (11/14).
+
+    0: 이름이 검색어와 같음 / 1: "검색어+역" 또는 검색어로 시작하는 지하철역 / 2: 이름이 검색어로 시작 / 3: 나머지.
+    같은 순위 안에서는 카카오 정확도 순서를 그대로 둬요.
+    """
+    k = keyword.replace(" ", "")
+
+    def score(p: dict) -> int:
+        name = p["name"].replace(" ", "")
+        if name == k:
+            return 0
+        if name == f"{k}역" or (p.get("category") == STATION_CATEGORY and name.startswith(k)):
+            return 1
+        if name.startswith(k):
+            return 2
+        return 3
+
+    return sorted(places, key=score)
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
@@ -42,4 +64,17 @@ def search_places(
                                     size=RESULT_SIZE, sort="accuracy")
     except kakao.KakaoError as e:
         return _error(502, "upstream_error", str(e))
-    return [{k: p[k] for k in ("name", "address", "lat", "lng")} for p in found]
+    found = _rank(keyword, found)
+    # "강남"처럼 역 이름이 될 수 있는 짧은 검색어인데 맞는 곳이 없으면 "강남역"도 찾아 앞에 붙여요 (11/14)
+    short = len(keyword.replace(" ", "")) <= 6 and not keyword.endswith("역")
+    if short and not any(p["name"].replace(" ", "") in (keyword.replace(" ", ""), f"{keyword.replace(' ', '')}역")
+                         or p.get("category") == STATION_CATEGORY for p in found[:3]):
+        try:
+            stations = kakao.search_places(center, keyword=f"{keyword}역", radius_m=MAX_RADIUS_M,
+                                           size=3, sort="accuracy")
+        except kakao.KakaoError:
+            stations = []
+        stations = [p for p in stations if p.get("category") == STATION_CATEGORY]
+        seen = {(p["name"], p["address"]) for p in stations}
+        found = _rank(keyword, stations + [p for p in found if (p["name"], p["address"]) not in seen])
+    return [{k: p[k] for k in ("name", "address", "lat", "lng")} for p in found[:RESULT_SIZE]]
