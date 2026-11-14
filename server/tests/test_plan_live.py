@@ -759,3 +759,13 @@ def test_시연_모드_다른_가게는_한_곳뿐이라고_안내(client, monke
     r = client.post("/api/ask", json={"user_id": "demo", "text": "다른 편의점도 안 될까?", "demo": True}).json()
     assert r["result"]["intent"] == "stopover_check"
     assert "한 곳뿐이에요" in r["answer"]
+
+
+def test_첫차_시각으로_출발하면_실시간_없이_그_시각_기준(client, world):
+    """밤에 다니는 차가 없으면 앱이 다음 첫차 시각(depart_at)으로 다시 물어봐요 (11/15)"""
+    res = plan(client, todo_ids=[], depart_at="2026-11-16T05:30:00+09:00",
+               destination={"name": "서울역", "lat": 37.5547, "lng": 126.9707})
+    assert res.status_code == 200
+    first = res.json()["routes"][0]
+    assert first["basis"] == "scheduled" and first["has_realtime"] is False
+    assert first["depart_at"].startswith("2026-11-16T05:30")

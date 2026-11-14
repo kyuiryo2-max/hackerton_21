@@ -30,6 +30,23 @@ class ServerPlan {
   /// 경로는 받았는데 지금 운행하는 게 하나도 없어요 (막차가 끊긴 시간 등)
   bool get noServiceNow => allRoutes.isNotEmpty && routes.isEmpty;
 
+  /// 밤이라 다음 첫차 시각 기준으로 다시 계산한 계획 (basis "scheduled", 11/15)
+  bool get isFirstTrain => '${data['basis'] ?? ''}' == 'scheduled';
+
+  /// 서울 지하철·버스 첫차가 다니기 시작하는 시각(한국 시간 05:30) 중 가장 가까운 다음 시각
+  static DateTime nextFirstTrain([DateTime? now]) {
+    final kst = (now ?? DateTime.now()).toUtc().add(const Duration(hours: 9));
+    var day = DateTime.utc(kst.year, kst.month, kst.day, 5, 30);
+    if (!kst.isBefore(day)) day = day.add(const Duration(days: 1));
+    return day.subtract(const Duration(hours: 9)); // UTC
+  }
+
+  /// 한국 시간으로 밤(23시~05시 59분)인지. 이때 다니는 차가 없으면 첫차 기준으로 보여 줘요.
+  static bool isNight([DateTime? now]) {
+    final h = (now ?? DateTime.now()).toUtc().add(const Duration(hours: 9)).hour;
+    return h >= 23 || h < 6;
+  }
+
   /// 맨 위 시각(board_at 등)은 서버 1순위 경로 기준이라, 그 경로가 빠졌으면 남은 첫 경로의 값을 써요
   dynamic _top(String key) {
     final all = allRoutes, live = routes;
@@ -71,8 +88,9 @@ class ServerPlanService {
   ServerPlanService({http.Client? client}) : _client = client ?? http.Client();
   final http.Client _client;
   /// [destinationLat]·[destinationLng]를 주면 일정 없이 "지금 출발" 기준으로 계산해요 (홈 검색창, 직접 검색).
+  /// [departAt]을 함께 주면 그 시각 출발 기준이에요 (밤에 다음 첫차, 11/15).
   Future<ServerPlan> fetch({int? scheduleId, List<int>? todoIds, double? originLat, double? originLng,
-      String? destinationName, double? destinationLat, double? destinationLng}) async {
+      String? destinationName, double? destinationLat, double? destinationLng, DateTime? departAt}) async {
     final body = <String, dynamic>{
       'user_id': ApiConfig.userId,
       'demo': ApiConfig.demoMode,
@@ -82,6 +100,8 @@ class ServerPlanService {
         'origin': {'lat': originLat, 'lng': originLng},
       if (!ApiConfig.demoMode && destinationLat != null && destinationLng != null)
         'destination': {'name': destinationName ?? '', 'lat': destinationLat, 'lng': destinationLng},
+      if (!ApiConfig.demoMode && departAt != null && destinationLat != null)
+        'depart_at': departAt.toUtc().toIso8601String(),
     };
     final response = await _client.post(ApiConfig.endpoint('/api/plan'),
       headers: {'Content-Type': 'application/json; charset=utf-8'},

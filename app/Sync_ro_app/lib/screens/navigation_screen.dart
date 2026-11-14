@@ -498,6 +498,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       ));
       if (!mounted || serial != _manualRequestSerial) return;
       final routes = [...result.routes]..sort(_fastestFirst);
+      if (result.notice != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.notice!)));
+      }
       if (routes.isNotEmpty) {
         _manualIsActive = true;
         activeRouteController.setSearch(ActiveRouteSelection(
