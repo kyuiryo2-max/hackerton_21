@@ -175,7 +175,7 @@ class StayVerdictCard extends StatelessWidget {
     } else {
       final latest = e.latestDepart;
       if (latest == null) {
-        line = '영업시간 안에 ${e.need}분을 확보하기 어려워요. 이번엔 빼는 걸 추천해요.';
+        line = '영업시간 안에 ${e.need}분을 확보하기 어려워요. 이번엔 빼고 출발 전이나 도착한 뒤에 들르는 걸 추천해요.';
       } else if (!latest.isBefore(now)) {
         line = '${hm(latest)}까지 출발하면 ${e.need}분을 확보할 수 있어요';
         final delay = o.departure == null ? null : (latest.difference(o.departure!).inSeconds / 60).floor();
@@ -186,7 +186,8 @@ class StayVerdictCard extends StatelessWidget {
           actions.add(_ActionButton(label: '머물 시간 ${e.dwell}분으로 줄이기', onTap: () => onSetNeed!(e.dwell)));
         }
       } else {
-        line = '${hm(latest)}까지 출발했어야 해요. 다음 차를 타거나 이번엔 빼는 걸 추천해요.';
+        // 인터뷰 P4: 이동 중이 빠듯하면 출발 전·도착 후에 들르기 (11/14)
+        line = '${hm(latest)}까지 출발했어야 해요. 다음 차를 타거나, 이번엔 빼고 도착한 뒤에 들르는 걸 추천해요.';
         if (e.dwell >= 1 && onSetNeed != null) {
           actions.add(_ActionButton(label: '머물 시간 ${e.dwell}분으로 줄이기', onTap: () => onSetNeed!(e.dwell)));
         }

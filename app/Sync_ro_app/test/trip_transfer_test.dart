@@ -22,6 +22,8 @@ void main() {
             stopName: '종로3가역',
             reachStop: at(13, 30),
             boardAt: at(13, 33),
+            lat: 37.5704,
+            lng: 126.9921,
           ),
         ],
       );
@@ -79,5 +81,20 @@ void main() {
     expect([for (final s in plan.steps) s.phase],
         [TripPhase.toStop, TripPhase.waiting, TripPhase.riding, TripPhase.arrived]);
     expect(plan.isLastLeg(0), isTrue);
+  });
+
+  test('들르기 질문에 갈아탈 곳을 같이 보내요 (인터뷰 P1·P3)', () {
+    final plan = busThenSubway();
+    // 버스 타는 중: 다음에 갈아탈 종로3가역
+    final riding = plan.toAskJson(TripPhase.riding, at(13, 20), 0);
+    expect((riding['transfer'] as Map)['stop_name'], '종로3가역');
+    expect((riding['transfer'] as Map)['ride_name'], '1호선');
+    // 환승 대기 중: 지금 갈아탈 곳
+    final waiting = plan.toAskJson(TripPhase.waiting, at(13, 31), 1);
+    expect((waiting['transfer'] as Map)['lat'], 37.5704);
+    // 마지막 차를 타는 중이면 갈아탈 곳이 없어요
+    expect(plan.toAskJson(TripPhase.riding, at(13, 40), 1).containsKey('transfer'), isFalse);
+    // 첫 정류장으로 가는 중에도 없어요
+    expect(plan.toAskJson(TripPhase.toStop, at(13, 1), 0).containsKey('transfer'), isFalse);
   });
 }
