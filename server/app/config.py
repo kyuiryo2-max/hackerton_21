@@ -32,8 +32,8 @@ LLM_TIMEOUT_SECONDS = env_float("LLM_TIMEOUT_SECONDS", 5)
 LLM_REASONING_EFFORT = env("LLM_REASONING_EFFORT").strip()
 # 샘플링 온도. 비우면 요청에 넣지 않아요 (Muse Spark는 기본 1.0에서 가장 잘 동작해요).
 LLM_TEMPERATURE = env("LLM_TEMPERATURE").strip()
-# 프롬프트 버전 폴더 (server/app/prompts/v1, v2 …). 평가는 --prompt 로 따로 바꿔요.
-LLM_PROMPT_VERSION = env("LLM_PROMPT_VERSION", "v2").strip() or "v2"
+# 프롬프트 버전 폴더 (server/app/prompts/v1, v2, v3 …). 평가는 --prompt 로 따로 바꿔요.
+LLM_PROMPT_VERSION = env("LLM_PROMPT_VERSION", "v3").strip() or "v3"
 
 DATA_GO_KR_SERVICE_KEY = env("DATA_GO_KR_SERVICE_KEY")
 SEOUL_OPEN_API_KEY = env("SEOUL_OPEN_API_KEY")
