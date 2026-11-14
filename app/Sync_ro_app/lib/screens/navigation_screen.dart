@@ -465,19 +465,6 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     });
   }
 
-  /// 출발지 ↔ 목적지 바꾸기 (#51 피드백 7: 신촌 → 서울대공원 을 서울대공원 → 신촌 으로)
-  void _swapManualPlaces() {
-    setState(() {
-      final place = _manualOrigin;
-      _manualOrigin = _manualDestination;
-      _manualDestination = place;
-      final text = _manualOriginController.text;
-      _manualOriginController.text = _manualDestinationController.text;
-      _manualDestinationController.text = text;
-      _manualError = null;
-    });
-  }
-
   Future<void> _pickManualArrival() async {
     final now = DateTime.now();
     final initial = _manualArrival?.isAfter(now) == true ? _manualArrival! : now.add(const Duration(hours: 1));
@@ -777,7 +764,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         if (_manualExpanded) ...[
           const SizedBox(height: 8),
           TextField(controller: _manualOriginController, readOnly: true, onTap: () => _pickManualPlace(origin: true), decoration: InputDecoration(labelText: '출발지', prefixIcon: const Icon(Icons.my_location), suffixIcon: IconButton(onPressed: () => _pickManualPlace(origin: true), icon: const Icon(Icons.search)), border: const OutlineInputBorder())),
-          // 현재 위치로 / 출발지↔목적지 바꾸기 (#51 피드백 2, 7)
+          // 현재 위치로 (#51 피드백 2). 출발지↔목적지 바꾸기(피드백 7)는 이동 탭 맨 위 ⇅ 버튼 하나로 (11/14)
           Row(children: [
             TextButton.icon(
               onPressed: _locating ? null : _useCurrentAsManualOrigin,
@@ -785,14 +772,6 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.gps_fixed, size: 18),
               label: const Text('현재 위치로'),
-            ),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: _manualOriginController.text.isEmpty && _manualDestinationController.text.isEmpty
-                  ? null
-                  : _swapManualPlaces,
-              icon: const Icon(Icons.swap_vert_rounded, size: 20),
-              label: const Text('출발·도착 바꾸기'),
             ),
           ]),
           TextField(controller: _manualDestinationController, readOnly: true, onTap: () => _pickManualPlace(origin: false), decoration: InputDecoration(labelText: '목적지', prefixIcon: const Icon(Icons.place), suffixIcon: IconButton(onPressed: () => _pickManualPlace(origin: false), icon: const Icon(Icons.search)), border: const OutlineInputBorder())),
