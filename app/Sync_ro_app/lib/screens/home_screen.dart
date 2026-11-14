@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_tiles.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -527,10 +528,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                   },
                 ),
                 children: [
-                  TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.syncro.sync_ro_app',
-                  ),
+                  MapTiles.layer(),
                   if (_me != null && _accuracy != null && _accuracy! > 15)
                     CircleLayer(circles: [
                       CircleMarker(
@@ -722,9 +720,9 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
               bottom: 12,
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  const _Glass(
-                    child: Text('© OpenStreetMap contributors',
-                        style: TextStyle(fontSize: 10, color: AppTheme.textMuted)),
+                  _Glass(
+                    child: Text(MapTiles.creditText,
+                        style: const TextStyle(fontSize: 10, color: AppTheme.textMuted)),
                   ),
                   const Spacer(),
                   Material(

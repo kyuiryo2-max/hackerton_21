@@ -19,7 +19,6 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
-  Offset? _aiButtonPosition;
 
   final PageController _pageController = PageController();
 
@@ -142,63 +141,7 @@ class _MainScreenState extends State<MainScreen> {
             onPageChanged: _onPageChanged,
             children: _screens,
           ),
-          // AI button is draggable within the visible content area.
-          LayoutBuilder(
-            builder: (context, constraints) {
-              const buttonWidth = 112.0;
-              const buttonHeight = 44.0;
-              const margin = 8.0;
-              final maxX = (constraints.maxWidth - buttonWidth - margin)
-                  .clamp(0.0, double.infinity).toDouble();
-              final maxY = (constraints.maxHeight - buttonHeight - margin)
-                  .clamp(0.0, double.infinity).toDouble();
-              final position = _aiButtonPosition ?? Offset(maxX - 8, maxY - 84);
-              final left = position.dx.clamp(0.0, maxX).toDouble();
-              final top = position.dy.clamp(0.0, maxY).toDouble();
-              return Stack(
-                children: [
-                  Positioned(
-                    left: left,
-                    top: top,
-                    child: SafeArea(
-                      top: false,
-                      bottom: false,
-                      child: Material(
-                        elevation: 6,
-                        shadowColor: AppTheme.primary.withValues(alpha: 0.4),
-                        borderRadius: BorderRadius.circular(24),
-                        color: AppTheme.primary,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onPanUpdate: (details) {
-                            setState(() {
-                              _aiButtonPosition = Offset(
-                                (left + details.delta.dx).clamp(0.0, maxX).toDouble(),
-                                (top + details.delta.dy).clamp(0.0, maxY).toDouble(),
-                              );
-                            });
-                          },
-                          onTap: _openAssistant,
-                          child: const SizedBox(
-                            width: buttonWidth,
-                            height: buttonHeight,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.auto_awesome, size: 18, color: Colors.white),
-                                SizedBox(width: 6),
-                                Text('AI 질문', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
+          // 떠 있는 "AI 질문" 버튼은 뺐어요. AI 질문은 이동 중 지도 팝업에서만 해요 (#51 피드백 4, 11/14)
         ],
       ),
       bottomNavigationBar: Container(

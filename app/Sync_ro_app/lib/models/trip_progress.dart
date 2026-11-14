@@ -55,7 +55,7 @@ class TripPlan {
 
   bool get hasStop => placeName != null && arrivePlace != null && leavePlace != null;
 
-  late final List<TripStep> steps = [
+  late final List<TripStep> steps = _inOrder([
     if (hasStop) ...[
       TripStep(TripPhase.toPlace, depart),
       TripStep(TripPhase.atPlace, arrivePlace!),
@@ -65,7 +65,22 @@ class TripPlan {
     TripStep(TripPhase.waiting, reachStop.isAfter(boardAt) ? boardAt : reachStop),
     TripStep(TripPhase.riding, boardAt),
     TripStep(TripPhase.arrived, arriveAt),
-  ];
+  ]);
+
+  /// 단계 시작 시각이 앞 단계보다 빠르면 앞 단계 시각으로 맞춰요.
+  /// (11/14 실제 모드: 17:21 출발인데 실시간 "3분 뒤" 버스 시각이 탑승 시각으로 들어가
+  ///  16:05에 바로 "타는 중"이 됐어요. 순서가 꼬여도 단계를 건너뛰지 않게 해요)
+  static List<TripStep> _inOrder(List<TripStep> raw) {
+    final out = <TripStep>[];
+    for (final s in raw) {
+      final prev = out.isEmpty ? null : out.last.start;
+      out.add(prev != null && s.start.isBefore(prev) ? TripStep(s.phase, prev) : s);
+    }
+    return out;
+  }
+
+  /// 출발 시각 전인지 (이동 시작을 일찍 눌렀을 때)
+  bool beforeDepart(DateTime now) => now.isBefore(depart);
 
   /// 시간 기준 지금 단계 (시작 시각이 지난 마지막 단계)
   int indexAt(DateTime now) {

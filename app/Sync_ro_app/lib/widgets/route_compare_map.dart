@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_tiles.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../config/app_theme.dart';
@@ -37,10 +38,18 @@ class RouteCompareMap extends StatelessWidget {
     this.onPickStop,
     this.detourPath = const [],
     this.liveDot,
+    this.liveHeading,
+    this.passedPath = const [],
   });
 
   /// 이동 중 지금 있을 것으로 보이는 곳 (시간 기준 추정, 11/13)
   final LatLng? liveDot;
+
+  /// 가는 방향 (북쪽 0, 시계 방향 라디안). 있으면 점 대신 화살표로 그려요
+  final double? liveHeading;
+
+  /// 이미 지나온 길. 네이버 지도처럼 회색으로 덮어서 남은 길만 또렷하게 보여요
+  final List<LatLng> passedPath;
 
   /// 고른 경유지를 지나는 실제 도보 길 (출발지 → 경유지 → 탑승 정류장). 비어 있으면 직선으로 이어요
   final List<LatLng> detourPath;
@@ -231,6 +240,17 @@ class RouteCompareMap extends StatelessWidget {
       }
     }
 
+    // 지나온 길: 경로 위를 회색으로 덮어요 (화살표가 움직이면 같이 늘어나요)
+    if (passedPath.length >= 2) {
+      lines.add(Polyline(
+        points: passedPath,
+        strokeWidth: 7,
+        color: const Color(0xFF9AA0A6),
+        borderStrokeWidth: 2,
+        borderColor: Colors.white,
+      ));
+    }
+
     if (stopPoint != null) {
       points.add(stopPoint!);
       markers.add(Marker(
@@ -254,15 +274,22 @@ class RouteCompareMap extends StatelessWidget {
     if (liveDot != null) {
       markers.add(Marker(
         point: liveDot!,
-        width: 26,
-        height: 26,
+        width: 34,
+        height: 34,
         child: Container(
           decoration: BoxDecoration(
             color: AppTheme.primary,
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 4),
+            border: Border.all(color: Colors.white, width: 3),
             boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 6)],
           ),
+          child: liveHeading == null
+              ? null
+              // 화살표가 가는 방향을 가리켜요 (지도는 북쪽이 위라서 방향 그대로 돌려요)
+              : Transform.rotate(
+                  angle: liveHeading!,
+                  child: const Icon(Icons.navigation_rounded, color: Colors.white, size: 18),
+                ),
         ),
       ));
     }
@@ -376,15 +403,10 @@ class RouteCompareMap extends StatelessWidget {
                     : null,
               ),
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.syncro.sync_ro_app',
-                ),
+                MapTiles.layer(),
                 PolylineLayer(polylines: lines),
                 MarkerLayer(markers: markers),
-                const RichAttributionWidget(
-                  attributions: [TextSourceAttribution('OpenStreetMap contributors')],
-                ),
+                MapTiles.attribution(),
               ],
             ),
           Positioned(

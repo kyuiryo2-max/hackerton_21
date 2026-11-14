@@ -2,6 +2,7 @@
 # main에 앱 코드가 바뀌면 자동으로, 또는 Actions 탭에서 "Run workflow"로 직접 실행해요.
 # 배포 주소: https://kyuiryo2-max.github.io/hackerton_21/
 # 서버 주소는 저장소 Settings → Secrets and variables → Actions → Variables 의 API_BASE_URL 에 넣어요 (키가 아니라 주소라 Variables).
+# 단순한 지도(CARTO Voyager)를 쓰려면 같은 곳 Variables 에 CARTO_BASEMAP_KEY 를 넣어요 (없으면 OpenStreetMap 기본 지도, #51 피드백 6).
 name: deploy-web
 
 on:
@@ -42,6 +43,7 @@ jobs:
           --dart-define=SYNC_RO_OFFLINE_DEMO=false
           --dart-define=SYNC_RO_DEMO_MODE=true
           --dart-define=SYNC_RO_USE_REAL_PLACES=true
+          --dart-define=CARTO_BASEMAP_KEY=${{ vars.CARTO_BASEMAP_KEY }}
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
