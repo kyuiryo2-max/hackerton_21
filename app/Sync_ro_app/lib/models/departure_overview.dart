@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import '../services/server_plan_service.dart';
+import 'route_candidate.dart';
 
 /// 홈 첫 화면에서 쓰는 "언제 나가야 하는지 + 들를 곳에서 얼마나 머물 수 있는지" 요약.
 ///
@@ -476,7 +477,8 @@ class DepartureOverview {
 
   static String? _transitLabel(Map<String, dynamic> route) {
     final type = '${route['type'] ?? ''}'.toUpperCase();
-    final name = '${route['name'] ?? ''}'.trim();
+    // "1호선·1호선·1호선" → "1호선" (11/14)
+    final name = RouteSegment.uniqueLines('${route['name'] ?? ''}');
     if (type.contains('BUS')) return name.isEmpty ? '버스' : (name.endsWith('번') ? '$name 버스' : '$name번 버스');
     if (type.contains('SUBWAY') || type.contains('METRO') || type.contains('TRAIN')) {
       return name.isEmpty ? '지하철' : '지하철 $name';
