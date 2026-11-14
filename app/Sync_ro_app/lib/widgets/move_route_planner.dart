@@ -493,9 +493,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
 
   /// 안내에 쓸 노선 이름: 서버 ride_name → 버스 번호면 "번"을 붙여요 ("2115" → "2115번", "2호선" 그대로)
   static String _rideNameOf(Map<String, dynamic>? p, RouteSegment? ride) {
+    // "4호선·4호선·4호선" → "4호선" (11/15)
     final given = p?['ride_name'];
-    if (given is String && given.isNotEmpty) return given;
-    final name = '${p?['name'] ?? ride?.lineName ?? ''}'.trim();
+    if (given is String && given.isNotEmpty) return RouteSegment.uniqueLines(given);
+    final name = RouteSegment.uniqueLines('${p?['name'] ?? ride?.lineName ?? ''}'.trim());
     if (name.isEmpty) return ride?.description ?? '탈 차';
     final last = name.codeUnitAt(name.length - 1);
     final endsWithDigit = last >= 48 && last <= 57;

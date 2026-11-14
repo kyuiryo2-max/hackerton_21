@@ -5,10 +5,37 @@ import '../config/api_config.dart';
 class ServerPlan {
   const ServerPlan(this.data);
   final Map<String, dynamic> data;
-  DateTime? get boardAt => DateTime.tryParse(data['board_at']?.toString() ?? '');
-  DateTime? get arriveAt => DateTime.tryParse(data['arrive_at']?.toString() ?? '');
-  List<Map<String, dynamic>> get routes => (data['routes'] as List? ?? const [])
+  DateTime? get boardAt => DateTime.tryParse(_top('board_at')?.toString() ?? '');
+  DateTime? get arriveAt => DateTime.tryParse(_top('arrive_at')?.toString() ?? '');
+
+  /// 서버가 준 경로 전부 (운행하지 않는 경로 포함)
+  List<Map<String, dynamic>> get allRoutes => (data['routes'] as List? ?? const [])
       .whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+
+  /// 지금 탈 수 있는 경로만 (11/15).
+  /// 지금 바로 출발하는 계획(basis realtime/now)인데 탈 정류장·역에 실시간 도착 정보가 하나도 없으면
+  /// 그 노선은 지금 운행하지 않는 걸로 보고 빼요. 예: 새벽 1시 50분의 지하철.
+  /// 일정이 멀어서 도착 시각에서 거꾸로 계산한 계획(arrive_by)은 실시간을 안 보니까 그대로 둬요.
+  List<Map<String, dynamic>> get routes => allRoutes.where((r) => !notRunning(r)).toList();
+
+  bool notRunning(Map<String, dynamic> r) {
+    final basis = '${r['basis'] ?? data['basis'] ?? ''}';
+    if (basis != 'realtime' && basis != 'now') return false;
+    if ('${r['type'] ?? ''}'.toUpperCase().contains('WALK')) return false;
+    if (r['has_realtime'] == true) return false;
+    final soon = r['next_vehicles_min'];
+    return !(soon is List && soon.isNotEmpty);
+  }
+
+  /// 경로는 받았는데 지금 운행하는 게 하나도 없어요 (막차가 끊긴 시간 등)
+  bool get noServiceNow => allRoutes.isNotEmpty && routes.isEmpty;
+
+  /// 맨 위 시각(board_at 등)은 서버 1순위 경로 기준이라, 그 경로가 빠졌으면 남은 첫 경로의 값을 써요
+  dynamic _top(String key) {
+    final all = allRoutes, live = routes;
+    if (live.isNotEmpty && live.length != all.length && live.first[key] != null) return live.first[key];
+    return data[key];
+  }
   List<Map<String, dynamic>> get todos => (data['todos'] as List? ?? const [])
       .whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   String get explanation => data['explanation']?.toString() ?? '';
@@ -31,7 +58,7 @@ class ServerPlan {
   // basis: arrive_by(도착 시각에서 거꾸로) / realtime(실시간 차) / now(지금 출발)
   String? get basis => data['basis']?.toString();
   DateTime? get departureAt {
-    final direct = DateTime.tryParse((data['depart_at'] ?? data['departure_at'])?.toString() ?? '');
+    final direct = DateTime.tryParse((_top('depart_at') ?? data['departure_at'])?.toString() ?? '');
     if (direct != null) return direct;
     final arrival = arriveAt;
     final minutes = routes.isEmpty ? null : (routes.first['total_min'] as num?)?.toInt();
