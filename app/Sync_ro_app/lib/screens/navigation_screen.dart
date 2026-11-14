@@ -416,6 +416,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             for (var i = 0; i < plan.routes.length; i++)
               ServerRouteAdapter.fromPlan(plan.routes[i], i),
           ]..sort(_fastestFirst);
+          if (plan.noServiceNow) {
+            throw StateError('지금은 탈 수 있는 대중교통이 없어요. 실시간 도착 정보가 있는 차가 없어서 운행이 끝난 것 같아요.');
+          }
           if (routes.isEmpty) throw StateError('서버에서 추천 가능한 경로가 없습니다.');
           activeRouteController.setSearch(ActiveRouteSelection(
             routes: routes, selectedId: routes.first.id,

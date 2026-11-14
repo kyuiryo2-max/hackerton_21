@@ -101,6 +101,9 @@ class RouteApiService {
           demoService.dispose();
         }
       }
+      if (plan.noServiceNow) {
+        throw StateError('지금은 탈 수 있는 대중교통이 없어요. 실시간 도착 정보가 있는 차가 없어서 운행이 끝난 것 같아요.');
+      }
       return RouteSearchData([
         for (var i = 0; i < plan.routes.length; i++)
           ServerRouteAdapter.fromPlan(plan.routes[i], i, context: demoContext),
