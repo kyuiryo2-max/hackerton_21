@@ -5,6 +5,7 @@
 """
 import logging
 import math
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -26,6 +27,8 @@ Coord = tuple[float, float]         # (경도 x, 위도 y)
 # 현재 위치가 들어간 호출은 아주 잠깐만 기억해요 (11/13 호출 줄이기).
 # 같은 자리(약 10m 안)에서 새로고침하면 카카오에 다시 묻지 않아요. 서버 메모리에만 두고 5분 뒤 지워요.
 ORIGIN_TTL_SECONDS = 5 * 60
+# 만료된 값은 1분마다 지워요. 같은 위치로 다시 조회하지 않아도 5분 + 최대 1분 안에 사라져요 (PR #46 리뷰)
+SWEEP_INTERVAL_SECONDS = 60
 
 # 도보 한도를 다 쓰면 직선거리로 어림해요 (11/13). 실제 길은 직선보다 돌아가서 1.3배로 쳐요.
 WALK_SPEED_MPS = 1.1                # 시속 약 4km
@@ -87,14 +90,49 @@ def _cache_get(key: tuple) -> Any | None:
         return None
     expires_at, value = item
     if time.monotonic() >= expires_at:
-        del _cache[key]
+        _cache.pop(key, None)
         return None
     return value
 
 
+def sweep_expired() -> int:
+    """만료된 값을 모두 지우고 지운 개수를 돌려줘요.
+    예전에는 같은 키로 다시 꺼낼 때만 지워서, 현재 위치가 1시간 넘게 남을 수 있었어요 (PR #46 리뷰)."""
+    now = time.monotonic()
+    expired = [key for key, (expires_at, _) in list(_cache.items()) if now >= expires_at]
+    for key in expired:
+        _cache.pop(key, None)
+    return len(expired)
+
+
+_sweeper: threading.Thread | None = None
+
+
+def _sweep_forever() -> None:
+    while True:
+        time.sleep(SWEEP_INTERVAL_SECONDS)
+        try:
+            sweep_expired()
+        except Exception:  # 지우기가 한 번 실패해도 다음 차례에 다시 해요
+            log.exception("카카오 저장값 정리 실패")
+
+
+def _ensure_sweeper() -> None:
+    """정리 담당을 처음 저장할 때 한 번만 띄워요. 서버가 꺼지면 같이 꺼져요 (daemon)."""
+    global _sweeper
+    if _sweeper is None or not _sweeper.is_alive():
+        _sweeper = threading.Thread(target=_sweep_forever, name="kakao-cache-sweeper", daemon=True)
+        _sweeper.start()
+
+
 def _cache_set(key: tuple, value: Any, ttl_seconds: int) -> None:
+    _ensure_sweeper()
+    sweep_expired()  # 새로 넣을 때도 만료된 것부터 치워요 (최대 1,000개라 금방 끝나요)
     if key not in _cache and len(_cache) >= MAX_CACHE_SIZE:
-        del _cache[next(iter(_cache))]  # 가장 먼저 넣은 항목부터 지워요
+        try:
+            _cache.pop(next(iter(_cache)), None)  # 가장 먼저 넣은 항목부터 지워요
+        except StopIteration:
+            pass
     _cache[key] = (time.monotonic() + ttl_seconds, value)
 
 

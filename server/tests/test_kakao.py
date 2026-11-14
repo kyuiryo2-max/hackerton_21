@@ -354,3 +354,33 @@ def test_현재_위치_호출은_정한_시간만큼만_기억(api, monkeypatch)
     monkeypatch.setattr(kakao.time, "monotonic", lambda: now + kakao.ORIGIN_TTL_SECONDS + 1)
     kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
     assert len(calls) == 2                       # 5분이 지나면 다시 물어요
+
+
+def test_만료된_현재_위치는_다시_조회하지_않아도_지워짐(api, monkeypatch):
+    # PR #46 리뷰: "5분 뒤 지움"인데 같은 위치로 다시 조회하지 않으면 1시간 뒤에도 남아 있었어요
+    _, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    assert len(kakao._cache) == 1
+    now = time.monotonic()
+    monkeypatch.setattr(kakao.time, "monotonic", lambda: now + 60 * 60)   # 1시간 뒤
+    assert kakao.sweep_expired() == 1                   # 정리 담당이 1분마다 부르는 함수
+    assert kakao._cache == {}
+
+
+def test_새로_저장할_때_만료된_값을_함께_치움(api, monkeypatch):
+    _, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    now = time.monotonic()
+    monkeypatch.setattr(kakao.time, "monotonic", lambda: now + kakao.ORIGIN_TTL_SECONDS + 1)
+    kakao.walk_route(END, START)                        # 다른 구간 조회
+    assert ("walk_route", kakao._rounded(START), kakao._rounded(END), ()) not in kakao._cache
+    assert len(kakao._cache) == 1
+
+
+def test_정리_담당이_떠_있음(api):
+    _, responses = api
+    responses["/v2/routing/walk"] = reply(WALK)
+    kakao.walk_route(START, END, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+    assert kakao._sweeper is not None and kakao._sweeper.is_alive() and kakao._sweeper.daemon
