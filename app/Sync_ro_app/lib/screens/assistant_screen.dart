@@ -209,9 +209,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
         await _finishVoice();
         return;
       }
-      if (!_speechReady) {
-        _speechReady = await _speech.initialize(onStatus: _onSpeechStatus);
-      }
+      // 쓸 때마다 불러서 이 화면의 콜백으로 바꿔요 (이동 중 팝업과 음성 인식을 같이 써요)
+      _speechReady = await _speech.initialize(onStatus: _onSpeechStatus);
       if (!_speechReady) throw Exception('음성 인식이 지원되지 않거나 마이크 권한이 없습니다.');
       _input.clear();
       setState(() => _listening = true);

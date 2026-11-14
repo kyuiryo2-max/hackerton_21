@@ -1334,6 +1334,11 @@ class _TimetableView extends StatelessWidget {
     final today = _dateOnly(now);
     final todayIndex = today.difference(weekStart).inDays;
     final bodyHeight = hours * hourHeight;
+    // 지금 시각 줄 위치 (이번 주이고 시간표 범위 안일 때만)
+    final nowMinute = now.hour * 60 + now.minute - startHour * 60;
+    final double? nowTop = todayIndex >= 0 && todayIndex < 7 && nowMinute >= 0 && nowMinute <= hours * 60
+        ? nowMinute / 60 * hourHeight
+        : null;
 
     return Container(
       decoration: BoxDecoration(
@@ -1509,23 +1514,20 @@ class _TimetableView extends StatelessWidget {
                   ),
                 ),
               // 지금 시각 줄
-              if (todayIndex >= 0 && todayIndex < 7)
-                Builder(builder: (context) {
-                  final m = now.hour * 60 + now.minute - startHour * 60;
-                  if (m < 0 || m > hours * 60) return const SizedBox.shrink();
-                  final top = m / 60 * hourHeight;
-                  return Positioned(
-                    left: timeColumn + colWidth * todayIndex - 3,
-                    width: colWidth + 3,
-                    top: top - 3,
-                    child: IgnorePointer(
-                      child: Row(children: [
-                        Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppTheme.danger, shape: BoxShape.circle)),
-                        Expanded(child: Container(height: 1.5, color: AppTheme.danger)),
-                      ]),
-                    ),
-                  );
-                }),
+              // (#51 피드백 3) 예전에는 Builder 안에서 Positioned 를 돌려줘서, 지금 시각이 시간표 안에 들어오면
+              // (= 이번 주) Stack 그리기가 깨져 줄과 칸이 전부 안 보였어요. Positioned 는 Stack 바로 아래에 둬요.
+              if (nowTop != null)
+                Positioned(
+                  left: timeColumn + colWidth * todayIndex - 3,
+                  width: colWidth + 3,
+                  top: nowTop - 3,
+                  child: IgnorePointer(
+                    child: Row(children: [
+                      Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppTheme.danger, shape: BoxShape.circle)),
+                      Expanded(child: Container(height: 1.5, color: AppTheme.danger)),
+                    ]),
+                  ),
+                ),
             ]),
           ),
         ]);
