@@ -278,15 +278,15 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     int sum(int from, int to, RouteSegmentType type) => [
           for (var i = from; i < to; i++)
             if (segs[i].type == type) segs[i].durationMinutes,
-        ].fold(0, (a, b) => a + b);
+        ].fold<int>(0, (a, b) => a + b);
     final walks = <int>[], waits = <int>[];
     for (var k = 1; k < rides.length; k++) {
       walks.add(sum(rides[k - 1] + 1, rides[k], RouteSegmentType.walking));
       waits.add(sum(rides[k - 1] + 1, rides[k], RouteSegmentType.waiting));
     }
-    final rideMinutes = [for (final i in rides) segs[i].durationMinutes].fold(0, (a, b) => a + b);
+    final rideMinutes = [for (final i in rides) segs[i].durationMinutes].fold<int>(0, (a, b) => a + b);
     final lastWalk = sum(rides.last + 1, segs.length, RouteSegmentType.walking);
-    final planned = rideMinutes + lastWalk + [...walks, ...waits].fold(0, (a, b) => a + b);
+    final planned = rideMinutes + lastWalk + [...walks, ...waits].fold<int>(0, (a, b) => a + b);
     final slack = arriveAt.difference(boardAt).inMinutes - planned;
     waits[0] = math.max(0, waits[0] + slack);
 
