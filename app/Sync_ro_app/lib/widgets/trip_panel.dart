@@ -234,20 +234,47 @@ class _TripPanelState extends State<TripPanel> {
           action: '나왔어요',
         );
       case TripPhase.toStop:
+        if (step.leg > 0) {
+          // 갈아타기 (11/14): 앞 차에서 내려 다음 정류장·역으로 걸어가는 중
+          final t = p.transfers[step.leg - 1];
+          return (
+            title: '${t.stopName}까지 환승하러 걷는 중',
+            sub: '${hm(t.boardAt)} ${t.rideName} 탑승 · ${left(t.boardAt)}분 남음',
+            action: '환승 장소 도착',
+          );
+        }
         return (
           title: '${p.stopName}까지 걷는 중',
           sub: '${hm(p.boardAt)} ${p.rideName} 탑승 · ${left(p.boardAt)}분 남음$live',
           action: '정류장 도착',
         );
       case TripPhase.waiting:
+        if (step.leg > 0) {
+          final t = p.transfers[step.leg - 1];
+          return (
+            title: '${t.rideName} ${left(t.boardAt)}분 뒤 탑승',
+            sub: '${t.stopName}에서 환승 기다리는 중',
+            action: '탔어요',
+          );
+        }
         return (
           title: '${p.rideName} ${left(p.boardAt)}분 뒤 탑승',
           sub: '${p.stopName}에서 기다리는 중$live',
           action: '탔어요',
         );
       case TripPhase.riding:
+        final ride = p.rideOf(step.leg);
+        if (!p.isLastLeg(step.leg)) {
+          // 다음에 갈아탈 차가 있으면 목적지가 아니라 내릴 곳과 환승을 안내해요 (11/14)
+          final next = p.transfers[step.leg];
+          return (
+            title: '$ride 타는 중',
+            sub: '${hm(next.getOffAt)} ${next.getOffName}에서 내려 ${next.rideName} 환승 · ${left(next.getOffAt)}분 남음',
+            action: '내렸어요',
+          );
+        }
         return (
-          title: '${p.rideName} 타는 중',
+          title: '$ride 타는 중',
           sub: '${p.destination} ${hm(p.arriveAt)} 도착 · ${left(p.arriveAt)}분 남음',
           action: '도착했어요',
         );
