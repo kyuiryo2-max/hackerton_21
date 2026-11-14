@@ -83,3 +83,35 @@ def test_카카오_오류는_502(client, monkeypatch):
     res = client.get("/api/places/search", params={"query": "청량리역"})
     assert res.status_code == 502
     assert res.json()["error"]["code"] == "upstream_error"
+
+
+def test_짧은_검색어는_역을_먼저_보여줌(client, monkeypatch):
+    """'강남'으로 찾으면 카센터보다 강남역이 먼저 (11/14 시연 피드백)."""
+    sent = []
+
+    def fake_get(path, params):
+        sent.append(params["query"])
+        if params["query"] == "강남역":
+            return {"documents": [
+                {"place_name": "강남역 2호선", "road_address_name": "서울 강남구 강남대로 396", "x": "127.0276",
+                 "y": "37.4979", "category_group_code": "SW8"},
+                {"place_name": "강남역 카페", "road_address_name": "서울 강남구 1", "x": "127.02", "y": "37.49",
+                 "category_group_code": "CE7"},
+            ]}
+        return {"documents": [
+            {"place_name": "강남카센터", "road_address_name": "서울 강서구 2", "x": "126.85", "y": "37.55",
+             "category_group_code": ""},
+            {"place_name": "강남구청", "road_address_name": "서울 강남구 학동로 426", "x": "127.0473",
+             "y": "37.5172", "category_group_code": "PO3"},
+        ]}
+    monkeypatch.setattr(kakao, "_get", fake_get)
+    body = client.get("/api/places/search", params={"query": "강남"}).json()
+    assert sent == ["강남", "강남역"]
+    assert body[0]["name"] == "강남역 2호선"
+    # 역 검색에서 나온 역이 아닌 곳(카페)은 붙이지 않아요
+    assert [p["name"] for p in body] == ["강남역 2호선", "강남카센터", "강남구청"]
+
+
+def test_역_이름으로_찾으면_추가_검색_안함(client, calls):
+    client.get("/api/places/search", params={"query": "청량리역"})
+    assert len(calls) == 1

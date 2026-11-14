@@ -4,6 +4,8 @@ import '../config/app_theme.dart';
 import '../models/schedule.dart';
 import '../models/place.dart';
 import 'place_search_screen.dart';
+import '../services/location_access.dart';
+import '../widgets/route_endpoints.dart';
 import '../providers/schedule_controller.dart';
 import '../services/planner_store.dart';
 
@@ -196,12 +198,76 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       MaterialPageRoute(builder: (_) => PlaceSearchScreen(
         title: '출발지 선택',
         initialQuery: _originController.text.trim(),
+        allowCurrentLocation: true,
       )),
     );
     if (!mounted || place == null) return;
     setState(() {
-      _selectedOrigin = place;
-      _originController.text = place.name;
+      if (place.id == PlaceSearchScreen.currentLocationId) {
+        // "현재 위치"는 나갈 때 위치로 계산해요 (좌표를 저장하지 않아요)
+        _originMode = 'current';
+        _selectedOrigin = null;
+        _originController.clear();
+      } else {
+        _originMode = 'place';
+        _selectedOrigin = place;
+        _originController.text = place.name;
+      }
+    });
+  }
+
+  bool _swapping = false;
+
+  /// 지금 위치를 장소로 (못 찾으면 알려 주고 null)
+  Future<Place?> _hereAsPlace() async {
+    setState(() => _swapping = true);
+    try {
+      final p = await LocationAccess.current();
+      return Place(
+        id: 'swapped_current_location',
+        name: '내 위치',
+        address: '바꿀 때 있던 위치',
+        latitude: p.latitude,
+        longitude: p.longitude,
+      );
+    } on LocationAccessException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('현재 위치를 몰라서 바꾸지 못했어요: ${e.message}')));
+      }
+      return null;
+    } finally {
+      if (mounted) setState(() => _swapping = false);
+    }
+  }
+
+  /// ⇅ 출발지와 도착지 바꾸기. 출발지가 "현재 위치"면 지금 위치를 도착지로 넣어요 (11/14)
+  Future<void> _swapEndpoints() async {
+    final dest = _selectedDestination;
+    if (dest == null && _originMode == 'current') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('도착지를 먼저 골라 주세요.')),
+      );
+      return;
+    }
+    Place? newDest = _originMode == 'place' ? _selectedOrigin : null;
+    if (newDest == null) {
+      final here = await _hereAsPlace();
+      if (here == null || !mounted) return;
+      newDest = here;
+    }
+    final to = newDest;
+    setState(() {
+      _selectedDestination = to;
+      _locationController.text = to.name;
+      if (dest == null) {
+        _originMode = 'current';
+        _selectedOrigin = null;
+        _originController.clear();
+      } else {
+        _originMode = 'place';
+        _selectedOrigin = dest;
+        _originController.text = dest.name;
+      }
     });
   }
 
@@ -392,81 +458,35 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // ② 목적지
-                _question('어디로 가요?'),
-                TextFormField(
-                  controller: _locationController,
-                  readOnly: true,
-                  onTap: _selectDestination,
-                  decoration: InputDecoration(
-                    hintText: '눌러서 장소 검색 (예: 을지로입구역)',
-                    prefixIcon: const Icon(Icons.place_outlined),
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.search),
-                      onPressed: _selectDestination,
-                    ),
-                  ),
-                  validator: (_) => _selectedDestination == null
-                      ? '검색 결과에서 목적지를 선택해 주세요.' : null,
+                // ②③ 출발지·도착지: 네이버 길찾기처럼 한 상자에서 바꾸고 ⇅로 뒤집어요 (11/14)
+                _question('어디서 어디로 가요?'),
+                RouteEndpoints(
+                  originLabel: _originMode == 'current' ? '현재 위치' : _selectedOrigin?.name,
+                  originSub: _originMode == 'current' ? '나갈 때 있는 곳에서 출발' : _selectedOrigin?.address,
+                  destinationLabel: _selectedDestination?.name,
+                  destinationSub: _selectedDestination?.address,
+                  originHint: '출발지 검색 (비우면 현재 위치)',
+                  destinationHint: '도착지 검색 (예: 을지로입구역)',
+                  onTapOrigin: _selectOrigin,
+                  onTapDestination: _selectDestination,
+                  onSwap: _swapEndpoints,
+                  busy: _swapping,
                 ),
-                if (_selectedDestination != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6, left: 4),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(_selectedDestination!.address,
-                        style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-                    ),
-                  ),
-                const SizedBox(height: 24),
-
-                // ③ 출발지: 큰 선택 카드 두 개
-                _question('어디서 출발해요?'),
-                Row(children: [
-                  Expanded(
-                    child: _OriginChoice(
-                      selected: _originMode == 'current',
-                      icon: Icons.my_location,
-                      title: '현재 위치',
-                      subtitle: '나갈 때 있는 곳에서',
-                      onTap: () => setState(() => _originMode = 'current'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _OriginChoice(
-                      selected: _originMode == 'place',
-                      icon: Icons.search,
-                      title: '직접 고르기',
-                      subtitle: '집, 학교 등 정해진 곳',
-                      onTap: () => setState(() => _originMode = 'place'),
-                    ),
-                  ),
-                ]),
-                if (_originMode == 'place') ...[
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _originController,
-                    readOnly: true,
-                    onTap: _selectOrigin,
-                    decoration: InputDecoration(
-                      hintText: '눌러서 출발 장소 검색',
-                      prefixIcon: const Icon(Icons.trip_origin),
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: _selectOrigin),
-                    ),
-                    validator: (_) => _originMode == 'place' && _selectedOrigin == null
-                        ? '출발 장소를 선택해 주세요.' : null,
-                  ),
-                  if (_selectedOrigin != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6, left: 4),
-                      child: Align(alignment: Alignment.centerLeft,
-                        child: Text(_selectedOrigin!.address,
-                          style: const TextStyle(fontSize: 12, color: AppTheme.textMuted))),
-                    ),
-                ],
+                // 저장할 때 빠진 칸 알려 주기
+                FormField<void>(
+                  validator: (_) => _selectedDestination == null
+                      ? '도착지를 검색해서 골라 주세요.'
+                      : _originMode == 'place' && _selectedOrigin == null
+                          ? '출발지를 검색해서 골라 주세요.'
+                          : null,
+                  builder: (field) => field.hasError
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 6, left: 4),
+                          child: Text(field.errorText!,
+                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error)),
+                        )
+                      : const SizedBox.shrink(),
+                ),
                 const SizedBox(height: 24),
 
                 // ④ 반복 (새 일정·반복 일정에서만)

@@ -31,9 +31,12 @@ def main() -> None:
     if missing:
         sys.exit(f"루트 .env 에 {', '.join(missing)} 가 없어요")
 
-    print(f"주소 {config.OPENAI_BASE_URL}\n모델 {config.LLM_MODEL}\n")
+    print(f"주소 {config.OPENAI_BASE_URL}\n모델 {config.LLM_MODEL}")
+    print(f"프롬프트 {llm.PROMPT_VERSION} · 대기 {llm.LLM_TIMEOUT_SECONDS:g}초\n")
     record = {"at": datetime.now(KST).isoformat(timespec="seconds"),
-              "base_url": config.OPENAI_BASE_URL, "model": config.LLM_MODEL, "calls": []}
+              "base_url": config.OPENAI_BASE_URL, "model": config.LLM_MODEL,
+              "prompt_version": llm.PROMPT_VERSION, "timeout_seconds": llm.LLM_TIMEOUT_SECONDS,
+              "calls": []}
     ok = True
     for label, fn, text in SAMPLES:
         started = time.perf_counter()

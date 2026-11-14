@@ -9,6 +9,22 @@ import '../services/kst_time.dart';
 import '../services/speech_input_service.dart';
 import 'route_compare_map.dart';
 
+/// 이동 중 AI 답변 (11/14): 문장 + 답에 맞는 버튼 (경유지로 추가, 할 일에 넣기, 일정 입력 등).
+/// AI 탭을 없애서, AI 탭에 있던 버튼을 이동 중 팝업으로 옮겼어요.
+class TripAskReply {
+  const TripAskReply(this.text, {this.actions = const []});
+  final String text;
+  final List<TripAskAction> actions;
+}
+
+class TripAskAction {
+  const TripAskAction(this.label, this.icon, this.onTap);
+  final String label;
+  final IconData icon;
+  /// 누르면 실행해요. 돌려준 문장이 있으면 답변 자리에 보여 줘요 (예: "경유지에 넣었어요").
+  final Future<String?> Function() onTap;
+}
+
 /// 이동 중 팝업 (11/13): 지도 위에 지금 단계, 진행 막대, 다음 단계 버튼, AI 질문 칸을 보여 줘요.
 /// 지금 단계는 시간이 흐르는 기준이고, 계획과 다르면 버튼으로 넘겨요.
 class TripPanel extends StatefulWidget {
@@ -33,8 +49,8 @@ class TripPanel extends StatefulWidget {
   /// 진행 막대에 쓸 경로 (경유 구간이 들어간 경로)
   final RouteCandidate stripRoute;
   final VoidCallback onAdvance;
-  /// 질문 → 답변 문장
-  final Future<String> Function(String text) onAsk;
+  /// 질문 → 답변 문장 + 버튼
+  final Future<TripAskReply> Function(String text) onAsk;
   /// 시연 모드: 시간 빨리 보내기 (분)
   final ValueChanged<int>? onSkip;
   /// 이동 종료 (#51 피드백 4: 팝업 안에서도 끝낼 수 있게)
@@ -51,7 +67,9 @@ class _TripPanelState extends State<TripPanel> {
   final _input = TextEditingController();
   String? _question;
   String? _answer;
+  List<TripAskAction> _actions = const [];
   bool _asking = false;
+  bool _acting = false;
 
   // 음성 질문 (#51 피드백 5): 말이 3초쯤 멈추면 그대로 물어봐요. AI 탭과 같은 방식이에요
   final _speech = SpeechInputService();
@@ -141,20 +159,48 @@ class _TripPanelState extends State<TripPanel> {
       _asking = true;
       _question = text;
       _answer = null;
+      _actions = const [];
     });
     _input.clear();
-    String answer;
+    TripAskReply reply;
     try {
-      answer = await widget.onAsk(text);
+      reply = await widget.onAsk(text);
     } catch (e) {
-      answer = '답을 받지 못했어요. 잠시 뒤 다시 물어봐 주세요.';
+      reply = const TripAskReply('답을 받지 못했어요. 잠시 뒤 다시 물어봐 주세요.');
     }
     if (!mounted) return;
     setState(() {
       _asking = false;
-      _answer = answer;
+      _answer = reply.text;
+      _actions = reply.actions;
     });
   }
+
+  Future<void> _runAction(TripAskAction action) async {
+    if (_acting) return;
+    setState(() => _acting = true);
+    String? message;
+    try {
+      message = await action.onTap();
+    } catch (e) {
+      message = '처리하지 못했어요: $e';
+    }
+    if (!mounted) return;
+    setState(() {
+      _acting = false;
+      _actions = const [];
+      if (message != null) _answer = message;
+    });
+  }
+  /// 오늘이 아니면 "내일 ", "11/16 "처럼 날짜를 붙여요 (11/14: 내일 일정을 오늘 시작했을 때 시각만 보여 헷갈림)
+  static String _day(DateTime t, DateTime now) {
+    final a = KstTime.toKst(t), b = KstTime.toKst(now);
+    final days = DateTime(a.year, a.month, a.day).difference(DateTime(b.year, b.month, b.day)).inDays;
+    if (days == 0) return '';
+    if (days == 1) return '내일 ';
+    return '${a.month}/${a.day} ';
+  }
+
   ({String title, String sub, String? action}) _status() {
     final p = widget.plan;
     final now = widget.stepNow ?? widget.now;
@@ -168,7 +214,7 @@ class _TripPanelState extends State<TripPanel> {
     // 이동 시작을 일찍 눌렀으면 출발 시각까지 기다리라고 알려 줘요 (11/14 실제 모드)
     if (widget.index == 0 && p.beforeDepart(now) && left(p.depart) >= 1) {
       return (
-        title: '${hm(p.depart)}에 출발하면 돼요',
+        title: '${_day(p.depart, widget.now)}${hm(p.depart)}에 출발하면 돼요',
         sub: '아직 ${left(p.depart)}분 여유 · ${p.hasStop ? '${p.placeName} 들러서 ' : ''}${p.rideName} ${hm(p.boardAt)} 탑승',
         action: '지금 출발했어요',
       );
@@ -214,6 +260,9 @@ class _TripPanelState extends State<TripPanel> {
   Widget build(BuildContext context) {
     final s = _status();
     final progress = widget.plan.progressAt(widget.stepNow ?? widget.now, widget.index);
+    // 위 문장과 같은 기준으로: 단계를 일찍 넘겼으면 출발·도착 시각도 그만큼 당겨서 보여 줘요 (11/14)
+    final early = (widget.stepNow ?? widget.now).difference(widget.now);
+    String label(DateTime t) => '${_day(t.subtract(early), widget.now)}${KstTime.hm(t.subtract(early))}';
     return Material(
       elevation: 6,
       borderRadius: BorderRadius.circular(18),
@@ -270,9 +319,9 @@ class _TripPanelState extends State<TripPanel> {
           }),
           const SizedBox(height: 4),
           Row(children: [
-            Text('${KstTime.hm(widget.plan.depart)} 출발', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+            Text('${label(widget.plan.depart)} 출발', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
             const Spacer(),
-            Text('${KstTime.hm(widget.plan.arriveAt)} 도착', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+            Text('${label(widget.plan.arriveAt)} 도착', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
           ]),
           if (s.action != null) ...[
             const SizedBox(height: 8),
@@ -287,6 +336,18 @@ class _TripPanelState extends State<TripPanel> {
             const SizedBox(height: 2),
             Text(_asking ? '계산하는 중…' : (_answer ?? ''),
                 style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+            if (!_asking && _actions.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(spacing: 8, runSpacing: 6, children: [
+                for (final a in _actions)
+                  FilledButton.tonalIcon(
+                    onPressed: _acting ? null : () => _runAction(a),
+                    icon: Icon(a.icon, size: 16),
+                    label: Text(a.label),
+                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+              ]),
+            ],
           ],
           const SizedBox(height: 8),
           Row(children: [

@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>틈길 로컬 테스트 콘솔</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --line: #e3e6ea;
+    --text: #1d2126;
+    --muted: #6b7280;
+    --accent: #2f6feb;
+    --ok: #0f8a52;
+    --warn: #b26a00;
+    --bad: #c0392b;
+    --code: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --panel: #1e2126;
+      --line: #2e3238;
+      --text: #e8eaed;
+      --muted: #9aa1ab;
+      --accent: #6ea0ff;
+      --ok: #4ad991;
+      --warn: #f0b04c;
+      --bad: #ff7b6b;
+      --code: #15171b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 650; }
+  header .spacer { flex: 1; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--bad); }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  main {
+    display: grid; gap: 16px;
+    grid-template-columns: minmax(340px, 460px) 1fr;
+    padding: 18px 20px 40px;
+    max-width: 1240px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  section h2 { margin: 0 0 12px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 5px; }
+  input[type="text"], textarea, select {
+    width: 100%; padding: 9px 11px; font: inherit; color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  }
+  textarea { min-height: 84px; resize: vertical; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 0 0 auto; }
+  .row .grow { flex: 1 1 140px; }
+  button {
+    padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer;
+    color: #fff; background: var(--accent); border: 0; border-radius: 8px;
+  }
+  button:hover { filter: brightness(1.06); }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  button:disabled { opacity: .55; cursor: default; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    font-size: 12.5px; padding: 5px 10px; border-radius: 999px;
+    background: var(--code); color: var(--text); border: 1px solid var(--line); cursor: pointer;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .switch { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text); }
+  .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .answer {
+    font-size: 17px; line-height: 1.6; padding: 14px 16px;
+    background: var(--code); border-radius: 10px; border: 1px solid var(--line);
+    min-height: 56px; white-space: pre-wrap;
+  }
+  .badges { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .badge {
+    font-size: 12px; font-weight: 650; padding: 3px 9px; border-radius: 999px;
+    background: var(--code); border: 1px solid var(--line); color: var(--muted);
+  }
+  .badge.ai { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+  .badge.rule { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+  .badge.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+  .intents { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+  .intent {
+    font: 12.5px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+    background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  pre {
+    margin: 8px 0 0; padding: 12px; overflow: auto; max-height: 380px;
+    background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .kv { display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px; font-size: 13.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>틈길 로컬 테스트 콘솔</h1>
+  <span class="status"><span id="dot" class="dot"></span><span id="health">서버 확인 중…</span></span>
+  <span class="spacer"></span>
+  <a href="/app/" target="_blank" rel="noopener">앱 화면(/app)</a>
+  <a href="/docs" target="_blank" rel="noopener">API 문서(/docs)</a>
+</header>
+
+<main>
+  <div style="display:grid; gap:16px; align-content:start;">
+    <section>
+      <h2>질문하기 · POST /api/ask</h2>
+      <label for="ask-user">user_id</label>
+      <input id="ask-user" type="text" value="demo">
+      <label for="ask-text">질문</label>
+      <textarea id="ask-text" placeholder="예: 편의점 들렀다 가도 돼?">편의점 들렀다 가도 돼?</textarea>
+      <div class="chips" id="chips"></div>
+      <div class="row" style="margin-top:12px;">
+        <label class="switch"><input id="ask-demo" type="checkbox" checked> 시연 모드(demo)</label>
+        <span class="spacer grow"></span>
+        <button id="ask-send">질문 보내기</button>
+      </div>
+      <p class="hint">시연 모드는 고정 시나리오로 계산해요. 시연 모드를 끄면 실시간 계획이 필요해서 교통 API 키와 현재 위치가 있어야 답해요.</p>
+    </section>
+
+    <section>
+      <h2>할 일 분석 · POST /api/tasks/parse</h2>
+      <label for="todo-user">user_id</label>
+      <input id="todo-user" type="text" value="demo">
+      <label for="todo-text">할 일 문장</label>
+      <input id="todo-text" type="text" value="아 우유 사야 돼">
+      <div class="chips" id="todo-chips"></div>
+      <div class="row" style="margin-top:12px;">
+        <span class="spacer grow"></span>
+        <button id="todo-send">분석하기</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>시연 시나리오 · GET /api/demo/context</h2>
+      <div class="row">
+        <button id="ctx-load" class="ghost">불러오기</button>
+      </div>
+      <div id="ctx-out" style="margin-top:12px;"></div>
+    </section>
+  </div>
+
+  <div style="display:grid; gap:16px; align-content:start;">
+    <section>
+      <h2>결과</h2>
+      <div class="badges">
+        <span id="engine-badge" class="badge">대기 중</span>
+        <span id="latency-badge" class="badge">–</span>
+        <span id="status-badge" class="badge">–</span>
+      </div>
+      <div id="answer" class="answer muted">왼쪽에서 질문을 보내면 답변이 여기에 나옵니다.</div>
+      <div id="intents" class="intents"></div>
+      <details>
+        <summary>원본 JSON 보기</summary>
+        <pre id="raw">–</pre>
+      </details>
+    </section>
+
+    <section>
+      <h2>팁</h2>
+      <dl class="kv">
+        <dt>engine</dt><dd><code>ai</code>면 Meta 모델 호출 성공, <code>rule</code>이면 키워드 규칙 폴백이에요.</dd>
+        <dt>맥락 질문</dt><dd>user_id를 <code>demo</code>가 아닌 값으로 두고 "근처 약국 어디야?" → "거기 들러도 돼?" 순서로 보내면 최근 대화를 쓰는지 볼 수 있어요.</dd>
+        <dt>빠른 반복</dt><dd>Ctrl(⌘) + Enter 로 전송할 수 있어요.</dd>
+      </dl>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const QUESTIONS = [
+  "다음 버스 언제야?",
+  "편의점 들렀다 가도 돼?",
+  "10분 늦을 것 같은데 약국은 들를 수 있어?",
+  "몇 분까지 나가면 돼?",
+  "약은 안 사도 돼",
+  "환승 적은 걸로",
+  "점심 뭐 먹지?",
+  "거기 들러도 돼?",
+];
+const TODOS = [
+  "아 우유 사야 돼",
+  "엄마 생신 선물 사야 해",
+  "수업 전에 아아 한 잔",
+  "현금 좀 뽑아 놔야 함",
+  "엄마한테 전화하기",
+];
+
+function chips(host, items, apply) {
+  items.forEach((text) => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.type = "button";
+    b.textContent = text;
+    b.onclick = () => apply(text);
+    host.appendChild(b);
+  });
+}
+
+chips($("chips"), QUESTIONS, (t) => { $("ask-text").value = t; $("ask-text").focus(); });
+chips($("todo-chips"), TODOS, (t) => { $("todo-text").value = t; $("todo-text").focus(); });
+
+function badge(el, text, kind) {
+  el.textContent = text;
+  el.className = "badge" + (kind ? " " + kind : "");
+}
+
+function showRaw(data) {
+  $("raw").textContent = JSON.stringify(data, null, 2);
+}
+
+// 좁은 화면에서는 결과가 입력칸 아래로 밀려서 안 보여요. 응답이 오면 결과로 데려가요.
+function revealResult() {
+  const box = $("answer");
+  const top = box.getBoundingClientRect().top;
+  if (top < 0 || top > window.innerHeight - 120) {
+    box.closest("section").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+async function call(method, path, body) {
+  const started = performance.now();
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const ms = Math.round(performance.now() - started);
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = { error: "JSON 아님" }; }
+  return { res, data, ms };
+}
+
+function renderAsk(data, ms) {
+  const engine = data.engine || (data.error ? "error" : "–");
+  badge($("engine-badge"), "engine: " + engine,
+        engine === "ai" ? "ai" : engine === "rule" ? "rule" : "err");
+  badge($("latency-badge"), ms + " ms", "");
+  const intents = data.intents || [];
+  badge($("status-badge"), data.needs_confirm ? "되묻기" : intents.length + "개 의도", "");
+
+  const answer = $("answer");
+  const body = data.answer || (data.error ? JSON.stringify(data.error) : "답변이 없어요.");
+  answer.textContent = data.needs_confirm && data.question ? body + "\n\n→ " + data.question : body;
+  answer.classList.toggle("muted", !data.answer);
+
+  const host = $("intents");
+  host.textContent = "";
+  intents.forEach((it) => {
+    const extra = [];
+    if (it.place_types && it.place_types.length) extra.push("장소=" + it.place_types.join("/"));
+    if (it.delay_minutes != null) extra.push("지연=" + it.delay_minutes + "분");
+    if (it.action) extra.push("action=" + it.action);
+    if (it.preference) extra.push("기준=" + it.preference);
+    const span = document.createElement("span");
+    span.className = "intent";
+    span.textContent = it.intent + (extra.length ? " · " + extra.join(" · ") : "");
+    host.appendChild(span);
+  });
+  showRaw(data);
+  revealResult();
+}
+
+async function ask() {
+  const btn = $("ask-send");
+  btn.disabled = true;
+  $("answer").textContent = "요청 중…";
+  try {
+    const { data, ms } = await call("POST", "/api/ask", {
+      user_id: $("ask-user").value.trim() || "demo",
+      text: $("ask-text").value.trim(),
+      demo: $("ask-demo").checked,
+    });
+    renderAsk(data, ms);
+  } catch (e) {
+    badge($("engine-badge"), "engine: error", "err");
+    $("answer").textContent = String(e);
+    $("intents").textContent = "";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function parseTodo() {
+  const btn = $("todo-send");
+  btn.disabled = true;
+  try {
+    const { data, ms } = await call("POST", "/api/tasks/parse", {
+      user_id: $("todo-user").value.trim() || "demo",
+      text: $("todo-text").value.trim(),
+    });
+    badge($("engine-badge"), "engine: " + (data.engine || (data.error ? "error" : "–")),
+          data.engine === "ai" ? "ai" : data.engine === "rule" ? "rule" : "err");
+    badge($("latency-badge"), ms + " ms", "");
+    badge($("status-badge"), data.place_types ? data.place_types.length + "개 장소" : "–", "");
+    const answer = $("answer");
+    answer.textContent = data.error
+      ? JSON.stringify(data.error)
+      : `${data.text || ""} → ${(data.place_types || []).join(", ") || "장소 없음"}` +
+        (data.needs_confirm ? " (확인 필요)" : "");
+    answer.classList.remove("muted");
+    $("intents").textContent = "";
+    showRaw(data);
+    revealResult();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadContext() {
+  const btn = $("ctx-load");
+  btn.disabled = true;
+  const out = $("ctx-out");
+  out.textContent = "불러오는 중…";
+  try {
+    const { data } = await call("GET", "/api/demo/context");
+    if (data.error) { out.textContent = JSON.stringify(data.error); return; }
+    const rows = [
+      ["현재 시각", data.now],
+      ["현재 위치", data.location && data.location.name],
+      ["목적지", data.schedule && data.schedule.destination && data.schedule.destination.name],
+      ["도착 희망", data.schedule && data.schedule.arrive_by],
+      ["준비 시간", data.schedule && data.schedule.prep_minutes != null
+        ? data.schedule.prep_minutes + "분" : null],
+      ["정류장", data.stop && (data.stop.name || data.stop.ars_id)],
+      ["노선", data.route && data.route.name],
+    ];
+    const dl = document.createElement("dl");
+    dl.className = "kv";
+    rows.forEach(([k, v]) => {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v == null ? "–" : v;
+      dl.append(dt, dd);
+    });
+    out.textContent = "";
+    out.appendChild(dl);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function health() {
+  try {
+    const { res } = await call("GET", "/health");
+    const ok = res.ok;
+    $("dot").className = "dot " + (ok ? "ok" : "bad");
+    $("health").textContent = ok ? "서버 연결됨" : "서버 오류";
+  } catch (e) {
+    $("dot").className = "dot bad";
+    $("health").textContent = "서버에 연결할 수 없음";
+  }
+}
+
+$("ask-send").onclick = ask;
+$("todo-send").onclick = parseTodo;
+$("ctx-load").onclick = loadContext;
+$("ask-text").addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") ask();
+});
+$("todo-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") parseTodo();
+});
+
+health();
+loadContext();
+</script>
+</body>
+</html>

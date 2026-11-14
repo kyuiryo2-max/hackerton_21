@@ -217,6 +217,7 @@ def search_places(
             "lat": float(d["y"]),
             "distance_m": int(d["distance"]) if d.get("distance") else None,
             "place_url": d.get("place_url", ""),
+            "category": d.get("category_group_code", ""),  # SW8 지하철역 등 (검색 순서 정리용, 11/14)
         }
         for d in _get(path, params).get("documents", [])
     ]

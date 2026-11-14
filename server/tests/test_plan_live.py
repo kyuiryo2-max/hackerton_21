@@ -380,7 +380,7 @@ def test_실제_모드_다른_경로는_말한_기준으로_가장_좋은_경로
 def _ai_says(monkeypatch, intent: dict):
     """AI 분류 결과를 정해 줘요 (키워드 규칙이 모르는 표현을 시험할 때)."""
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
-    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+    monkeypatch.setattr(assistant, "_classify", lambda text, history, context=None: {
         "type": "question", "intents": [{"place_types": [], "delay_minutes": None, **intent}],
         "needs_confirm": False, "question": None, "engine": "ai"})
 
@@ -409,7 +409,7 @@ def test_실제_모드_두_곳_모두_들를_수_있으면_하나로_답함(clie
     plan(client)
     monkeypatch.setattr(planner, "_vehicle_seconds", lambda leg: [600, 1200, 1800])  # 두 곳을 들르면 30분 차
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
-    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+    monkeypatch.setattr(assistant, "_classify", lambda text, history, context=None: {
         "type": "question", "needs_confirm": False, "question": None, "engine": "ai",
         "intents": [{"intent": "stopover_check", "place_types": [k], "delay_minutes": None} for k in ("편의점", "약국")]})
     body = live_ask("편의점 들렀다가 약국도 갈 수 있어?")
@@ -633,3 +633,45 @@ def test_추천_경로는_동시에_계산해서_빠름(client, world, monkeypat
     took = clock.monotonic() - started
     assert res.status_code == 200 and len(res.json()["routes"]) == 3
     assert took < 0.8, f"{took:.2f}초 걸렸어요"
+
+
+def test_이동_중_들르기는_지난_출발_시각을_말하지_않음(client, far_plan):
+    """11/14: 이동 중(18:33)에 '커피 사도 돼?'라고 물었더니 '17시 58분에 출발하시면 돼요'라고 답하던 문제."""
+    trip = {"phase": "waiting", "now": datetime.now().astimezone().isoformat(), "stop_name": "정류장",
+            "destination": "목적지", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["result"]["feasible"] is True
+    assert "출발하면 돼요" not in r["answer"] and "출발하시면" not in r["answer"]
+    assert "depart_at" not in r["result"]
+    assert "들를 수 있어요" in r["answer"]
+
+
+def test_이동_중_들르기는_저장한_할_일_id를_줌(client, far_plan):
+    """이동 중 팝업의 '경유지로 추가' 버튼이 이 id로 지금 경로에 경유지를 넣어요 (11/14)."""
+    trip = {"phase": "waiting", "now": datetime.now().astimezone().isoformat(), "stop_name": "정류장",
+            "destination": "목적지", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["result"]["feasible"] is True
+    assert r["todo"] and r["todo"].get("id")
+
+
+def test_이동_중_들르기_할_일_이름은_질문_문장이_아님(client, far_plan):
+    trip = {"phase": "waiting", "now": datetime.now().astimezone().isoformat(), "stop_name": "정류장",
+            "destination": "목적지", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["todo"]["text"] == "편의점 들르기"
+
+
+def test_타는_중_들르기는_목적지에_내려서_들르라고_안내(client, far_plan):
+    """11/14: 버스를 타는 중이면 중간에 내리라고 하지 않고 목적지 근처 가게를 알려 줘요."""
+    trip = {"phase": "riding", "now": datetime.now().astimezone().isoformat(), "ride_name": "2115번",
+            "destination": "청량리역", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["result"]["feasible"] is False and r["result"]["after_arrival"] is True
+    assert "청량리역에 내려서" in r["answer"] or "청량리역에 내린 뒤" in r["answer"]
+    assert r["result"]["place"]["name"] in r["answer"]
+    assert r["todo"]["text"] == "편의점 들르기"

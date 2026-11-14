@@ -19,6 +19,9 @@ import 'specialty_chips.dart';
 import '../models/trip_progress.dart';
 import '../services/server_ask_service.dart';
 import 'trip_panel.dart';
+import '../models/schedule.dart';
+import '../screens/schedule_form_screen.dart';
+import '../services/schedule_draft_parser.dart';
 
 /// 이동 탭 (팀장님 흐름도 기준)
 /// ① 일정 이름 · 출발지 → 목적지   ② 지도 (경로 · 출발지 · 목적지 · 경유 후보)
@@ -89,6 +92,12 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   String? _candidateId;
   final Map<String, int> _needOverride = {};
   bool _tripStarted = false;
+  /// 이동 중 화면을 그릴 때의 경로·경유 후보·계획 (이동 중 질문 버튼이 지금 위치를 계산할 때 써요)
+  RouteCandidate? _tripRoute;
+  StayEval? _tripChosen;
+  TripPlan? _tripNow;
+  /// 이동 중 경유지를 바꿔 다시 계산하면, 새 경로가 오는 대로 이동을 그 자리에서 다시 시작해요
+  bool _restartTripOnPlan = false;
 
   // ---------- 이동 중 (11/13): 시간 기준 단계 + 버튼으로 넘기기 ----------
   DateTime? _tripRealStart;
@@ -472,11 +481,157 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
             final now = _tripClock;
             final phase = trip.steps[_tripIndex(trip)].phase;
             final res = await _askService.ask(text, trip: trip.toAskJson(phase, now));
-            return res.needsConfirm && res.question != null ? res.question! : res.answer;
+            await _afterTodoChange(res);
+            return _tripReply(res);
           },
         ),
       ),
     ]);
+  }
+
+  // ---------- 이동 중 AI 답변 버튼 (11/14) ----------
+  // AI 탭을 없애서, AI 탭에 있던 버튼(#48 할 일·일정 초안, #50 경유지 추가)을 이동 중 팝업으로 옮겼어요.
+
+  TripAskReply _tripReply(ServerAskResponse res) {
+    if (res.needsConfirm) return TripAskReply(res.question ?? res.answer);
+    final r = res.result ?? const <String, dynamic>{};
+    final intent = r['intent']?.toString() ??
+        (res.intents.isEmpty ? null : res.intents.first['intent']?.toString());
+    final todo = res.todo;
+    final savedId = widget.isDemo ? null : todo?['id'];
+
+    // 1. 들를 수 있는 들르기: 서버가 할 일로 저장해 뒀어요 → 지금 경로에 경유지로 넣을지 물어봐요
+    if (intent == 'stopover_check' && r['feasible'] == true && savedId != null) {
+      return TripAskReply('${res.answer} 경유지로 추가할까요?', actions: [
+        TripAskAction('경유지로 추가', Icons.add_location_alt_rounded, () => _addStopFromAsk('$savedId')),
+      ]);
+    }
+    // 2. 시간이 부족한 들르기(실제 모드): 서버가 할 일 목록에 남겨 뒀어요
+    if (intent == 'stopover_check' && r['feasible'] == false && savedId != null) {
+      return TripAskReply('${res.answer} 할 일 목록에는 남겨 뒀어요.');
+    }
+    // 3. 저장 전 할 일 초안 ("나중에 ~해야 해", 시연 모드 들르기) → 버튼을 눌러야 넣어요
+    if (todo != null && todo['id'] == null && (r['can_add_todo'] == true || intent == 'add_todo')) {
+      return TripAskReply(res.answer, actions: [
+        TripAskAction('할 일에 넣기', Icons.playlist_add_rounded, () => _addTodoFromAsk(todo)),
+      ]);
+    }
+    // 4. 일정 추가 초안 → 일정 입력 화면
+    final draft = ScheduleDraft.fromServerResult(r) ??
+        (res.schedule != null ? ScheduleDraft.fromScheduleMap(res.schedule!) : null);
+    if (intent == 'add_schedule' && draft != null) {
+      return TripAskReply(res.answer, actions: [
+        TripAskAction('일정 입력 열기', Icons.event_rounded, () => _openScheduleDraft(draft)),
+      ]);
+    }
+    return TripAskReply(res.answer);
+  }
+
+  /// "커피 샀어"·"약은 안 사도 돼"처럼 서버가 할 일을 바꿨으면 할 일 목록을 다시 불러와요 (11/14).
+  /// - 이동 중: 경로는 그대로 둬요. 가게 안에서 "샀어"라고 하는 게 보통이라 경로가 맞기 때문이에요.
+  ///   그 가게에 머무는 단계면 "나왔어요"를 누른 것처럼 다음 단계로 넘겨요.
+  /// - 이동 전: 완료·제외한 할 일은 경유지에서 빼고 경로를 다시 계산해요.
+  Future<void> _afterTodoChange(ServerAskResponse res) async {
+    final r = res.result;
+    if (widget.isDemo || res.needsConfirm || r == null || r['intent'] != 'change_todo' || r['todo_id'] == null) return;
+    await TodoScope.of(context).initialize();
+    if (!mounted) return;
+    final plan = _tripNow;
+    if (_tripStarted && plan != null) {
+      final index = _tripIndex(plan);
+      if (r['action'] == 'done' && plan.steps[index].phase == TripPhase.atPlace) {
+        setState(() {
+          _tripManualIndex = index + 1;
+          _manualAt = _tripClock;
+        });
+      }
+      return;
+    }
+    final id = '${r['todo_id']}';
+    final trip = _trip;
+    if ((r['action'] == 'done' || r['action'] == 'delete') && activeRouteController.appliedFor(trip)) {
+      final ids = (activeRouteController.appliedTaskId ?? '').split('+').where((x) => x.isNotEmpty && x != id).toList();
+      activeRouteController.setApplied(ids.isEmpty ? null : ids.join('+'), null, trip);
+    }
+    activeRouteController.requestPlanRefresh();
+  }
+
+  /// 이동 중 팝업이 시간으로 보여 주는 지금 위치 (GPS 아님). 지도 위 점과 같은 계산이에요.
+  LatLng? _timelinePoint(TripPlan plan, int index) {
+    final route = _tripRoute;
+    if (route == null) return null;
+    final now = _tripClock;
+    final passed = <LatLng>[];
+    for (var i = 0; i < index; i++) {
+      passed.addAll(_stepTrack(plan, i, route, _tripChosen, now).$1);
+    }
+    final (pts, f) = _stepTrack(plan, index, route, _tripChosen, _stepClock(plan, index, now));
+    passed.addAll(_prefix(pts, f));
+    return passed.isEmpty ? null : passed.last;
+  }
+
+  /// 서버가 저장한 할 일을 경유지로 넣고 다시 계산해요.
+  /// - 이동 전: 이미 넣은 곳과 같이 들러요 ('1+3').
+  /// - 이동 중: 팝업의 지금 위치(시간 기준)에서 목적지까지 다시 계산해요. 이미 들른 곳은 빼고,
+  ///   아직 가는 중인 곳(가게로 걷는 단계)은 같이 들러요. 새 경로가 오면 이동을 처음 단계부터 다시 시작해요.
+  Future<String?> _addStopFromAsk(String id) async {
+    await TodoScope.of(context).initialize();
+    if (!mounted) return null;
+    final trip = _trip;
+    final TripPlan? plan = _tripStarted ? _tripNow : null;
+    final int? index = plan == null ? null : _tripIndex(plan);
+    final keepOld = plan == null || plan.steps[index!].phase == TripPhase.toPlace;
+    final current = keepOld && activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
+    final ids = <String>{...?current?.split('+'), id};
+    activeRouteController.setApplied(ids.join('+'), null, trip);
+    if (plan == null || index == null) {
+      activeRouteController.requestPlanRefresh();
+      return '경유지에 넣었어요. 경로를 다시 계산할게요.';
+    }
+    final point = _timelinePoint(plan, index);
+    _restartTripOnPlan = true;
+    activeRouteController.requestPlanRefresh(
+        from: point == null ? null : (lat: point.latitude, lng: point.longitude, name: '이동 중 지금 위치'));
+    return '경유지에 넣었어요. 지금 위치에서 다시 계산할게요.';
+  }
+
+  Future<String?> _addTodoFromAsk(Map<String, dynamic> raw) async {
+    final title = '${raw['text'] ?? ''}'.trim();
+    if (title.isEmpty) return null;
+    final controller = TodoScope.of(context);
+    if (controller.todos.any((t) => t.title.trim() == title && !t.isCompleted)) {
+      return '「$title」은(는) 이미 할 일에 있어요.';
+    }
+    final types = raw['place_types'] is List
+        ? [for (final t in raw['place_types'] as List) '$t']
+        : const <String>[];
+    await controller.addTodo(
+      title: title,
+      minutes: (raw['stay_minutes'] as num?)?.toInt(),
+      requiresTravel: types.isNotEmpty,
+      placeTypes: types,
+      important: raw['importance'] == '필수',
+    );
+    return '「$title」 할 일에 넣었어요.';
+  }
+
+  Future<String?> _openScheduleDraft(ScheduleDraft d) async {
+    final saved = await Navigator.push<Schedule>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScheduleFormScreen(
+          initial: Schedule(
+            id: 0,
+            title: d.title,
+            location: d.location,
+            startTime: d.start,
+            endTime: d.end ?? d.start.add(const Duration(hours: 1)),
+          ),
+        ),
+      ),
+    );
+    if (saved == null) return null;
+    return '「${saved.title}」 일정을 추가했어요.';
   }
 
   /// 이 화면의 이동 (목적지 + 도착 시각)
@@ -491,6 +646,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       _appliedTaskId = null;
       _candidateId = null;
     }
+    _lastSharedKey = _appliedTaskId == null ? null : '$_appliedTaskId|$_candidateId';
   }
 
   @override
@@ -509,6 +665,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       if (!sameTrip) {
         _tripStarted = false;
         _stopTrip();
+      } else if (_restartTripOnPlan && _tripStarted) {
+        // 지금 위치에서 다시 계산한 경로라서, 이동도 새 경로의 처음 단계부터 이어 가요
+        _restartTripOnPlan = false;
+        _startTrip();
       }
     }
   }
@@ -605,9 +765,15 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     return const [];
   }
 
+  /// 적용한 할 일. 여러 개를 고르면('1+3') 한 번에 들르는 묶음이에요 (11/14).
   StayTask? get _applied {
-    for (final t in _tasks) {
-      if (t.id == _appliedTaskId) return t;
+    final id = _appliedTaskId;
+    if (id == null) return null;
+    for (final r in widget.routes) {
+      final o = _overviewFor(r);
+      if (o == null || o.tasks.isEmpty) continue;
+      final t = o.taskFor(id, needOf: _needOf);
+      if (t != null) return t;
     }
     return null;
   }
@@ -618,9 +784,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   List<StayEval>? _evals(RouteCandidate route, StayTask task) {
     final o = _overviewFor(route);
     if (o == null || !o.canPlanStay) return null;
-    final match = o.tasks.where((t) => t.id == task.id);
-    if (match.isEmpty) return null;
-    return o.rank(match.first, delayMinutes: 0, need: _needOf(task));
+    final match = o.taskFor(task.id, needOf: _needOf);
+    if (match == null) return null;
+    return o.rank(match, delayMinutes: 0, need: _needOverride[task.id] ?? match.needMinutes);
   }
 
   /// 할 일을 적용했을 때 경로 카드 순서 (11/13)
@@ -751,6 +917,13 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     return '실시간 · ${live.name.isEmpty ? '' : '${live.name} '}${parts.join(' · ')}$later';
   }
 
+  /// 실시간 도착 정보가 없을 때: 서버 경로의 탑승 대기 시간 (11/14)
+  String? _waitText(RouteCandidate r) {
+    final w = (_planRouteFor(r)?['wait_min'] as num?)?.toInt();
+    if (w == null || w <= 0) return null;
+    return '정류장 대기 약 $w분 · 실시간 도착 정보는 출발 30분 전부터';
+  }
+
   /// 적용한 할 일이 빠듯하거나 시간이 부족할 때: 다음 차를 타면 더 머물 수 있는지 (카카오맵 "여유"처럼)
   String? _nextVehicleHint(RouteCandidate r, List<StayEval>? stay) {
     if (stay == null || stay.isEmpty) return null;
@@ -770,19 +943,38 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     return '다음 차($next분 뒤)를 타면 ${e.candidate.name}에서 $dwell분 · ${KstTime.hm(arrive)} 도착';
   }
 
+  /// 이 화면이 마지막으로 홈과 맞춘 값. 다른 화면(AI 질문)이 경유지를 바꾸면 그 값을 따라가요 (11/14).
+  String? _lastSharedKey;
+
   /// 적용한 할 일·경유지를 홈과 함께 써요. 빌드 중에 알리면 안 돼서 화면을 그린 뒤에 알려요.
   void _shareApplied() {
     if (widget.isDemo) return;
     final trip = _trip;
-    final shared = _appliedTaskId == null
-        ? !activeRouteController.appliedFor(trip)
-        : activeRouteController.appliedFor(trip) &&
-            activeRouteController.appliedTaskId == _appliedTaskId &&
-            activeRouteController.appliedCandidateId == _candidateId;
-    if (shared) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) activeRouteController.setApplied(_appliedTaskId, _candidateId, trip);
-    });
+    final ctrlKey = activeRouteController.appliedFor(trip)
+        ? '${activeRouteController.appliedTaskId}|${activeRouteController.appliedCandidateId}'
+        : null;
+    final localKey = _appliedTaskId == null ? null : '$_appliedTaskId|$_candidateId';
+    if (ctrlKey == localKey) {
+      _lastSharedKey = localKey;
+      return;
+    }
+    if (localKey != _lastSharedKey) {
+      // 이 화면에서 바꿨어요 → 홈에 알려요
+      _lastSharedKey = localKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) activeRouteController.setApplied(_appliedTaskId, _candidateId, trip);
+      });
+    } else {
+      // 다른 화면에서 바꿨어요 → 이 화면이 따라가요
+      _lastSharedKey = ctrlKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _appliedTaskId = activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
+          _candidateId = activeRouteController.appliedFor(trip) ? activeRouteController.appliedCandidateId : null;
+        });
+      });
+    }
   }
 
   // ---------- 할 일 적용 창 ----------
@@ -808,7 +1000,27 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
         hidden++;
       }
     }
-    String? chosen = _appliedTaskId;
+    // 여러 곳을 고를 수 있어요 (11/14). 고른 순서가 아니라 걷는 시간이 짧은 순서로 묶어서 계산해요.
+    final picked = <String>[
+      for (final id in (_appliedTaskId ?? '').split('+'))
+        if (feasible.any((f) => f.$1.id == id)) id,
+    ];
+    String? combinedLine() {
+      if (picked.length < 2) return null;
+      StayEval? best;
+      for (final r in widget.routes) {
+        final o = _overviewFor(r);
+        final t = o?.taskFor(picked.join('+'), needOf: _needOf);
+        if (o == null || t == null || !o.canPlanStay) continue;
+        final e = o.rank(t, delayMinutes: 0, need: t.needMinutes);
+        if (e.isNotEmpty && (best == null || e.first.maxDwell > best.maxDwell)) best = e.first;
+      }
+      if (best == null) return '이 조합은 계산할 수 없어요';
+      final route = best.candidate.via.map((c) => c.name).join(' → ');
+      return best.status == StayStatus.bad
+          ? '${picked.length}곳 모두는 ${best.shortBy}분 부족해요 · $route'
+          : '${picked.length}곳 모두 들를 수 있어요 · $route (${best.stayLabel})';
+    }
     final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -849,19 +1061,22 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 5),
                     child: Material(
-                      color: chosen == t.id ? AppTheme.primarySoft : Colors.white,
+                      color: picked.contains(t.id) ? AppTheme.primarySoft : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(14),
-                        onTap: () => setSheet(() => chosen = t.id),
+                        onTap: () => setSheet(() {
+                          if (!picked.remove(t.id)) picked.add(t.id);
+                        }),
                         child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: chosen == t.id ? AppTheme.primary : AppTheme.border, width: 2),
+                            border: Border.all(
+                                color: picked.contains(t.id) ? AppTheme.primary : AppTheme.border, width: 2),
                           ),
                           child: Row(children: [
-                            Icon(chosen == t.id ? Icons.radio_button_checked : Icons.radio_button_off,
+                            Icon(picked.contains(t.id) ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
                                 color: AppTheme.primary),
                             const SizedBox(width: 10),
                             Expanded(
@@ -898,14 +1113,22 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                       style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ),
               const SizedBox(height: 6),
-              const Text('한 번에 한 곳만 적용해요. 여러 곳을 들르려면 경로를 다시 확인해야 해서, 먼저 한 곳으로 계산해요.',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.4)),
+              if (combinedLine() case final line?)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: AppTheme.background, borderRadius: BorderRadius.circular(10)),
+                  child: Text(line, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                )
+              else
+                const Text('여러 곳을 고르면 걷는 시간이 가장 짧은 순서로 묶어서 한 번에 계산해요.',
+                    style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.4)),
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: chosen == null ? null : () => Navigator.pop(sheet, chosen),
-                  child: const Text('선택한 할 일로 경로 다시 찾기'),
+                  onPressed: picked.isEmpty ? null : () => Navigator.pop(sheet, picked.join('+')),
+                  child: Text(picked.length > 1 ? '${picked.length}곳 들르는 경로 찾기' : '선택한 할 일로 경로 다시 찾기'),
                 ),
               ),
               const SizedBox(height: 6),
@@ -920,6 +1143,24 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     );
     if (result == null || !mounted) return;
     // 카드 순서의 1번 경로(들를 수 있고 많이 느리지 않은 경로)로 바꿔 줘요.
+    if (result.contains('+')) {
+      final combined = _overviewFor(_selected)?.taskFor(result, needOf: _needOf) ??
+          (() {
+            for (final r in widget.routes) {
+              final t = _overviewFor(r)?.taskFor(result, needOf: _needOf);
+              if (t != null) return t;
+            }
+            return null;
+          })();
+      if (combined == null) return;
+      final best = widget.routes.isEmpty ? null : _orderedRoutes(combined).first;
+      setState(() {
+        _appliedTaskId = result;
+        _candidateId = null;
+      });
+      if (best != null && best.id != widget.selectedId) widget.onSelect(best.id);
+      return;
+    }
     final task = tasks.firstWhere((t) => t.id == result);
     // 병원인데 진료과가 없으면 먼저 물어봐요 (11/13). 진료과를 붙여 저장하면 경로를 다시 불러오고,
     // 같은 이동이라 적용한 할 일은 그대로 남아요.
@@ -956,11 +1197,24 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final ordered = _orderedRoutes(applied);
     _shareApplied();
     final trip = _tripStarted ? _tripPlan(route, applied, chosenEval) : null;
+    _tripRoute = route;
+    _tripChosen = chosenEval;
+    _tripNow = trip;
     final tripIndex = trip == null ? 0 : _tripIndex(trip);
     _maybeAutoEnd(trip, tripIndex);
     final track = trip == null ? null : _tripTrack(trip, tripIndex, route, chosenEval);
     // 지도에 들를 수 있는 곳을 모두 보여 주고, 누르면 그곳으로 경로를 바꿔요 (11/13)
     final stopChoices = <StopChoice>[
+      // 여러 곳을 들르면 두 번째 곳부터도 지도에 표시 (11/14)
+      if (chosenEval != null && chosenEval.candidate.isMulti)
+        for (var i = 1; i < chosenEval.candidate.via.length; i++)
+          if (chosenEval.candidate.via[i].point != null)
+            StopChoice(
+              id: chosenEval.candidate.id,
+              point: LatLng(chosenEval.candidate.via[i].point!.lat, chosenEval.candidate.via[i].point!.lng),
+              label: '${i + 1}. ${chosenEval.candidate.via[i].name}',
+              color: stayColor(chosenEval.status),
+            ),
       for (final e in evals ?? const <StayEval>[])
         if (e.candidate.point != null && e.candidate.id != chosenEval?.candidate.id)
           StopChoice(
@@ -1091,7 +1345,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           badge: _badgeFor(i, ordered[i], ordered),
           stripRoute: _stripRoute(ordered[i], applied, chosen: ordered[i].id == route.id ? chosenEval : null),
           fare: _fareOf(ordered[i]),
-          live: _liveText(ordered[i]),
+          live: _liveText(ordered[i]) ?? _waitText(ordered[i]),
           liveHint: applied == null ? null : _nextVehicleHint(ordered[i], _evals(ordered[i], applied)),
         ),
 

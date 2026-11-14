@@ -17,7 +17,7 @@ from app.db import repository as repo
 from app.db.database import DEMO_USER_ID
 from app.services import demo, live, llm, planner, rules, trip
 from app.services.planner import ACTIVE, KST, STATUS, _demo_place
-from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, decide_stops
+from app.services.stopover import DEFAULT_BUFFER_SECONDS, StopCandidate, StopDecision, decide_stops
 from app.services.timecalc import travel_minutes_from_seconds, wait_minutes_from_seconds
 
 log = logging.getLogger(__name__)
@@ -49,11 +49,74 @@ def _broken(classified: dict) -> bool:
     return not classified["intents"] and classified["question"] == llm.DEFAULT_CONFIRM_QUESTION
 
 
-def _classify(text: str, history: list[dict]) -> dict:
-    out = llm.classify_question(text, history=history)
+def _classify(text: str, history: list[dict], context: dict | None = None) -> dict:
+    out = llm.classify_question(text, context=context, history=history)
     if _broken(out):
         raise ValueError("AI 질문 분류 형식이 맞지 않아요")
     return out
+
+
+_WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
+
+
+def _ask_context(user_id: str, trip_context: trip.TripIn | None) -> dict:
+    """AI 질문 분류에 주는 상황 정보 (v3). 시각·경로·할 일을 실제로 채워서 보내요.
+
+    AI는 이 값을 "해석"에만 쓰고, 숫자·삽입 위치는 서버가 계산해요.
+    """
+    now = trip_context.now if trip_context is not None else _now()
+    ctx: dict = {
+        "now": now.isoformat(timespec="seconds"),
+        "today": f"{now:%Y-%m-%d} ({_WEEKDAYS[now.weekday()]})",
+    }
+    if trip_context is not None:
+        ctx.update(
+            phase=trip_context.phase,
+            phase_label=trip.PHASE_LABEL.get(trip_context.phase),
+            ride_name=trip_context.ride_name,
+            destination=trip_context.destination,
+            board_at=trip_context.board_at.strftime("%H:%M") if trip_context.board_at else None,
+            arrive_at=trip_context.arrive_at.strftime("%H:%M") if trip_context.arrive_at else None,
+        )
+        if trip_context.steps:
+            ctx["current_step"] = trip_context.current_step
+            ctx["steps"] = [
+                {"index": s.index, "kind": s.kind, "label": trip.step_label(s),
+                 "start": s.start.strftime("%H:%M") if s.start else None,
+                 "end": s.end.strftime("%H:%M") if s.end else None}
+                for s in trip_context.steps
+            ]
+    ctx["todos"] = [
+        {"text": t["text"], "place_types": t.get("place_types") or [], "status": t.get("status")}
+        for t in repo.list_todos(user_id)[:10]
+    ]
+    return ctx
+
+
+# ---------- 일정/할 일 추가 (v3) ----------
+def _add_schedule(item: dict, state: dict) -> tuple[dict, str]:
+    """일정 초안. 저장하지 않고, 앱의 기존 일정 추가 화면에 이름·목적지만 채워 줘요."""
+    title = (item.get("title") or "").strip()
+    location = (item.get("location") or "").strip()
+    result = {"intent": "add_schedule", "schedule": {"title": title, "location": location}}
+    if not title:
+        return result, "무슨 일정인지 알려 줄래요?"
+    answer = (f"「{title}」 일정 초안을 준비했어요. 일정 이름과 목적지만 채워 뒀어요. "
+              f"나머지는 화면에서 입력해 주세요.")
+    return result, answer
+
+
+def _add_todo(item: dict, state: dict) -> tuple[dict, str]:
+    """나중에 할 일 초안. 여기서 저장하지 않고 앱의 "할 일 목록에 추가" 버튼으로 확인받아요."""
+    text = (item.get("text") or "").strip() or rules.todo_text(state["text"])
+    places = [p for p in (item.get("place_types") or []) if p]
+    importance = item.get("importance") or None
+    todo = {"text": text, "place_types": places, "importance": importance,
+            "status": "대기", "source": "질문"}
+    state.setdefault("drafts", []).append(todo)
+    result = {"intent": "add_todo", "text": text, "place_types": places,
+              "importance": importance, "can_add_todo": True}
+    return result, f"{text}, 잊지 않게 할 일로 남겨 둘 수 있어요."
 
 
 def understand_todo(text: str) -> dict:
@@ -125,7 +188,11 @@ def _stop_text(item: dict, state: dict) -> str:
     if state.get("stopovers", 1) > 1 and item["place_types"]:
         return f"{item['place_types'][0]} 들르기"
     # AI 출력에는 들르기 할 일 이름이 없어서 문장에서 다듬어요 ("아 이어폰 사야 돼" → "이어폰 사기")
-    return rules.todo_text(state["text"])
+    text = rules.todo_text(state["text"])
+    if item["place_types"] and (text == state["text"].strip() or text.endswith("?")):
+        # 다듬지 못한 질문 문장을 할 일 이름으로 남기지 않아요 (11/14: 할 일 이름이 "커피 사도 돼?")
+        return f"{item['place_types'][0]} 들르기"
+    return text
 
 
 def _judge_stop(timing, included: list, place: dict, state: dict, deadline: int):
@@ -215,7 +282,8 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     place = next((places[t] for t in item["place_types"] if t in places), None)
     if place is None:
         kind = item["place_types"][0]
-        return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None, "board_at": None},
+        return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None,
+                 "board_at": None, "insert_at": None},
                 f"시연 지역에서는 {_josa(kind, '을를')} 찾지 못했어요.")
     # 이미 들르기로 한 장소면 다시 더하지 않아요 (이어폰을 넣은 뒤 "편의점 들러도 돼?")
     result, decision = _judge_stop(demo.route_timing(state["elapsed"]), _included(state["user_id"]), place, state,
@@ -228,9 +296,17 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         "place": {"name": place["name"], "address": place["address"]},
         "max_stay_min": wait_minutes_from_seconds(result.max_stay_seconds) if feasible and result.max_stay_seconds is not None else None,
         "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
+        # 시간이 부족해도 나중에 할 일로는 남길 수 있어요. 앱이 이 값으로 "할 일 목록에 추가" 버튼을 보여 줘요.
+        "can_add_todo": True,
     }
+    ins = trip.insert_at(place, state["trip"]) if state.get("trip") is not None else None
+    if ins is not None:
+        out["insert_at"] = ins
     _remember_todo(state, item, decision, place, now)
     if feasible:
+        if ins is not None:
+            return out, (f"{ins['label']} {place['name']}에 들를 수 있어요. "
+                         f"최대 {out['max_stay_min']}분 있어도 돼요.")
         return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
     return out, _short_answer(place, state)
 
@@ -453,11 +529,15 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     if ctx is None:
         return _no_plan("stopover_check")
     plan, now, elapsed, vehicles = ctx
+    if getattr(state.get("trip"), "phase", None) == "riding" and plan.destination is not None:
+        # 타는 중이면 중간에 내리라고 하지 않고, 목적지에 내린 뒤 근처에서 들르라고 안내해요 (11/14)
+        return _after_arrival_stop(item, state, plan, now)
     stop = tuple(plan.leg["start"])
     place = planner._near_place({"place_types": item["place_types"]}, stop, {}) if item["place_types"] else None
     if place is None:
         kind = item["place_types"][0] if item["place_types"] else "들를 곳"
-        return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None, "board_at": None},
+        return ({"intent": "stopover_check", "feasible": False, "place": None, "max_stay_min": None,
+                 "board_at": None, "insert_at": None},
                 f"정류장 근처에서 {_josa(kind, '을를')} 찾지 못했어요.")
     timing = replace(plan.timing, first_walk_seconds=max(plan.timing.first_walk_seconds - elapsed, 0),
                      vehicle_seconds=vehicles)
@@ -470,19 +550,53 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
         "place": {"name": place["name"], "address": place["address"]},
         "max_stay_min": wait_minutes_from_seconds(result.max_stay_seconds) if feasible and result.max_stay_seconds is not None else None,
         "board_at": (now + timedelta(seconds=result.board_seconds)).isoformat() if feasible and result.board_seconds is not None else None,
+        # 시간이 부족해도 나중에 할 일로는 남길 수 있어요. 앱이 이 값으로 "할 일 목록에 추가" 버튼을 보여 줘요.
+        "can_add_todo": True,
     }
+    # v3: 앱이 상세 경로를 보냈으면 삽입 위치까지 알려 줘요
+    ins = trip.insert_at(place, state["trip"]) if state.get("trip") is not None else None
+    if ins is not None:
+        out["insert_at"] = ins
     _remember_todo(state, item, decision, place, now)
-    if feasible and not vehicles and plan.has_target:
+    depart = _depart_for(plan, now, result.total_seconds) if feasible and not vehicles and plan.has_target else None
+    if depart is not None and (state.get("trip") is not None or depart <= now):
+        # 이미 이동 중이거나 그 시각이 지났으면 "HH:MM에 출발하면 돼요"라고 하지 않아요 (11/14: 18:33에 "17시 58분 출발")
+        depart = None
+    if depart is not None:
         # 실시간 차가 없으면(출발이 멀거나 운행 전) 들르는 만큼 일찍 나가면 돼요
-        depart = _depart_for(plan, now, result.total_seconds)
         out["depart_at"] = depart.isoformat()
         state["stop_depart"] = depart
-        return out, f"{place['name']}에 들를 수 있어요. {_hhmm(depart)}에 출발하면 돼요."
+        where = f"{ins['label']} " if ins is not None else ""
+        return out, f"{where}{place['name']}에 들를 수 있어요. {_hhmm(depart)}에 출발하면 돼요."
     if feasible:
         if out["max_stay_min"] is None:
-            return out, f"{place['name']}에 들를 수 있어요."
+            where = f"{ins['label']} " if ins is not None else ""
+            return out, f"{where}{place['name']}에 들를 수 있어요."
+        if ins is not None:
+            return out, (f"{ins['label']} {place['name']}에 들를 수 있어요. "
+                         f"최대 {out['max_stay_min']}분 있어도 돼요.")
         return out, f"{place['name']}에 들를 수 있어요. 최대 {out['max_stay_min']}분 있을 수 있어요."
     return out, _short_answer(place, state)
+
+
+def _after_arrival_stop(item: dict, state: dict, plan, now) -> tuple[dict, str]:
+    """버스·지하철을 타는 중의 들르기: 목적지 근처 장소를 찾아 "도착해서 들르면 돼요"로 답해요.
+
+    할 일은 저장해 두고(시간이 부족한 들르기처럼 '대기'), 지금 경로에 경유지로 넣지는 않아요.
+    """
+    kind = item["place_types"][0] if item["place_types"] else "들를 곳"
+    place = planner._near_place({"place_types": item["place_types"]}, plan.destination, {}) if item["place_types"] else None
+    dest_name = getattr(state.get("trip"), "destination", None) or plan.destination_name or "목적지"
+    out = {"intent": "stopover_check", "feasible": False, "after_arrival": True, "place": None,
+           "max_stay_min": None, "board_at": None, "insert_at": None, "can_add_todo": True}
+    if place is None:
+        return out, f"지금은 타고 가는 중이라 내려서 들르기는 어려워요. {_copula(dest_name)} 근처에서도 {_josa(kind, '을를')} 찾지 못했어요."
+    out["place"] = {"name": place["name"], "address": place["address"]}
+    walk = place.get("round_trip_walk_seconds")
+    walk_min = travel_minutes_from_seconds(walk // 2) if walk else None
+    _remember_todo(state, item, StopDecision(todo_id=-1, status="ask"), place, now)
+    where = f"{dest_name}에 내려서 걸어서 {walk_min}분" if walk_min else f"{dest_name}에 내린 뒤"
+    return out, f"지금은 타고 가는 중이라 내려서 들르기보다, {where} 거리의 {place['name']}에 들르는 걸 추천해요."
 
 
 def _live_running_late(item: dict, state: dict) -> tuple[dict, str]:
@@ -602,6 +716,9 @@ LIVE_HANDLERS = {
     "time_left": _live_time_left,
     "place_info": _live_place_info,
     "change_route": _live_change_route,
+    # 일정/할 일 초안은 시연·실제 모드가 같아요 (저장은 앱 버튼에서)
+    "add_schedule": _add_schedule,
+    "add_todo": _add_todo,
 }
 
 
@@ -613,6 +730,8 @@ HANDLERS = {
     "place_info": _place_info,
     "change_route": _change_route,
     "change_todo": _change_todo,
+    "add_schedule": _add_schedule,
+    "add_todo": _add_todo,
 }
 
 
@@ -624,7 +743,10 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
     # demo는 부스에서 여러 사람이 함께 써서, 앞사람 질문이 섞이지 않게 기록도 이전 대화도 쓰지 않아요
     keep_history = user_id != DEMO_USER_ID
     history = repo.recent_messages(user_id) if keep_history else []
-    classified, engine = _with_fallback(lambda t: _classify(t, history), rules.classify_question, text)
+    # v3: 지금 시각·이동 단계·상세 경로·할 일을 AI에 실제로 넘겨요 (해석용)
+    context = _ask_context(user_id, trip_context)
+    classified, engine = _with_fallback(
+        lambda t: _classify(t, history, context), rules.classify_question, text)
     classified = rules.ask_delay_if_unknown(classified, text)
     intents = classified["intents"]
     if keep_history:
@@ -633,6 +755,7 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
     result, results, answers = None, [], []
     used_trip = False
     state = {"user_id": user_id, "text": text, "elapsed": 0, "todo": None, "todos": [],
+             "drafts": [], "trip": trip_context,
              "stopovers": sum(i["intent"] == "stopover_check" for i in intents)}
     if classified["needs_confirm"]:
         answers.append(classified["question"])
@@ -658,12 +781,16 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
         answers = _combine_stops(state, results, answers, intents)
 
     # 들르기 질문으로 생긴 할 일 저장. 한 질문에 두 곳이면 둘 다 (todo는 마지막 것, 예전 앱 호환)
-    todos = state["todos"]
-    if user_id != DEMO_USER_ID:
-        todos = [{**t, "id": repo.add_todo(user_id, t["text"], t["place_types"], status=t["status"],
-                                           source="질문")["id"]} for t in todos]
-    todo = todos[-1] if todos else None
+    saved = state["todos"]
+    if user_id != DEMO_USER_ID and saved:
+        saved = [{**t, "id": repo.add_todo(user_id, t["text"], t["place_types"], status=t["status"],
+                                            source="질문")["id"]} for t in saved]
+    # add_todo 초안은 저장하지 않아요: 앱의 "할 일 목록에 추가" 버튼으로 확인한 뒤 저장해요
+    drafts = state["drafts"]
+    todos = saved + drafts
+    todo = drafts[-1] if drafts else (saved[-1] if saved else None)
     answer = " ".join(dict.fromkeys(answers))
+    schedule = next((r["schedule"] for r in results if r.get("intent") == "add_schedule"), None)
 
     # #37: AI 답변 문장 생성 및 숫자 대조 검증 (기존 코드 안전망 유지)
     should_explain = explain_with_ai if explain_with_ai is not None else config.EXPLAIN_WITH_AI
@@ -684,5 +811,6 @@ def ask(user_id: str, text: str, use_demo: bool, explain_with_ai: bool | None = 
         "answer": answer,
         "todo": todo,
         "todos": todos,
+        **({"schedule": schedule} if schedule else {}),
         "engine": engine,
     }

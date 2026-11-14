@@ -51,7 +51,15 @@ class StayCandidate {
     this.closeAt,
     this.pathTo = const [],
     this.pathBack = const [],
+    this.via = const [],
+    this.betweenMinutes = 0,
   });
+
+  /// 여러 곳을 들를 때 (11/14): 들르는 순서대로의 장소들. 한 곳이면 비어 있어요.
+  final List<StayCandidate> via;
+  /// 여러 곳을 들를 때 장소 사이를 걷는 시간 합계(분). [walkBackMinutes]에 이미 들어 있어요.
+  final int betweenMinutes;
+  bool get isMulti => via.length > 1;
 
   /// 실제 걷는 길 모양: 출발지 → 이곳, 이곳 → 탑승 정류장 (서버가 줄 때만, 11/13)
   final List<GeoPoint> pathTo;
@@ -108,6 +116,87 @@ class StayTask {
   final String reason;
 
   bool get isRequired => importance == '필수';
+  /// 여러 할 일을 묶은 것 (id가 '1+3')
+  bool get isMulti => id.contains('+');
+
+  /// 할 일 여러 개를 한 번에 들르기 (11/14 시연 피드백: 올리브영 + 편의점).
+  ///
+  /// 순서와 장소 조합을 모두 따져 걷는 시간이 가장 짧은 순서로 묶어요.
+  /// - 출발지 → 첫 장소: 첫 장소의 walkTo
+  /// - 장소 → 다음 장소: 두 좌표의 직선거리 × 1.3 ÷ 분당 67m (좌표가 없으면 정류장을 거쳐 가는 걸로 어림)
+  /// - 마지막 장소 → 정류장: 마지막 장소의 walkBack
+  /// 장소 사이 도보는 "돌아가는 도보"에 더해서, [StayEval.dwell]은 여러 곳에서 머물 수 있는 시간의 합이에요.
+  static StayTask combine(List<StayTask> parts, {int Function(StayTask t)? needOf}) {
+    int need(StayTask t) => needOf?.call(t) ?? t.needMinutes;
+    final options = [
+      for (final t in parts)
+        ([...t.candidates]..sort((a, b) => a.detourMinutes.compareTo(b.detourMinutes))).take(3).toList(),
+    ];
+    final found = <(int, List<StayCandidate>)>[];
+    void walk(List<int> order, List<StayCandidate> picked) {
+      if (picked.length == parts.length) {
+        var between = 0;
+        for (var i = 0; i + 1 < picked.length; i++) {
+          between += walkBetween(picked[i], picked[i + 1]);
+        }
+        found.add((picked.first.walkTo + between + picked.last.walkBack, [...picked]));
+        return;
+      }
+      for (var i = 0; i < parts.length; i++) {
+        if (order.contains(i)) continue;
+        for (final c in options[i]) {
+          walk([...order, i], [...picked, c]);
+        }
+      }
+    }
+
+    walk(const [], const []);
+    found.sort((a, b) => a.$1.compareTo(b.$1));
+    final candidates = <StayCandidate>[];
+    final seen = <String>{};
+    for (final (_, picked) in found) {
+      final key = ([for (final c in picked) c.id]..sort()).join(',');
+      if (!seen.add(key)) continue; // 같은 장소 묶음은 가장 짧은 순서 하나만
+      var between = 0;
+      for (var i = 0; i + 1 < picked.length; i++) {
+        between += walkBetween(picked[i], picked[i + 1]);
+      }
+      final first = picked.first, last = picked.last;
+      candidates.add(StayCandidate(
+        id: [for (final c in picked) c.id].join('+'),
+        name: [for (final c in picked) c.name].join(' → '),
+        detourMinutes: first.walkTo + between + last.walkBack,
+        point: first.point,
+        walkToMinutes: first.walkTo,
+        walkBackMinutes: between + last.walkBack,
+        pathTo: first.pathTo,
+        pathBack: last.pathBack,
+        via: picked,
+        betweenMinutes: between,
+      ));
+      if (candidates.length >= 4) break;
+    }
+    return StayTask(
+      id: [for (final t in parts) t.id].join('+'),
+      title: [for (final t in parts) t.title].join(' + '),
+      importance: parts.any((t) => t.isRequired) ? '필수' : '선택',
+      serverStatus: '',
+      needMinutes: parts.fold(0, (sum, t) => sum + need(t)),
+      candidates: candidates,
+    );
+  }
+
+  /// 두 장소 사이 도보(분) 어림
+  static int walkBetween(StayCandidate a, StayCandidate b) {
+    final p = a.point, q = b.point;
+    if (p == null || q == null) return a.walkBack + b.walkTo;
+    const r = 6371000.0;
+    final dLat = (q.lat - p.lat) * math.pi / 180, dLng = (q.lng - p.lng) * math.pi / 180;
+    final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(p.lat * math.pi / 180) * math.cos(q.lat * math.pi / 180) * math.sin(dLng / 2) * math.sin(dLng / 2);
+    final meters = 2 * r * math.asin(math.sqrt(h));
+    return math.max(1, (meters * 1.3 / 67).round());
+  }
   bool get includedByServer => serverStatus == '포함';
 }
 
@@ -187,7 +276,24 @@ class DepartureOverview {
     this.origin,
     this.destinationPoint,
     this.leaveEarlier = false,
+    this.nextVehiclesMin = const [],
+    this.waitMinutes,
+    this.planNow,
   });
+
+  /// 탈 정류장에 곧 오는 차들이 계획 시각([planNow])부터 몇 분 뒤인지 (실시간, 11/14 홈 표시용)
+  final List<int> nextVehiclesMin;
+  /// 서버 경로의 탑승 대기(분). 실시간이 없을 때 "약 N분 대기"로 보여 줘요.
+  final int? waitMinutes;
+  /// 서버가 계획을 계산한 시각
+  final DateTime? planNow;
+
+  /// [now] 기준 남은 분으로 바꾼 다음 차 목록 (지나간 차는 빼요)
+  List<int> nextVehiclesAt(DateTime now) {
+    final base = planNow;
+    final passed = base == null ? 0 : now.difference(base).inMinutes;
+    return [for (final m in nextVehiclesMin) if (m - passed >= 0) m - passed];
+  }
 
   /// 일정이 아직 멀어서(도착 시각에서 거꾸로 계산, 실시간 차 없음) 서버가 체류 여유(max_stay_min)를 안 줄 때.
   /// 이때는 "더 일찍 나가면" 들를 수 있어요: 지금 나간다고 보고, 원래 출발 시각까지를 여유로 계산해요.
@@ -345,6 +451,18 @@ class DepartureOverview {
     return list;
   }
 
+  /// 할 일 id로 찾기. '1+3'처럼 여러 개면 묶어서 한 번에 들르는 할 일로 만들어요 (11/14).
+  StayTask? taskFor(String id, {int Function(StayTask t)? needOf}) {
+    final parts = <StayTask>[];
+    for (final i in id.split('+')) {
+      final match = tasks.where((t) => t.id == i);
+      if (match.isEmpty) return null;
+      parts.add(match.first);
+    }
+    if (parts.isEmpty) return null;
+    return parts.length == 1 ? parts.first : StayTask.combine(parts, needOf: needOf);
+  }
+
   /// 아무 데도 안 들를 때 늦어도 이때 나가면 탈 수 있어요.
   DateTime? get latestDirectDeparture =>
       departure == null || spareMinutes == null ? null : departure!.add(Duration(minutes: spareMinutes!));
@@ -487,6 +605,12 @@ class DepartureOverview {
       demoNow: source == DepartureSource.serverDemo || source == DepartureSource.offlineDemo
           ? DateTime.tryParse('${plan.data['now'] ?? ''}')
           : null,
+      nextVehiclesMin: [
+        if (route['next_vehicles_min'] is List)
+          for (final v in route['next_vehicles_min'] as List) if (v is num) v.toInt(),
+      ],
+      waitMinutes: _int(route['wait_min']),
+      planNow: DateTime.tryParse('${plan.data['now'] ?? ''}'),
     );
   }
 }

@@ -282,7 +282,7 @@ def test_demo는_질문_기록을_남기지_않고_이전_대화도_보내지_�
 # ---------- 한 질문에 들를 곳 두 군데 (11/12) ----------
 def _ai_two_stops(monkeypatch, *kinds):
     monkeypatch.setattr(assistant, "_ai_ready", lambda: True)
-    monkeypatch.setattr(assistant, "_classify", lambda text, history: {
+    monkeypatch.setattr(assistant, "_classify", lambda text, history, context=None: {
         "type": "question", "needs_confirm": False, "question": None, "engine": "ai",
         "intents": [{"intent": "stopover_check", "place_types": [k], "delay_minutes": None} for k in kinds]})
 

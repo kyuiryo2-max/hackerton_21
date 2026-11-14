@@ -7,14 +7,30 @@ import '../providers/active_route_controller.dart';
 import '../config/api_config.dart';
 import '../models/schedule.dart';
 import '../services/schedule_draft_parser.dart';
+import '../services/place_search_service.dart';
+import '../models/place.dart';
 import 'schedule_form_screen.dart';
+
+/// AI 답변 아래 버튼 하나 (화면 이동·길찾기·할 일 보기, 11/14)
+class _AnswerAction {
+  const _AnswerAction(this.label, this.icon, {this.tab, this.placeName});
+  final String label;
+  final IconData icon;
+  /// 0 홈 / 1 이동 / 2 할 일·일정
+  final int? tab;
+  /// 이 이름으로 장소를 찾아 길찾기
+  final String? placeName;
+}
 
 
 class AssistantScreen extends StatefulWidget {
-  const AssistantScreen({super.key, this.initialQuestion});
+  const AssistantScreen({super.key, this.initialQuestion, this.onNavigate});
 
   /// 홈 "가는 길에 할 일"에서 넘어온 질문. 있으면 화면이 열리자마자 물어봐요.
   final String? initialQuestion;
+
+  /// 답변 버튼으로 다른 화면을 열 때 (메인 화면이 질문 창을 닫고 탭을 바꾸거나 길찾기를 시작해요)
+  final void Function({int? tab, Place? destination})? onNavigate;
 
   @override
   State<AssistantScreen> createState() => _AssistantScreenState();
@@ -47,21 +63,42 @@ class _AssistantScreenState extends State<AssistantScreen> {
       final intent = response.result?['intent']?.toString() ??
           (response.intents.isEmpty ? null : response.intents.first['intent']?.toString());
       final draft = ScheduleDraft.fromServerResult(response.result) ??
+          (response.schedule != null ? ScheduleDraft.fromScheduleMap(response.schedule!) : null) ??
           (intent == 'unsupported' || intent == null ? ScheduleDraft.parseLocal(message, DateTime.now()) : null);
-      setState(() => _history.add(_Message(
+      final goPlace = draft == null && (intent == 'unsupported' || intent == null) ? _destinationIn(message) : null;
+      final reply = _Message(
         draft != null && !draft.fromServer
             ? '일정 추가 요청으로 보여요. 아래 내용으로 일정 입력 화면을 열어 드릴게요.'
-            : (response.needsConfirm && response.question != null ? response.question! : response.answer),
+            : goPlace != null
+                ? '「$goPlace」까지 가는 길을 찾아 드릴게요. 아래 버튼을 누르면 이동 탭에서 경로를 보여 줘요.'
+                : (response.needsConfirm && response.question != null ? response.question! : response.answer),
         false, todo: _shouldShowTodo(response) ? response.todo : null,
         intent: intent,
         engine: response.engine,
         schedule: draft,
-      )));
+        actions: response.needsConfirm ? const [] : _actionsFor(intent, response.result, goPlace),
+        savedByServer: !ApiConfig.demoMode && response.todo?['id'] != null,
+      );
+      setState(() => _history.add(reply));
+      // 들를 수 있다고 답한 할 일만 바로 목록에 넣어요 (되돌리기 가능, 11/14).
+      // 시간이 부족한 들르기, "나중에 ~해야 해"(add_todo)는 자동으로 넣지 않고 버튼으로 확인받아요.
+      if (reply.todo != null && intent == 'stopover_check' && response.result?['feasible'] == true) {
+        await _addSuggestedTodo(reply, auto: true);
+      }
+      if (!mounted) return;
       // In real mode /api/ask may have already saved a new todo.
       // Refresh the visible todo list rather than showing an Add button again.
       if (!ApiConfig.demoMode && response.todo?['id'] != null) {
         await TodoScope.of(context).initialize();
         if (!mounted) return;
+        // 들를 수 있다고 한 곳은 지금 이동에 바로 경유지로 더해요. 이미 적용한 곳이 있으면 같이 들러요 (11/14)
+        final active = activeRouteController.active;
+        if (intent == 'stopover_check' && response.result?['feasible'] != false && active != null) {
+          final trip = ActiveRouteController.tripKey(active.destination, active.arrival);
+          final current = activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
+          final ids = <String>{...?current?.split('+'), '${response.todo!['id']}'};
+          activeRouteController.setApplied(ids.join('+'), null, trip);
+        }
       }
       // A persisted server-side change can invalidate the current plan.
       // The demo account does not persist changes, so don't imply recalculation.
@@ -86,6 +123,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
     // /api/ask persists generated todos for real users. Never POST them again.
     if (!ApiConfig.demoMode && response.todo?['id'] != null) return false;
     final result = response.result ?? const <String, dynamic>{};
+    // 시간이 부족해도 나중에 할 일로는 남길 수 있어요. 서버가 can_add_todo=true 를 주면 버튼을 보여 줘요.
+    if (result['can_add_todo'] == true) return true;
     // Prefer machine-readable server decision rather than a language heuristic.
     if (result['can_add_todo'] == false || result['feasible'] == false ||
         result['can_stop'] == false || result['status'] == '제외' ||
@@ -97,7 +136,75 @@ class _AssistantScreenState extends State<AssistantScreen> {
         .any(answer.contains);
   }
 
-  Future<void> _addSuggestedTodo(_Message message) async {
+  /// 답변에 맞는 버튼들 (11/14)
+  List<_AnswerAction> _actionsFor(String? intent, Map<String, dynamic>? result, String? goPlace) {
+    if (goPlace != null) {
+      return [_AnswerAction('「$goPlace」 길찾기', Icons.directions_rounded, placeName: goPlace)];
+    }
+    switch (intent) {
+      case 'stopover_check':
+        if (result?['feasible'] == false) {
+          return const [_AnswerAction('다른 경로 보기', Icons.alt_route_rounded, tab: 1)];
+        }
+        return const [_AnswerAction('경로에 넣어서 보기', Icons.route_rounded, tab: 1)];
+      case 'next_vehicle':
+      case 'time_left':
+      case 'running_late':
+      case 'change_route':
+        return const [_AnswerAction('이동 탭에서 경로 보기', Icons.route_rounded, tab: 1)];
+      case 'place_info':
+        final places = result?['places'];
+        final one = result?['place'];
+        final names = <String>[
+          if (places is List)
+            for (final p in places.take(3)) if (p is Map && p['name'] != null) '${p['name']}',
+          if ((places is! List || places.isEmpty) && one is Map && one['name'] != null) '${one['name']}',
+        ];
+        return [for (final n in names) _AnswerAction('$n 길찾기', Icons.directions_walk_rounded, placeName: n)];
+      case 'change_todo':
+        return const [_AnswerAction('할 일 보기', Icons.checklist_rounded, tab: 2)];
+    }
+    return const [];
+  }
+
+  /// "강남역 가는 길 알려줘", "홍대까지 어떻게 가?" → 강남역 / 홍대 (서버가 모르는 질문일 때만)
+  static final _goRe = RegExp(
+      r'^\s*(.+?)\s*(?:까지|으로|로|에|에서)?\s*(?:가는\s*(?:길|법|방법)|어떻게\s*가|가고\s*싶|가려면|길\s*찾|길찾기|가자|데려다)');
+  static String? _destinationIn(String text) {
+    final m = _goRe.firstMatch(text.trim());
+    final place = m?.group(1)?.trim();
+    if (place == null || place.isEmpty || place.length > 20) return null;
+    if (const {'지금', '어디', '여기', '거기', '집', '학교', '회사', '거기까지'}.contains(place)) return null;
+    return place;
+  }
+
+  Future<void> _runAction(_AnswerAction action) async {
+    final go = widget.onNavigate;
+    if (go == null) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    final name = action.placeName;
+    if (name == null) {
+      go(tab: action.tab);
+      return;
+    }
+    try {
+      final found = await PlaceSearchService().searchPlaces(name);
+      if (!mounted) return;
+      if (found.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('「$name」 장소를 찾지 못했어요. 이동 탭에서 직접 검색해 주세요.')));
+        return;
+      }
+      go(destination: found.first);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('장소 검색 실패: $e')));
+      }
+    }
+  }
+
+  Future<void> _addSuggestedTodo(_Message message, {bool auto = false}) async {
     final raw = message.todo;
     if (raw == null || message.added) return;
     final title = '${raw['text'] ?? ''}'.trim();
@@ -111,24 +218,26 @@ class _AssistantScreenState extends State<AssistantScreen> {
       }
       return;
     }
-    final confirmed = await showDialog<bool>(context: context, builder: (context) =>
-      AlertDialog(title: const Text('할 일에 추가할까요?'),
-        content: Text('「$title」를 내 할 일 목록에 추가합니다.\n'
-          '서버의 경로 추천에 자동으로 반영되는 것은 아니며, 계획은 다시 조회해야 합니다.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('추가')),
-        ]));
-    if (confirmed != true || !mounted) return;
+    // 확인 창 없이 바로 넣고, 아래 알림에서 되돌릴 수 있어요 (11/14)
+    final types = raw['place_types'] is List
+        ? [for (final t in raw['place_types'] as List) '$t']
+        : const <String>[];
     try {
-      await controller.addTodo(title: title, minutes: 10,
-        requiresTravel: (raw['place_types'] is List && (raw['place_types'] as List).isNotEmpty),
+      final saved = await controller.addTodo(title: title,
+        minutes: (raw['stay_minutes'] as num?)?.toInt(),
+        requiresTravel: types.isNotEmpty,
+        placeTypes: types,
+        important: raw['importance'] == '필수',
         placeName: null);
       if (!mounted) return;
       setState(() => message.added = true);
-      activeRouteController.requestPlanRefresh();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('앱의 할 일 목록에 추가했어요. 예상 소요시간은 기본 10분으로 설정했어요.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(auto ? '「$title」 할 일에 넣었어요. 이동 탭 경로에 반영돼요.' : '「$title」 할 일에 넣었어요.'),
+        action: SnackBarAction(label: '되돌리기', onPressed: () async {
+          await controller.deleteTodo(saved.id);
+          if (mounted) setState(() => message.added = false);
+        }),
+      ));
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -267,13 +376,31 @@ class _AssistantScreenState extends State<AssistantScreen> {
                         padding: const EdgeInsets.all(12),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           SelectableText(m.text),
-                          if (!m.mine && m.todo != null) ...[
+                          if (!m.mine && (m.todo != null || m.savedByServer)) ...[
                             const SizedBox(height: 7),
-                            OutlinedButton.icon(
-                              onPressed: m.added ? null : () => _addSuggestedTodo(m),
-                              icon: const Icon(Icons.playlist_add),
-                              label: Text(m.added ? '할 일 추가 완료' : '할 일 목록에 추가'),
-                            ),
+                            if (m.added || m.savedByServer)
+                              const Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(Icons.check_circle_rounded, size: 16, color: Color(0xFF12A36B)),
+                                SizedBox(width: 4),
+                                Text('할 일에 넣었어요', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                              ])
+                            else
+                              OutlinedButton.icon(
+                                onPressed: () => _addSuggestedTodo(m),
+                                icon: const Icon(Icons.playlist_add),
+                                label: const Text('할 일 목록에 추가'),
+                              ),
+                          ],
+                          if (!m.mine && m.actions.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Wrap(spacing: 6, runSpacing: 6, children: [
+                              for (final a in m.actions)
+                                FilledButton.tonalIcon(
+                                  onPressed: () => _runAction(a),
+                                  icon: Icon(a.icon, size: 18),
+                                  label: Text(a.label),
+                                ),
+                            ]),
                           ],
                           if (!m.mine && m.schedule != null) ...[
                             const SizedBox(height: 8),
@@ -302,9 +429,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
                                     style: TextStyle(fontSize: 11, color: Colors.black54)),
                               ),
                           ],
-                          if (!m.mine && m.intent == 'change_route')
-                            const Text('실제 경로 재탐색은 서버 경로 API 지원 후 가능합니다.',
-                              style: TextStyle(fontSize: 11, color: Colors.black54)),
                           if (!m.mine && m.engine == 'rule')
                             const Text('서버 규칙 기반 응답', style: TextStyle(fontSize: 11, color: Colors.black54)),
                         ]),
@@ -357,6 +481,11 @@ class _Message {
   final String? intent;
   final String? engine;
   final ScheduleDraft? schedule;
+  /// 답변에 맞는 버튼 (경로 보기, 길찾기 …)
+  final List<_AnswerAction> actions;
+  /// 실제 모드: 서버가 이미 할 일로 저장했어요
+  final bool savedByServer;
   bool added = false;
-  _Message(this.text, this.mine, {this.todo, this.intent, this.engine, this.schedule});
+  _Message(this.text, this.mine,
+      {this.todo, this.intent, this.engine, this.schedule, this.actions = const [], this.savedByServer = false});
 }
