@@ -551,9 +551,12 @@ def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     if ins is not None:
         out["insert_at"] = ins
     _remember_todo(state, item, decision, place, now)
-    if feasible and not vehicles and plan.has_target:
+    depart = _depart_for(plan, now, result.total_seconds) if feasible and not vehicles and plan.has_target else None
+    if depart is not None and (state.get("trip") is not None or depart <= now):
+        # 이미 이동 중이거나 그 시각이 지났으면 "HH:MM에 출발하면 돼요"라고 하지 않아요 (11/14: 18:33에 "17시 58분 출발")
+        depart = None
+    if depart is not None:
         # 실시간 차가 없으면(출발이 멀거나 운행 전) 들르는 만큼 일찍 나가면 돼요
-        depart = _depart_for(plan, now, result.total_seconds)
         out["depart_at"] = depart.isoformat()
         state["stop_depart"] = depart
         where = f"{ins['label']} " if ins is not None else ""

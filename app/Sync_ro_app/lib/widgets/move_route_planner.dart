@@ -19,6 +19,9 @@ import 'specialty_chips.dart';
 import '../models/trip_progress.dart';
 import '../services/server_ask_service.dart';
 import 'trip_panel.dart';
+import '../models/schedule.dart';
+import '../screens/schedule_form_screen.dart';
+import '../services/schedule_draft_parser.dart';
 
 /// 이동 탭 (팀장님 흐름도 기준)
 /// ① 일정 이름 · 출발지 → 목적지   ② 지도 (경로 · 출발지 · 목적지 · 경유 후보)
@@ -472,11 +475,100 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
             final now = _tripClock;
             final phase = trip.steps[_tripIndex(trip)].phase;
             final res = await _askService.ask(text, trip: trip.toAskJson(phase, now));
-            return res.needsConfirm && res.question != null ? res.question! : res.answer;
+            return _tripReply(res);
           },
         ),
       ),
     ]);
+  }
+
+  // ---------- 이동 중 AI 답변 버튼 (11/14) ----------
+  // AI 탭을 없애서, AI 탭에 있던 버튼(#48 할 일·일정 초안, #50 경유지 추가)을 이동 중 팝업으로 옮겼어요.
+
+  TripAskReply _tripReply(ServerAskResponse res) {
+    if (res.needsConfirm) return TripAskReply(res.question ?? res.answer);
+    final r = res.result ?? const <String, dynamic>{};
+    final intent = r['intent']?.toString() ??
+        (res.intents.isEmpty ? null : res.intents.first['intent']?.toString());
+    final todo = res.todo;
+    final savedId = widget.isDemo ? null : todo?['id'];
+
+    // 1. 들를 수 있는 들르기: 서버가 할 일로 저장해 뒀어요 → 지금 경로에 경유지로 넣을지 물어봐요
+    if (intent == 'stopover_check' && r['feasible'] == true && savedId != null) {
+      return TripAskReply('${res.answer} 경유지로 추가할까요?', actions: [
+        TripAskAction('경유지로 추가', Icons.add_location_alt_rounded, () => _addStopFromAsk('$savedId')),
+      ]);
+    }
+    // 2. 시간이 부족한 들르기(실제 모드): 서버가 할 일 목록에 남겨 뒀어요
+    if (intent == 'stopover_check' && r['feasible'] == false && savedId != null) {
+      return TripAskReply('${res.answer} 할 일 목록에는 남겨 뒀어요.');
+    }
+    // 3. 저장 전 할 일 초안 ("나중에 ~해야 해", 시연 모드 들르기) → 버튼을 눌러야 넣어요
+    if (todo != null && todo['id'] == null && (r['can_add_todo'] == true || intent == 'add_todo')) {
+      return TripAskReply(res.answer, actions: [
+        TripAskAction('할 일에 넣기', Icons.playlist_add_rounded, () => _addTodoFromAsk(todo)),
+      ]);
+    }
+    // 4. 일정 추가 초안 → 일정 입력 화면
+    final draft = ScheduleDraft.fromServerResult(r) ??
+        (res.schedule != null ? ScheduleDraft.fromScheduleMap(res.schedule!) : null);
+    if (intent == 'add_schedule' && draft != null) {
+      return TripAskReply(res.answer, actions: [
+        TripAskAction('일정 입력 열기', Icons.event_rounded, () => _openScheduleDraft(draft)),
+      ]);
+    }
+    return TripAskReply(res.answer);
+  }
+
+  /// 서버가 저장한 할 일을 지금 이동의 경유지로 넣어요. 이미 넣은 곳이 있으면 같이 들러요 ('1+3').
+  Future<String?> _addStopFromAsk(String id) async {
+    await TodoScope.of(context).initialize();
+    if (!mounted) return null;
+    final trip = _trip;
+    final current = activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
+    final ids = <String>{...?current?.split('+'), id};
+    activeRouteController.setApplied(ids.join('+'), null, trip);
+    activeRouteController.requestPlanRefresh();
+    return '경유지에 넣었어요. 경로를 다시 계산할게요.';
+  }
+
+  Future<String?> _addTodoFromAsk(Map<String, dynamic> raw) async {
+    final title = '${raw['text'] ?? ''}'.trim();
+    if (title.isEmpty) return null;
+    final controller = TodoScope.of(context);
+    if (controller.todos.any((t) => t.title.trim() == title && !t.isCompleted)) {
+      return '「$title」은(는) 이미 할 일에 있어요.';
+    }
+    final types = raw['place_types'] is List
+        ? [for (final t in raw['place_types'] as List) '$t']
+        : const <String>[];
+    await controller.addTodo(
+      title: title,
+      minutes: (raw['stay_minutes'] as num?)?.toInt(),
+      requiresTravel: types.isNotEmpty,
+      placeTypes: types,
+      important: raw['importance'] == '필수',
+    );
+    return '「$title」 할 일에 넣었어요.';
+  }
+
+  Future<String?> _openScheduleDraft(ScheduleDraft d) async {
+    final saved = await Navigator.push<Schedule>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScheduleFormScreen(
+          initial: Schedule(
+            id: 0,
+            title: d.title,
+            location: d.location,
+            startTime: d.start,
+            endTime: d.end ?? d.start.add(const Duration(hours: 1)),
+          ),
+        ),
+      ),
+    );
+    if (saved == null) return null;
+    return '「${saved.title}」 일정을 추가했어요.';
   }
 
   /// 이 화면의 이동 (목적지 + 도착 시각)

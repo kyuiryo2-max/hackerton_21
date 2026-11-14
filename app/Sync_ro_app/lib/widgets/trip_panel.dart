@@ -9,6 +9,22 @@ import '../services/kst_time.dart';
 import '../services/speech_input_service.dart';
 import 'route_compare_map.dart';
 
+/// 이동 중 AI 답변 (11/14): 문장 + 답에 맞는 버튼 (경유지로 추가, 할 일에 넣기, 일정 입력 등).
+/// AI 탭을 없애서, AI 탭에 있던 버튼을 이동 중 팝업으로 옮겼어요.
+class TripAskReply {
+  const TripAskReply(this.text, {this.actions = const []});
+  final String text;
+  final List<TripAskAction> actions;
+}
+
+class TripAskAction {
+  const TripAskAction(this.label, this.icon, this.onTap);
+  final String label;
+  final IconData icon;
+  /// 누르면 실행해요. 돌려준 문장이 있으면 답변 자리에 보여 줘요 (예: "경유지에 넣었어요").
+  final Future<String?> Function() onTap;
+}
+
 /// 이동 중 팝업 (11/13): 지도 위에 지금 단계, 진행 막대, 다음 단계 버튼, AI 질문 칸을 보여 줘요.
 /// 지금 단계는 시간이 흐르는 기준이고, 계획과 다르면 버튼으로 넘겨요.
 class TripPanel extends StatefulWidget {
@@ -33,8 +49,8 @@ class TripPanel extends StatefulWidget {
   /// 진행 막대에 쓸 경로 (경유 구간이 들어간 경로)
   final RouteCandidate stripRoute;
   final VoidCallback onAdvance;
-  /// 질문 → 답변 문장
-  final Future<String> Function(String text) onAsk;
+  /// 질문 → 답변 문장 + 버튼
+  final Future<TripAskReply> Function(String text) onAsk;
   /// 시연 모드: 시간 빨리 보내기 (분)
   final ValueChanged<int>? onSkip;
   /// 이동 종료 (#51 피드백 4: 팝업 안에서도 끝낼 수 있게)
@@ -51,7 +67,9 @@ class _TripPanelState extends State<TripPanel> {
   final _input = TextEditingController();
   String? _question;
   String? _answer;
+  List<TripAskAction> _actions = const [];
   bool _asking = false;
+  bool _acting = false;
 
   // 음성 질문 (#51 피드백 5): 말이 3초쯤 멈추면 그대로 물어봐요. AI 탭과 같은 방식이에요
   final _speech = SpeechInputService();
@@ -141,18 +159,37 @@ class _TripPanelState extends State<TripPanel> {
       _asking = true;
       _question = text;
       _answer = null;
+      _actions = const [];
     });
     _input.clear();
-    String answer;
+    TripAskReply reply;
     try {
-      answer = await widget.onAsk(text);
+      reply = await widget.onAsk(text);
     } catch (e) {
-      answer = '답을 받지 못했어요. 잠시 뒤 다시 물어봐 주세요.';
+      reply = const TripAskReply('답을 받지 못했어요. 잠시 뒤 다시 물어봐 주세요.');
     }
     if (!mounted) return;
     setState(() {
       _asking = false;
-      _answer = answer;
+      _answer = reply.text;
+      _actions = reply.actions;
+    });
+  }
+
+  Future<void> _runAction(TripAskAction action) async {
+    if (_acting) return;
+    setState(() => _acting = true);
+    String? message;
+    try {
+      message = await action.onTap();
+    } catch (e) {
+      message = '처리하지 못했어요: $e';
+    }
+    if (!mounted) return;
+    setState(() {
+      _acting = false;
+      _actions = const [];
+      if (message != null) _answer = message;
     });
   }
   ({String title, String sub, String? action}) _status() {
@@ -287,6 +324,18 @@ class _TripPanelState extends State<TripPanel> {
             const SizedBox(height: 2),
             Text(_asking ? '계산하는 중…' : (_answer ?? ''),
                 style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+            if (!_asking && _actions.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(spacing: 8, runSpacing: 6, children: [
+                for (final a in _actions)
+                  FilledButton.tonalIcon(
+                    onPressed: _acting ? null : () => _runAction(a),
+                    icon: Icon(a.icon, size: 16),
+                    label: Text(a.label),
+                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+              ]),
+            ],
           ],
           const SizedBox(height: 8),
           Row(children: [

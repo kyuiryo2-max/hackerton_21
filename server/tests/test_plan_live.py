@@ -633,3 +633,25 @@ def test_추천_경로는_동시에_계산해서_빠름(client, world, monkeypat
     took = clock.monotonic() - started
     assert res.status_code == 200 and len(res.json()["routes"]) == 3
     assert took < 0.8, f"{took:.2f}초 걸렸어요"
+
+
+def test_이동_중_들르기는_지난_출발_시각을_말하지_않음(client, far_plan):
+    """11/14: 이동 중(18:33)에 '커피 사도 돼?'라고 물었더니 '17시 58분에 출발하시면 돼요'라고 답하던 문제."""
+    trip = {"phase": "waiting", "now": datetime.now().astimezone().isoformat(), "stop_name": "정류장",
+            "destination": "목적지", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["result"]["feasible"] is True
+    assert "출발하면 돼요" not in r["answer"] and "출발하시면" not in r["answer"]
+    assert "depart_at" not in r["result"]
+    assert "들를 수 있어요" in r["answer"]
+
+
+def test_이동_중_들르기는_저장한_할_일_id를_줌(client, far_plan):
+    """이동 중 팝업의 '경유지로 추가' 버튼이 이 id로 지금 경로에 경유지를 넣어요 (11/14)."""
+    trip = {"phase": "waiting", "now": datetime.now().astimezone().isoformat(), "stop_name": "정류장",
+            "destination": "목적지", "next_vehicles_min": []}
+    r = client.post("/api/ask", json={"user_id": "u1", "text": "편의점 들러도 돼?", "demo": False,
+                                      "trip": trip}).json()
+    assert r["result"]["feasible"] is True
+    assert r["todo"] and r["todo"].get("id")
