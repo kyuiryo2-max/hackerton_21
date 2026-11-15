@@ -491,7 +491,8 @@ def _near_place(todo: dict, stop: kakao.Coord, cache: dict,
 
 
 def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
-                 todos: list[dict], place_cache: dict, deadline: int | None = None) -> RouteOption | None:
+                 todos: list[dict], place_cache: dict, deadline: int | None = None,
+                 realtime: bool = True) -> RouteOption | None:
     """deadline(도착 희망까지 남은 초)이 있고 출발까지 여유가 REALTIME_WINDOW_SECONDS보다 많으면
     실시간 도착을 부르지 않아요. 지금 오는 차는 그때 탈 차가 아니라서요 (호출 한도도 아껴요)."""
     legs = [leg for leg in route["legs"] if leg["type"] in TRANSIT_TYPES and leg["start"]]
@@ -499,8 +500,12 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
         return None
     first, last = legs[0], legs[-1]
     # 현재 좌표가 들어간 호출은 서버 메모리에 5분만 기억해요 (PR #29 리뷰 → 11/13 호출 한도 때문에 바꿈)
-    first_route = kakao.walk_route(origin, tuple(first["start"]), ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
-    last_route = kakao.walk_route(tuple(last["end"] or last["start"]), destination)
+    # 처음·마지막 도보도 서로 상관없어서 동시에 물어봐요 (11/14)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_job = pool.submit(kakao.walk_route, origin, tuple(first["start"]),
+                                ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
+        last_job = pool.submit(kakao.walk_route, tuple(last["end"] or last["start"]), destination)
+        first_route, last_route = first_job.result(), last_job.result()
     first_walk = first_route["seconds"] if first_route else None
     last_walk = last_route["seconds"] if last_route else None
     # 지도에 도보를 실제 길 모양으로 그리려고 좌표도 받아요 (11/13). 못 받으면 직선
@@ -514,7 +519,8 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
     plain = first_walk + route["moving_seconds"] + last_walk
     far = deadline is not None and deadline - plain > REALTIME_WINDOW_SECONDS
     return RouteOption(
-        timing=RouteTiming(route["moving_seconds"], first_walk, last_walk, [] if far else _vehicle_seconds(first),
+        timing=RouteTiming(route["moving_seconds"], first_walk, last_walk,
+                           [] if far or not realtime else _vehicle_seconds(first),
                            is_subway=first["type"] == "SUBWAY"),
         card={"type": route["type"], "name": "·".join(first["vehicles"][:3]) or first["guidance"],
               "guidance": first["guidance"], "transfers": route["transfers"], "fare": route["fare_min"],
@@ -582,15 +588,22 @@ def _pick_schedule(user_id: str, schedule_id: int | None, now: datetime) -> dict
 
 def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
               todo_ids: list[int] | None = None, now: datetime | None = None,
-              destination: dict | None = None) -> dict:
+              destination: dict | None = None, depart_at: datetime | None = None) -> dict:
     """실시간 계획. origin은 (경도, 위도)이고 저장하지 않아요.
 
     destination({name, lng, lat})이 있으면 일정 없이 지금 출발 기준으로 계산해요 (홈 검색창).
     이때 할 일은 todo_ids로 고른 것만 넣어요 (없으면 할 일 없이 길만 찾아요).
     없으면 일정(schedule_id, 없으면 가장 가까운 일정)의 도착 희망 시각에서 거꾸로 계산해요.
 
+    depart_at가 있으면(destination과 함께) 그 시각에 출발하는 기준이에요 (basis "scheduled", 11/15).
+    밤이라 지금 다니는 차가 없을 때 앱이 다음 첫차 시각을 보내요. 지금 오는 차가 아니라서 실시간 도착은 안 봐요.
+
     카카오 경로 최대 3개를 계산하고 할 일을 잘 넣는 경로부터 보여 줘요. 할 일 상태는 첫 번째 경로 기준이에요.
     """
+    scheduled = depart_at is not None and destination is not None
+    if scheduled:
+        aware = depart_at if depart_at.tzinfo else depart_at.replace(tzinfo=KST)
+        now = aware.astimezone(KST).replace(microsecond=0)
     now = now or datetime.now(KST).replace(microsecond=0)
     if destination is not None:
         dest = (destination["lng"], destination["lat"])
@@ -611,9 +624,14 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
     try:
         routes = kakao.transit_routes(origin, dest, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
         place_cache: dict = {}
-        options = [o for r in routes[:MAX_ROUTES]
-                   if (o := _live_option(r, origin, dest, todos, place_cache,
-                                         deadline if arrive_by else None))]
+        # 추천 경로 3개는 서로 상관없어서 동시에 계산해요 (11/14: 첫 조회가 오래 걸리던 문제).
+        # 경로마다 도보·장소 검색·실시간 도착을 부르는데, 순서대로 하면 경로 수만큼 기다렸어요.
+        with ThreadPoolExecutor(max_workers=MAX_ROUTES) as pool:
+            found = list(pool.map(lambda r: _live_option(r, origin, dest, todos, place_cache,
+                                                         deadline if arrive_by else None,
+                                                         realtime=not scheduled),
+                                  routes[:MAX_ROUTES]))
+        options = [o for o in found if o]
     except kakao.KakaoError as e:
         # Render 로그에서 원인을 볼 수 있게 남겨요 (키·좌표는 오류 문장에 없어요)
         log.warning("실제 모드 경로 계산 실패: %s", e)
@@ -634,6 +652,8 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         # (11/13: 할 일을 적용 안 했는데 "대기 57분, 18:23 탑승"으로 나오던 문제)
         option.result = direct
         _set_times(option, now, arrive_by)
+        if scheduled:
+            option.times["basis"] = "scheduled"
         option.result = _without_stop_times(_decide(option, todos, deadline), direct)
     sort_options(options, todos)
     # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
@@ -648,7 +668,8 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         planned_at=now, arrive_by=arrive_by or now + timedelta(seconds=NOW_TRIP_DEADLINE_SECONDS),
         leg=best.leg, timing=best.timing, places=dict(best.places), routes=summary,
         basis=best.times["basis"], depart_at=best.times["depart_at"], total_seconds=best.result.total_seconds,
-        has_target=arrive_by is not None))
+        has_target=arrive_by is not None, destination=dest,
+        destination_name=schedule_out["destination"]["name"]))
     out = _response(user_id, todos, options, now, schedule_out, "근처에서 찾지 못했어요", explain_todos=False)
     # 오늘 도보 한도를 다 써서 도보 시간을 직선거리로 어림했으면 앱이 알 수 있게 표시해요 (11/13)
     out["walk_estimated"] = kakao.walk_quota_used_up()

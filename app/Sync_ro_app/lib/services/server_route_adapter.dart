@@ -46,7 +46,7 @@ class ServerRouteAdapter {
     final demo = context != null && _matches(route, context) ?
         _object(context['route']) : <String, dynamic>{};
     final kind = _type('${route['type'] ?? 'BUS'}');
-    final name = '${route['name'] ?? '대중교통'}';
+    final name = RouteSegment.uniqueLines('${route['name'] ?? '대중교통'}');
     final stops = (route['stops'] is List ? route['stops'] as List :
         demo['stops'] is List ? demo['stops'] as List : const [])
         .map((s) => '$s').toList();
@@ -94,7 +94,8 @@ class ServerRouteAdapter {
         legs.add(RouteSegment(
           type: type,
           description: '${leg['guidance'] ?? leg['description'] ?? ''}',
-          lineName: '${leg['line_name'] ?? leg['name'] ?? ''}',
+          lineName: RouteSegment.uniqueLines('${leg['line_name'] ?? leg['name'] ?? ''}'),
+          stopCount: (leg['stop_count'] as num?)?.toInt(),
           durationMinutes: (leg['minutes'] as num?)?.toInt() ??
               (leg['duration_min'] as num?)?.toInt() ??
               (leg['moving_min'] as num?)?.toInt() ?? 0,

@@ -139,6 +139,21 @@ def insert_at(place: dict, trip: TripIn) -> dict | None:
     return None
 
 
+class TransferIn(BaseModel):
+    """갈아타기 (11/14, 인터뷰 P1·P3: 환승하기 전에 근처에서 들르기).
+
+    환승하러 가는 중·환승 대기 중이면 지금 갈아탈 곳, 첫 차를 타는 중이면 다음에 갈아탈 곳이에요.
+    좌표는 갈아탈 정류장·역이에요 (사용자 위치 아님)."""
+    get_off_name: str | None = Field(default=None, description="앞 차에서 내리는 곳")
+    get_off_at: datetime | None = Field(default=None, description="앞 차에서 내리는 시각")
+    stop_name: str | None = Field(default=None, description="갈아탈 정류장·역")
+    lat: float  # 범위를 막지 않아요: 이상한 좌표 하나로 질문 전체가 422로 실패하지 않게 (장소를 못 찾을 뿐)
+    lng: float
+    reach_at: datetime | None = Field(default=None, description="갈아탈 곳에 걸어서 닿는 시각")
+    board_at: datetime = Field(description="갈아탈 차 시각")
+    ride_name: str | None = Field(default=None, description='"1호선", "273번"')
+
+
 class TripIn(BaseModel):
     """이동 중 상황. 시각은 모두 ISO 8601 (+09:00)."""
     phase: Phase
@@ -154,6 +169,7 @@ class TripIn(BaseModel):
     # 상세 경로 (v3). 없으면 기존과 똑같이 동작해요
     steps: list[TripStep] = Field(default_factory=list, description="상세 경로 구간 (앱 경로 카드 순서)")
     current_step: int | None = Field(default=None, ge=0, description="지금 있는 steps index")
+    transfer: TransferIn | None = Field(default=None, description="갈아타기 (11/14). 없으면 한 번에 가는 경로")
 
 
 def _josa(word: str, pair: str) -> str:

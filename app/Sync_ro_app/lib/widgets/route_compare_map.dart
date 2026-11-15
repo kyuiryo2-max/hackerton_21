@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_tiles.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../config/app_theme.dart';
@@ -37,10 +38,23 @@ class RouteCompareMap extends StatelessWidget {
     this.onPickStop,
     this.detourPath = const [],
     this.liveDot,
+    this.liveHeading,
+    this.passedPath = const [],
+    this.followPoint,
   });
+
+  /// 이동 중: 이 점(내 위치)을 가운데 두고 크게, 움직이면 따라가요 (내비게이션처럼, 11/14).
+  /// 손으로 지도를 옮기면 잠시(10초) 따라가기를 멈춰요.
+  final LatLng? followPoint;
 
   /// 이동 중 지금 있을 것으로 보이는 곳 (시간 기준 추정, 11/13)
   final LatLng? liveDot;
+
+  /// 가는 방향 (북쪽 0, 시계 방향 라디안). 있으면 점 대신 화살표로 그려요
+  final double? liveHeading;
+
+  /// 이미 지나온 길. 네이버 지도처럼 회색으로 덮어서 남은 길만 또렷하게 보여요
+  final List<LatLng> passedPath;
 
   /// 고른 경유지를 지나는 실제 도보 길 (출발지 → 경유지 → 탑승 정류장). 비어 있으면 직선으로 이어요
   final List<LatLng> detourPath;
@@ -231,6 +245,17 @@ class RouteCompareMap extends StatelessWidget {
       }
     }
 
+    // 지나온 길: 경로 위를 회색으로 덮어요 (화살표가 움직이면 같이 늘어나요)
+    if (passedPath.length >= 2) {
+      lines.add(Polyline(
+        points: passedPath,
+        strokeWidth: 7,
+        color: const Color(0xFF9AA0A6),
+        borderStrokeWidth: 2,
+        borderColor: Colors.white,
+      ));
+    }
+
     if (stopPoint != null) {
       points.add(stopPoint!);
       markers.add(Marker(
@@ -254,15 +279,22 @@ class RouteCompareMap extends StatelessWidget {
     if (liveDot != null) {
       markers.add(Marker(
         point: liveDot!,
-        width: 26,
-        height: 26,
+        width: 34,
+        height: 34,
         child: Container(
           decoration: BoxDecoration(
             color: AppTheme.primary,
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 4),
+            border: Border.all(color: Colors.white, width: 3),
             boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 6)],
           ),
+          child: liveHeading == null
+              ? null
+              // 화살표가 가는 방향을 가리켜요 (지도는 북쪽이 위라서 방향 그대로 돌려요)
+              : Transform.rotate(
+                  angle: liveHeading!,
+                  child: const Icon(Icons.navigation_rounded, color: Colors.white, size: 18),
+                ),
         ),
       ));
     }
@@ -362,29 +394,15 @@ class RouteCompareMap extends StatelessWidget {
               child: const Text('경로 좌표가 없어 지도를 그릴 수 없어요', style: TextStyle(color: AppTheme.textMuted)),
             )
           else
-            FlutterMap(
+            _MapView(
               key: ValueKey(cameraKey),
-              options: MapOptions(
-                initialCenter: points.first,
-                initialZoom: 13,
-                initialCameraFit: points.length >= 2
-                    ? CameraFit.coordinates(
-                        coordinates: points,
-                        padding: const EdgeInsets.fromLTRB(40, 56, 40, 40),
-                        maxZoom: 16,
-                      )
-                    : null,
-              ),
+              all: points,
+              follow: followPoint,
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.syncro.sync_ro_app',
-                ),
+                MapTiles.layer(),
                 PolylineLayer(polylines: lines),
                 MarkerLayer(markers: markers),
-                const RichAttributionWidget(
-                  attributions: [TextSourceAttribution('OpenStreetMap contributors')],
-                ),
+                MapTiles.attribution(),
               ],
             ),
           Positioned(
@@ -480,5 +498,84 @@ class RouteTimeStrip extends StatelessWidget {
         ),
       );
     });
+  }
+}
+
+/// 지도: 추천 경로를 볼 때는 모든 경로가 한 화면에 들어오게, 이동을 시작하면 내 위치로 크게 따라가요 (11/15)
+class _MapView extends StatefulWidget {
+  const _MapView({super.key, required this.all, required this.children, this.follow});
+
+  final List<LatLng> all;
+  final LatLng? follow;
+  final List<Widget> children;
+
+  @override
+  State<_MapView> createState() => _MapViewState();
+}
+
+class _MapViewState extends State<_MapView> {
+  static const double _followZoom = 17;
+  final MapController _map = MapController();
+  bool _ready = false;
+  /// 손으로 지도를 옮기면 잠시 따라가기를 멈춰요
+  DateTime? _pausedUntil;
+
+  CameraFit? get _fitAll => _fit(widget.all, 16);
+
+  static CameraFit? _fit(List<LatLng> pts, double maxZoom) => pts.length >= 2
+      ? CameraFit.coordinates(
+          coordinates: pts,
+          padding: const EdgeInsets.fromLTRB(40, 56, 40, 40),
+          maxZoom: maxZoom,
+        )
+      : null;
+
+  @override
+  void didUpdateWidget(covariant _MapView old) {
+    super.didUpdateWidget(old);
+    if (!_ready) return;
+    final f = widget.follow;
+    if (f == null) {
+      // 이동을 마치면 다시 모든 경로가 보이게
+      final fit = _fitAll;
+      if (old.follow != null && fit != null) _map.fitCamera(fit);
+      return;
+    }
+    if (old.follow == null) {
+      _pausedUntil = null;
+      _map.move(f, _followZoom); // 이동 시작: 내 위치로 크게
+      return;
+    }
+    final paused = _pausedUntil != null && DateTime.now().isBefore(_pausedUntil!);
+    if (!paused && f != old.follow) {
+      final z = _map.camera.zoom;
+      _map.move(f, z < 15 ? _followZoom : z);
+    }
+  }
+
+  @override
+  void dispose() {
+    _map.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final f = widget.follow;
+    return FlutterMap(
+      mapController: _map,
+      options: MapOptions(
+        initialCenter: f ?? widget.all.first,
+        initialZoom: f != null ? _followZoom : 13,
+        initialCameraFit: f != null ? null : _fitAll,
+        onMapReady: () => _ready = true,
+        onPositionChanged: (camera, hasGesture) {
+          if (hasGesture && widget.follow != null) {
+            _pausedUntil = DateTime.now().add(const Duration(seconds: 10));
+          }
+        },
+      ),
+      children: widget.children,
+    );
   }
 }

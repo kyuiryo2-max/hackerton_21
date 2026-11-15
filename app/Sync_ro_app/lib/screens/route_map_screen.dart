@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_tiles.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/place.dart';
@@ -161,22 +162,14 @@ class RouteMapScreen extends StatelessWidget {
                       : null,
                 ),
                 children: [
-                  TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.syncro.sync_ro_app',
-                  ),
+                  MapTiles.layer(),
 
                   // 실제 경로 좌표가 있는 경우만 선 표시
                   PolylineLayer(polylines: polylines),
 
                   MarkerLayer(markers: markers),
 
-                  const RichAttributionWidget(
-                    attributions: [
-                      TextSourceAttribution('OpenStreetMap contributors'),
-                    ],
-                  ),
+                  MapTiles.attribution(),
                 ],
               ),
             ),

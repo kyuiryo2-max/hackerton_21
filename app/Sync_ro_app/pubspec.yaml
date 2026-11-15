@@ -66,6 +66,17 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # 한글 글꼴 (11/14): 웹에서 한글을 입력하는 중인 글자가 네모(□)로 깨져 보여서 넣었어요.
+  # Noto Sans KR(OFL)에서 자주 쓰는 한글 2,350자·자모·영문·기호만 남겨 줄인 파일이에요.
+  # 여기에 없는 드문 글자는 브라우저가 예전처럼 글꼴을 따로 받아서 보여 줘요.
+  fonts:
+    - family: NotoSansKR
+      fonts:
+        - asset: assets/fonts/NotoSansKR-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansKR-Bold.ttf
+          weight: 700
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

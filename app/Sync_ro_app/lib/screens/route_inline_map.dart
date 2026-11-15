@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_tiles.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/place.dart';
@@ -192,10 +193,10 @@ class RouteInlineMap extends StatelessWidget {
                 : null,
           ),
           children: [
-            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.syncro.sync_ro_app'),
+            MapTiles.layer(),
             PolylineLayer(polylines: lines),
             MarkerLayer(markers: markers),
-            const RichAttributionWidget(attributions: [TextSourceAttribution('OpenStreetMap contributors')]),
+            MapTiles.attribution(),
           ],
         ),
         if (lines.isEmpty)

@@ -1,0 +1,13 @@
+id,text,expected_intents,expected_args,group
+INT01,지금 편의점 갔다 오면 이 버스 탈 수 있나?,stopover_check,place_types=편의점,P3 인터뷰
+INT02,이 버스 놓쳐도 다음 버스 타면 수업에 안 늦을까?,running_late,,P3 인터뷰
+INT03,계산 줄이 길어서 3분 늦을 것 같아,running_late,delay_minutes=3,P3 인터뷰
+INT04,GTX 타기 전에 근처에서 밥 먹고 가려면 몇 시까지 돌아와야 해?,stopover_check,place_types=음식점,P1 인터뷰
+INT05,다음 GTX 언제 와?,next_vehicle,,P1 인터뷰
+INT06,환승역에서 빵집 들렀다 가도 돼?,stopover_check,place_types=빵집,P1 인터뷰
+INT07,기다리는 동안 근처 올리브영 갔다 와도 될까?,stopover_check,place_types=올리브영,P2 인터뷰
+INT08,근처에 국민은행 ATM 어디 있어?,place_info,place_types=은행·ATM,P4 인터뷰
+INT09,올리브영 어딨지,place_info,place_types=올리브영,설문 자유 응답
+INT10,다른 카페도 안 될까?,stopover_check,place_types=카페,사용 테스트
+INT11,나 이어폰 샀어,change_todo,action=done,사용 테스트
+INT12,커피 샀어,change_todo,action=done,사용 테스트

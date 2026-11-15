@@ -48,6 +48,12 @@ flowchart LR
 | `change_route` 경로 변경 | "환승 적은 걸로" |
 | `unsupported` 범위 밖 | "점심 뭐 먹지?" |
 
+## 메모 위젯과 AI 장소 추천
+
+안드로이드 홈 화면 위젯에서 짧은 메모를 남기면 앱이 할 일·일정으로 분류하고, 메모 탭에서 기존 할 일·일정 입력 폼으로 넘겨 저장할 수 있어요. 앱을 열지 않고 위젯 하단 입력줄로 빠르게 메모를 추가할 수도 있습니다.
+
+`슬리퍼`, `음료`, `커피`처럼 자주 사는 물건은 앱의 로컬 의미 규칙이 다이소·편의점·문구점·카페 같은 장소를 먼저 추천해요. 로컬 결과가 없으면 `POST /api/places/recommend`가 현재 위치를 기준으로 AI에게 매장 후보를 묻고, 카카오 장소 검색으로 실제 지점명·주소·좌표를 확인한 뒤 최대 3곳을 돌려줍니다. AI가 지어낸 주소나 좌표는 사용하지 않아요.
+
 ## 개발 환경
 
 | 구분 | 버전 |
@@ -57,7 +63,7 @@ flowchart LR
 | FastAPI | 0.118.3 |
 | 패키지 관리 | uv (uv.lock으로 버전 고정) |
 | DB | SQLite |
-| LLM | Meta Model API (OpenAI 호환 SDK) |
+| LLM | OpenRouter (OpenAI 호환 SDK) |
 | 배포 | Render + GitHub Pages |
 
 ## 외부 API 호출 한도
@@ -142,7 +148,7 @@ uv run uvicorn app.main:app --reload
 
 Flutter 앱을 띄우지 않아도 `/console`에서 API를 그대로 눌러 볼 수 있어요. 같은 서버가 페이지를 서빙해서 CORS·mixed content 문제가 없습니다. 답변 위의 `engine` 배지가 `ai`면 모델 호출 성공, `rule`이면 키워드 규칙 폴백이에요.
 
-프롬프트는 루트 `.env`의 `LLM_PROMPT_VERSION`(기본 `v2`)으로 고릅니다. LLM은 OpenAI 호환이면 되고, 이 프로젝트는 Meta Model API(`https://api.meta.ai/v1`, 모델 `muse-spark-1.3-contributor`)를 씁니다. AI 응답 대기 시간은 기본 5초라서, reasoning 모델(Muse Spark 등)을 쓰면 `LLM_TIMEOUT_SECONDS`를 늘리세요. 늘리지 않으면 5초마다 키워드 규칙(`engine: "rule"`)으로 답합니다.
+프롬프트는 v3(`server/app/prompts/v3/`)를 써요. AI 응답을 5초 기다리고, 넘으면 키워드 규칙(`engine: "rule"`)으로 답합니다.
 
 키·모델이 실제로 도는지 확인 (호출 2번, `ai/results/llm_first_call.json`에 기록):
 

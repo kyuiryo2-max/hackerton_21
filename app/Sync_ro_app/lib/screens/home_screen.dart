@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_tiles.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -100,6 +101,16 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   String? _promptedKey;
   /// 휴대폰 알림을 걸어 둔 일정·시각
   String? _notifKey;
+
+  /// 아래 카드를 한 줄로 접었어요 (지도를 넓게 보려고, 11/14)
+  bool _cardCollapsed = false;
+
+  /// 접었을 때 보여 줄 한 줄
+  String _cardSummary(_HomePhase phase, DepartureOverview? o) {
+    if (phase == _HomePhase.free && _spots.isNotEmpty) return '근처에서 할 수 있는 일 ${_spots.length}곳';
+    if (o == null) return '다가오는 일정이 없어요';
+    return '${o.title} · ${hm(_departOf(o))} 출발 → ${hm(o.arriveAt ?? o.arriveBy)} 도착';
+  }
 
   @override
   void initState() {
@@ -525,12 +536,13 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                     _mapReady = true;
                     if (_me != null) _map.move(_me!, 16);
                   },
+                  // 지도를 손으로 움직이면 아래 카드를 접어서 지도를 넓게 보여 줘요 (11/14)
+                  onPositionChanged: (camera, hasGesture) {
+                    if (hasGesture && !_cardCollapsed) setState(() => _cardCollapsed = true);
+                  },
                 ),
                 children: [
-                  TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.syncro.sync_ro_app',
-                  ),
+                  MapTiles.layer(),
                   if (_me != null && _accuracy != null && _accuracy! > 15)
                     CircleLayer(circles: [
                       CircleMarker(
@@ -722,9 +734,9 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
               bottom: 12,
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  const _Glass(
-                    child: Text('© OpenStreetMap contributors',
-                        style: TextStyle(fontSize: 10, color: AppTheme.textMuted)),
+                  _Glass(
+                    child: Text(MapTiles.creditText,
+                        style: const TextStyle(fontSize: 10, color: AppTheme.textMuted)),
                   ),
                   const Spacer(),
                   Material(
@@ -749,8 +761,13 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                   ),
                 ]),
                 const SizedBox(height: 8),
-                if (phase == _HomePhase.free)
-                  _NearbyCard(
+                // 카드 접기: 위 손잡이를 누르거나 아래로 밀면 한 줄로 접혀요. 다시 누르면 펼쳐져요 (11/14)
+                _SheetCard(
+                  collapsed: _cardCollapsed,
+                  summary: _cardSummary(phase, o),
+                  onChanged: (v) => setState(() => _cardCollapsed = v),
+                  child: phase == _HomePhase.free
+                      ? _NearbyCard(
                     spots: _spots,
                     loading: _spotsLoading,
                     hasPlaceTodos: hasPlaceTodos,
@@ -765,8 +782,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                     onOpenPlanner: () => widget.onOpenTab?.call(2),
                     onAddSchedule: _addSchedule,
                   )
-                else
-                  _NextCard(
+                      : _NextCard(
                     overview: o,
                     now: now,
                     todayCount: todayCount,
@@ -779,6 +795,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                     onOpenPlanner: () => widget.onOpenTab?.call(2),
                     onAddSchedule: _addSchedule,
                   ),
+                ),
               ]),
             ),
           ]);
@@ -898,9 +915,10 @@ class _ModePill extends StatelessWidget {
     if (id == null || !activeRouteController.appliedFor(ActiveRouteController.tripKey(o.destination, o.arriveBy))) {
       return null;
     }
-    final match = o.tasks.where((t) => t.id == id);
-    if (match.isEmpty) return null;
-    task = match.first;
+    // 여러 곳을 고르면 '1+3' (11/14)
+    final match = o.taskFor(id);
+    if (match == null) return null;
+    task = match;
     candidateId = activeRouteController.appliedCandidateId;
   }
   final ranked = o.rank(task, delayMinutes: 0, need: task.needMinutes);
@@ -946,10 +964,31 @@ class _NextCard extends StatelessWidget {
     return m == 0 ? '$h시간' : '$h시간 $m분';
   }
 
+  /// "버스 12분 뒤 도착 · 다음 20분 뒤" / "정류장 대기 약 5분"
+  String? _vehicleLine(DepartureOverview o) {
+    if (o.isEstimate) return null;
+    final soon = o.nextVehiclesAt(now);
+    if (soon.isNotEmpty) {
+      final first = soon.first == 0 ? '곧 도착' : '${soon.first}분 뒤 도착';
+      return soon.length > 1 ? '다음 차 $first · 그다음 ${soon[1]}분 뒤' : '다음 차 $first';
+    }
+    final w = o.waitMinutes;
+    return w == null || w <= 0 ? null : '정류장 대기 약 $w분 (실시간은 출발 30분 전부터)';
+  }
+
   (String, Color) _status(DepartureOverview o, [DateTime? stopDepart]) {
     final dep = stopDepart ?? o.departure;
     if (dep == null) return ('출발 시각 계산 전', AppTheme.textMuted);
     final prep = dep.subtract(Duration(minutes: o.prepMinutes));
+    // 준비 시작이 오늘이 아니면 "15시간 33분" 대신 날짜로: "내일 15:43 출발" (11/14)
+    final p = prep.toLocal(), n = now.toLocal();
+    final days = DateTime(p.year, p.month, p.day).difference(DateTime(n.year, n.month, n.day)).inDays;
+    if (now.isBefore(prep) && days >= 1) {
+      const w = ['월', '화', '수', '목', '금', '토', '일'];
+      final d = dep.toLocal();
+      final day = days == 1 ? '내일' : days == 2 ? '모레' : '${d.month}/${d.day}(${w[d.weekday - 1]})';
+      return ('$day ${KstTime.hm(dep)} 출발', AppTheme.primary);
+    }
     if (now.isBefore(prep)) return ('준비 시작까지 ${_countdown(prep.difference(now))}', AppTheme.primary);
     if (now.isBefore(dep)) return ('출발까지 ${_countdown(dep.difference(now))}', AppTheme.warn);
     final late = now.difference(dep).inMinutes;
@@ -1137,6 +1176,13 @@ class _NextCard extends StatelessWidget {
                   textAlign: TextAlign.end,
                   style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                 ),
+                // 다음 차 대기 (11/14): 실시간이 있으면 "12분 뒤 · 다음 20분", 없으면 서버 대기 시간
+                if (_vehicleLine(o) != null)
+                  Text(
+                    _vehicleLine(o)!,
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primary),
+                  ),
               ]),
             ),
           ]),
@@ -1331,6 +1377,91 @@ class _NearbyCard extends StatelessWidget {
           ),
         ]),
       ),
+    );
+  }
+}
+
+/// 홈 아래 카드를 접고 펴는 껍데기 (11/14)
+/// 펼침: 카드 맨 위 손잡이를 누르거나 카드를 아래로 밀면 접혀요.
+/// 접힘: 한 줄 요약만 보여요. 누르거나 위로 밀면 펼쳐져요.
+class _SheetCard extends StatelessWidget {
+  const _SheetCard({
+    required this.collapsed,
+    required this.summary,
+    required this.onChanged,
+    required this.child,
+  });
+
+  final bool collapsed;
+  final String summary;
+  final ValueChanged<bool> onChanged;
+  final Widget child;
+
+  static Widget _grabber() => Container(
+        width: 40,
+        height: 5,
+        decoration: BoxDecoration(color: AppTheme.border, borderRadius: BorderRadius.circular(3)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    if (collapsed) {
+      return Semantics(
+        button: true,
+        label: '카드 펼치기',
+        child: GestureDetector(
+          onTap: () => onChanged(false),
+          onVerticalDragEnd: (d) {
+            if ((d.primaryVelocity ?? 0) < 0) onChanged(false);
+          },
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 12, 14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: AppTheme.border),
+              boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 24, offset: Offset(0, 8))],
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              _grabber(),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  child: Text(summary,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                ),
+                const Icon(Icons.expand_less_rounded, color: AppTheme.textMuted),
+              ]),
+            ]),
+          ),
+        ),
+      );
+    }
+    return GestureDetector(
+      onVerticalDragEnd: (d) {
+        if ((d.primaryVelocity ?? 0) > 200) onChanged(true);
+      },
+      child: Stack(children: [
+        child,
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Semantics(
+              button: true,
+              label: '카드 접기',
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onChanged(true),
+                child: SizedBox(width: 120, height: 14, child: Center(child: _grabber())),
+              ),
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }

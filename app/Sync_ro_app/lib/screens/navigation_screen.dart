@@ -14,6 +14,7 @@ import '../services/server_route_adapter.dart';
 import '../services/place_search_service.dart';
 import '../services/location_access.dart';
 import 'place_search_screen.dart';
+import '../widgets/route_endpoints.dart';
 import '../data/offline_demo_data.dart';
 import '../widgets/move_route_planner.dart';
 import 'package:latlong2/latlong.dart';
@@ -137,6 +138,8 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       // Manual searches have no server schedule id, so do not fabricate a
       // stopover plan; ask the user to run the search again.
       if (_manualIsActive) {
+        activeRouteController.takeReplanFrom();
+        activeRouteController.clearSearch();
         setState(() {
           _manualIsActive = false;
           _manualExpanded = true;
@@ -147,6 +150,11 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       final schedule = _explicitSchedule ??
           _nextSchedule(ScheduleScope.of(context).schedules);
       if (schedule == null) return;
+      // 이동 중 경유지를 바꿨으면 이동 중 팝업의 지금 위치(시간 기준)에서 다시 계산해요 (11/14)
+      final from = activeRouteController.takeReplanFrom();
+      if (from != null) {
+        _origin = Place(id: 'trip_point', name: from.name, address: '', latitude: from.lat, longitude: from.lng);
+      }
       if (_origin != null && _scheduleDestination != null) {
         _loadScheduleRoutes(schedule);
       } else if (_origin == null && schedule.originMode != 'place' && !_autoLocating) {
@@ -174,9 +182,125 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     }
   }
 
-  Future<Place?> _pickPlace(String title) => Navigator.push<Place>(
-    context, MaterialPageRoute(builder: (_) => PlaceSearchScreen(title: title)),
+  Future<Place?> _pickPlace(String title, {bool allowCurrent = false}) => Navigator.push<Place>(
+    context, MaterialPageRoute(builder: (_) => PlaceSearchScreen(title: title, allowCurrentLocation: allowCurrent)),
   );
+
+  // ---------- 출발지·도착지 바로 바꾸기 (네이버 길찾기처럼, 11/14) ----------
+
+  bool _endpointBusy = false;
+
+  /// 지금 화면에 보이는 경로의 출발지·도착지
+  Place? get _shownOrigin => _manualIsActive ? _manualOrigin : (_origin ?? _manualOrigin);
+  Place? _shownDestination() => _manualIsActive ? _manualDestination : (_scheduleDestination ?? _manualDestination);
+
+  /// 바꾼 경로의 도착 목표: 일정 경로였으면 그 일정 시각, 아니면 1시간 뒤
+  DateTime _arrivalFor(Schedule? schedule) {
+    final soon = DateTime.now().add(const Duration(minutes: 10));
+    final t = _manualIsActive ? _manualArrival : schedule?.startTime;
+    return t != null && t.isAfter(soon) ? t : DateTime.now().add(const Duration(hours: 1));
+  }
+
+  /// [origin] → [destination] 으로 바로 다시 찾기 (직접 검색으로 바뀌어요)
+  Future<void> _searchBetween(Place origin, Place destination, Schedule? schedule) async {
+    setState(() {
+      _manualArrival = _arrivalFor(schedule);
+      _manualOrigin = origin;
+      _manualOriginController.text = origin.name;
+      _manualDestination = destination;
+      _manualDestinationController.text = destination.name;
+      _manualError = null;
+    });
+    await _loadManualRoutes();
+  }
+
+  Future<void> _changeOrigin(Schedule? schedule) async {
+    final place = await _pickPlace('출발지 바꾸기', allowCurrent: true);
+    if (!mounted || place == null) return;
+    setState(() => _endpointBusy = true);
+    try {
+      if (!_manualIsActive && schedule != null && _scheduleDestination != null) {
+        // 일정 경로는 출발지만 바꿔서 그대로 다시 받아요 (서버가 출발 좌표를 받아요)
+        setState(() {
+          _origin = place;
+          _originController.text = place.name;
+        });
+        await _loadScheduleRoutes(schedule);
+        return;
+      }
+      final dest = _shownDestination();
+      if (dest == null) {
+        setState(() {
+          _manualOrigin = place;
+          _manualOriginController.text = place.name;
+        });
+        return;
+      }
+      await _searchBetween(place, dest, schedule);
+    } finally {
+      if (mounted) setState(() => _endpointBusy = false);
+    }
+  }
+
+  Future<void> _changeDestination(Schedule? schedule) async {
+    final place = await _pickPlace('도착지 바꾸기');
+    if (!mounted || place == null) return;
+    setState(() => _endpointBusy = true);
+    try {
+      var origin = _shownOrigin;
+      if (origin == null) {
+        await _useCurrentLocation();
+        if (!mounted) return;
+        origin = _origin;
+      }
+      if (origin == null) {
+        setState(() {
+          _manualDestination = place;
+          _manualDestinationController.text = place.name;
+          _manualExpanded = true;
+          _manualError = '출발지를 골라 주세요.';
+        });
+        return;
+      }
+      await _searchBetween(origin, place, schedule);
+    } finally {
+      if (mounted) setState(() => _endpointBusy = false);
+    }
+  }
+
+  Future<void> _swapEndpoints(Schedule? schedule) async {
+    final origin = _shownOrigin, dest = _shownDestination();
+    if (origin == null || dest == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('출발지와 도착지를 모두 정한 뒤 바꿀 수 있어요.')));
+      return;
+    }
+    setState(() => _endpointBusy = true);
+    try {
+      await _searchBetween(dest, origin, schedule);
+    } finally {
+      if (mounted) setState(() => _endpointBusy = false);
+    }
+  }
+
+  Widget _endpoints(Schedule? schedule) {
+    final origin = _shownOrigin;
+    final dest = _shownDestination();
+    final currentMode = !_manualIsActive && schedule != null && schedule.originMode != 'place';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: RouteEndpoints(
+        originLabel: origin?.name ?? (currentMode ? '현재 위치' : null),
+        originSub: origin?.id == PlaceSearchScreen.currentLocationId ? null : origin?.address,
+        destinationLabel: dest?.name ?? (_manualIsActive ? null : schedule?.location),
+        destinationSub: dest?.address,
+        onTapOrigin: () => _changeOrigin(schedule),
+        onTapDestination: () => _changeDestination(schedule),
+        onSwap: _endpointBusy ? null : () => _swapEndpoints(schedule),
+        busy: _endpointBusy,
+      ),
+    );
+  }
 
   Future<void> _useCurrentLocation() async {
     if (_locating) return;
@@ -269,7 +393,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   Future<void> _loadScheduleRoutes(Schedule schedule) async {
     if (_origin == null || _scheduleDestination == null) return;
     final serial = ++_scheduleRequestSerial;
-    activeRouteController.clearSearch();
+    // 지도·경로 카드는 그대로 두고 새 결과가 오면 바꿔요 (다시 찾을 때 화면이 꺼졌다 켜지지 않게, 11/14)
     setState(() { _loadingSchedule = true; _scheduleError = null; });
     try {
       if (!ApiConfig.demoMode) {
@@ -292,6 +416,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             for (var i = 0; i < plan.routes.length; i++)
               ServerRouteAdapter.fromPlan(plan.routes[i], i),
           ]..sort(_fastestFirst);
+          if (plan.noServiceNow) {
+            throw StateError('지금은 탈 수 있는 대중교통이 없어요. 실시간 도착 정보가 있는 차가 없어서 운행이 끝난 것 같아요.');
+          }
           if (routes.isEmpty) throw StateError('서버에서 추천 가능한 경로가 없습니다.');
           activeRouteController.setSearch(ActiveRouteSelection(
             routes: routes, selectedId: routes.first.id,
@@ -317,7 +444,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       }
     } catch (e) {
       if (mounted && serial == _scheduleRequestSerial) {
-        activeRouteController.clearSearch();
+        // 이전 결과가 있으면 그대로 두고 오류만 알려요
         setState(() => _scheduleError = '$e');
       }
     } finally {
@@ -326,11 +453,24 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
   }
 
   Future<void> _pickManualPlace({required bool origin}) async {
-    final place = await _pickPlace(origin ? '출발지 검색' : '목적지 검색');
+    final place = await _pickPlace(origin ? '출발지 검색' : '목적지 검색', allowCurrent: origin);
     if (!mounted || place == null) return;
     setState(() {
       if (origin) { _manualOrigin = place; _manualOriginController.text = place.name; }
       else { _manualDestination = place; _manualDestinationController.text = place.name; }
+    });
+  }
+
+  /// 출발지를 현재 위치로 (#51 피드백 2)
+  Future<void> _useCurrentAsManualOrigin() async {
+    await _useCurrentLocation();
+    if (!mounted) return;
+    final here = _origin;
+    if (here == null || here.id != 'device_current_location') return; // 위치를 못 받으면 _useCurrentLocation 이 안내해요
+    setState(() {
+      _manualOrigin = here;
+      _manualOriginController.text = here.name;
+      _manualError = null;
     });
   }
 
@@ -358,6 +498,9 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       ));
       if (!mounted || serial != _manualRequestSerial) return;
       final routes = [...result.routes]..sort(_fastestFirst);
+      if (result.notice != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.notice!)));
+      }
       if (routes.isNotEmpty) {
         _manualIsActive = true;
         activeRouteController.setSearch(ActiveRouteSelection(
@@ -509,7 +652,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
             Expanded(child: Text(_manualIsActive ? '직접 검색한 이동 경로' : '다음 일정의 추천 경로',
                 style: Theme.of(context).textTheme.titleLarge)),
             TextButton.icon(onPressed: () {
-              activeRouteController.clearSearch();
+              // 지우지 않고 새 경로가 오면 바꿔요 (11/14)
               _manualIsActive = false;
               if (schedule != null) {
                 if (_origin == null) {
@@ -522,6 +665,28 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
               }
             }, icon: const Icon(Icons.refresh), label: const Text('다음 일정 경로')),
           ]),
+          const SizedBox(height: 6),
+          _endpoints(schedule),
+          // 다시 찾는 중: 지도는 그대로, 위에 진행 표시만
+          AnimatedSize(
+            duration: const Duration(milliseconds: 150),
+            child: (_loadingSchedule || _loadingManual || _locating)
+                ? const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Row(children: [
+                      Expanded(child: LinearProgressIndicator(minHeight: 3)),
+                      SizedBox(width: 8),
+                      Text('경로 다시 찾는 중…', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    ]),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+          if (_scheduleError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('경로를 새로 받지 못했어요: $_scheduleError',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error)),
+            ),
           _routePanel(routes: active.routes, selectedId: active.selectedId,
             onSelect: activeRouteController.select, loading: false, error: null,
             originName: active.origin, destinationName: active.destination,
@@ -536,8 +701,10 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
                     ? () => _loadScheduleRoutes(schedule)
                     : null)),
         ] else if (schedule == null && !ApiConfig.demoMode) ...[
+          _endpoints(null),
+          if (_loadingManual || _locating) const LinearProgressIndicator(minHeight: 3),
           const Card(child: Padding(padding: EdgeInsets.all(18),
-            child: Text('등록된 미래 일정이 없습니다. 일정 탭에서 목적지와 도착 시간을 등록하면 실제 경로를 계산할 수 있어요.'))),
+            child: Text('위에서 출발지·도착지를 고르면 바로 경로를 찾아요. 일정 탭에서 일정을 등록하면 도착 시각에 맞춰 계산해요.'))),
         ] else if (schedule == null) ...[
           Card(child: Padding(
             padding: const EdgeInsets.all(14),
@@ -563,6 +730,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         ] else ...[
           Text('다음 일정 · 자동 경로', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
+          _endpoints(schedule),
           Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -608,7 +776,16 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         if (_manualExpanded) ...[
           const SizedBox(height: 8),
           TextField(controller: _manualOriginController, readOnly: true, onTap: () => _pickManualPlace(origin: true), decoration: InputDecoration(labelText: '출발지', prefixIcon: const Icon(Icons.my_location), suffixIcon: IconButton(onPressed: () => _pickManualPlace(origin: true), icon: const Icon(Icons.search)), border: const OutlineInputBorder())),
-          const SizedBox(height: 12),
+          // 현재 위치로 (#51 피드백 2). 출발지↔목적지 바꾸기(피드백 7)는 이동 탭 맨 위 ⇅ 버튼 하나로 (11/14)
+          Row(children: [
+            TextButton.icon(
+              onPressed: _locating ? null : _useCurrentAsManualOrigin,
+              icon: _locating
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.gps_fixed, size: 18),
+              label: const Text('현재 위치로'),
+            ),
+          ]),
           TextField(controller: _manualDestinationController, readOnly: true, onTap: () => _pickManualPlace(origin: false), decoration: InputDecoration(labelText: '목적지', prefixIcon: const Icon(Icons.place), suffixIcon: IconButton(onPressed: () => _pickManualPlace(origin: false), icon: const Icon(Icons.search)), border: const OutlineInputBorder())),
           const SizedBox(height: 12),
           OutlinedButton.icon(onPressed: _pickManualArrival, icon: const Icon(Icons.schedule), label: Text(_manualArrival == null ? '도착 희망시간 선택' : _time(_manualArrival!))),

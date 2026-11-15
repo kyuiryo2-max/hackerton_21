@@ -37,7 +37,7 @@
 | 있음 | `POST /api/tasks/parse` | 할 일 문장 → 장소 종류 (저장 안 함) | [tasks_parse.json](api-examples/tasks_parse.json) | routers/assistant.py |
 | 있음 | `POST /api/plan` | 출발 시각, 경로 카드, 할 일 포함·제외. `demo=true`면 시연, 아니면 `origin`(현재 위치)으로 실시간 | [plan.json](api-examples/plan.json) | routers/plan.py |
 | 있음 | `POST /api/ask` | 이동 중 질문 → 분류 → 계산 → 답변. 실제 모드는 마지막 실시간 계획의 경로로 계산 (#59) | [ask.json](api-examples/ask.json) | routers/assistant.py |
-| 있음 | `GET /api/places/search?query=` | 목적지 장소 검색 (카카오 키워드, 서울 전체·정확도순 최대 10곳, `lat`·`lng`를 주면 그 근처). 응답 `[{name, address, lat, lng}]` (#61) | – | routers/places.py |
+| 있음 | `GET /api/places/search?query=` | 목적지 장소 검색 (카카오 키워드, 서울 전체·정확도순 최대 10곳, `lat`·`lng`를 주면 그 근처). 이름이 검색어와 같은 곳·지하철역을 먼저, 짧은 검색어("강남")에 맞는 곳이 없으면 "강남역"도 찾아 앞에 붙임 (11/14). 응답 `[{name, address, lat, lng}]` (#61) | – | routers/places.py |
 
 경로 선택 기록은 `/api/choices`(복수)다. 기준 문서의 `/api/choice`는 이 이름으로 맞춘다.
 

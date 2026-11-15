@@ -29,6 +29,8 @@ class LivePlan:
     depart_at: datetime | None = None  # 1번 경로로 늦어도 출발해야 하는 시각
     total_seconds: int = 0           # 1번 경로로 출발부터 도착까지 (경유 포함)
     has_target: bool = True          # 도착 희망 시각이 있는지 (홈 검색창으로 찾으면 없음)
+    destination: tuple | None = None  # 목적지 좌표 (경도, 위도). 타는 중 들르기는 목적지 근처에서 찾아요 (11/14)
+    destination_name: str = ""
 
 
 _plans: dict[str, LivePlan] = {}

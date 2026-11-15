@@ -66,10 +66,20 @@ class ActiveRouteController extends ChangeNotifier {
   }
   // Any task/schedule change invalidates a previous recommendation immediately.
   // Do not display stopovers from a plan calculated using deleted tasks.
-  void requestPlanRefresh() {
-    _active = null;
+  // 화면이 꺼졌다 켜지지 않게 이전 결과는 남겨 두고, 이동 탭이 revision을 보고 바로 다시 받아요 (11/14).
+  void requestPlanRefresh({({double lat, double lng, String name})? from}) {
+    _replanFrom = from;
     _revision++;
     notifyListeners();
+  }
+
+  /// 이동 중 경유지를 바꿨을 때 다시 계산할 출발 지점 (11/14).
+  /// GPS가 아니라 이동 중 팝업이 시간으로 보여 주는 "지금 위치"예요. 부스에서도 같은 결과가 나와요.
+  ({double lat, double lng, String name})? _replanFrom;
+  ({double lat, double lng, String name})? takeReplanFrom() {
+    final from = _replanFrom;
+    _replanFrom = null;
+    return from;
   }
 }
 

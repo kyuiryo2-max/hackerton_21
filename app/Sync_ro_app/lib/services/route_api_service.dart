@@ -8,8 +8,10 @@ import 'server_route_adapter.dart';
 import 'demo_service.dart';
 
 class RouteSearchData {
-  const RouteSearchData(this.routes, {this.plan, this.demoContext});
+  const RouteSearchData(this.routes, {this.plan, this.demoContext, this.notice});
   final List<RouteCandidate> routes;
+  /// 화면에 잠깐 알려 줄 말 (예: 밤이라 첫차 기준으로 보여 줘요)
+  final String? notice;
   final ServerPlan? plan;
   final Map<String, dynamic>? demoContext;
 }
@@ -83,13 +85,27 @@ class RouteApiService {
     try {
       // 직접 검색(홈 검색창·별도 이동 계획)은 일정이 아니라 고른 목적지로, 지금 출발 기준이에요.
       // 목적지를 빼먹으면 서버가 가장 가까운 일정으로 계산해서 엉뚱한 길이 나와요 (11/13 발견).
-      final plan = await service.fetch(
-        originLat: request.originPlace?.latitude,
-        originLng: request.originPlace?.longitude,
-        destinationName: request.destinationPlace?.name ?? request.destination,
-        destinationLat: request.destinationPlace?.latitude,
-        destinationLng: request.destinationPlace?.longitude,
-      );
+      Future<ServerPlan> fetch({DateTime? departAt}) => service.fetch(
+            originLat: request.originPlace?.latitude,
+            originLng: request.originPlace?.longitude,
+            destinationName: request.destinationPlace?.name ?? request.destination,
+            destinationLat: request.destinationPlace?.latitude,
+            destinationLng: request.destinationPlace?.longitude,
+            departAt: departAt,
+          );
+      var plan = await fetch();
+      String? notice;
+      // 밤이라 지금 다니는 차가 없으면 다음 첫차(05:30) 기준으로 다시 찾아요 (11/15)
+      if (plan.noServiceNow && ServerPlan.isNight() && !ApiConfig.demoMode) {
+        final first = ServerPlan.nextFirstTrain();
+        final retry = await fetch(departAt: first);
+        if (retry.routes.isNotEmpty) {
+          plan = retry;
+          final when = first.toUtc().add(const Duration(hours: 9));
+          final today = DateTime.now().toUtc().add(const Duration(hours: 9)).day == when.day;
+          notice = '지금은 다니는 차가 없어서 ${today ? '오늘' : '내일'} 첫차(05:30) 기준으로 보여 줘요';
+        }
+      }
       Map<String, dynamic>? demoContext;
       if (ApiConfig.demoMode) {
         final demoService = DemoService();
@@ -101,10 +117,13 @@ class RouteApiService {
           demoService.dispose();
         }
       }
+      if (plan.noServiceNow) {
+        throw StateError('지금은 탈 수 있는 대중교통이 없어요. 실시간 도착 정보가 있는 차가 없어서 운행이 끝난 것 같아요.');
+      }
       return RouteSearchData([
         for (var i = 0; i < plan.routes.length; i++)
           ServerRouteAdapter.fromPlan(plan.routes[i], i, context: demoContext),
-      ], plan: plan, demoContext: demoContext);
+      ], plan: plan, demoContext: demoContext, notice: notice);
     } finally {
       service.dispose();
     }

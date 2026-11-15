@@ -97,6 +97,30 @@ class PrepNotificationService {
     }
   }
 
+  /// 바로 보내는 알림 (이동 중 경로 이탈 등, 11/14)
+  Future<void> showNow({required int id, required String title, required String body}) async {
+    if (!_ready) return;
+    try {
+      await _plugin.show(
+        id,
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'sync_ro_trip',
+            '이동 안내',
+            channelDescription: '이동 중 경로를 벗어나면 알려 줘요',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+      );
+    } catch (e) {
+      debugPrint('알림 실패: $e');
+    }
+  }
+
   Future<void> cancel(int scheduleId) async {
     if (!_ready || scheduleId <= 0) return;
     try {

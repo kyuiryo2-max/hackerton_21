@@ -1,13 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/place.dart';
+import '../services/location_access.dart';
 import '../services/place_search_service.dart';
 
 class PlaceSearchScreen extends StatefulWidget {
   final String title;
   final String initialQuery;
 
-  const PlaceSearchScreen({super.key, this.title = '장소 검색', this.initialQuery = ''});
+  /// 맨 위에 "현재 위치" 줄을 보여 줘요 (출발지 고를 때, 11/14)
+  final bool allowCurrentLocation;
+
+  const PlaceSearchScreen({super.key, this.title = '장소 검색', this.initialQuery = '', this.allowCurrentLocation = false});
+
+  /// "현재 위치"를 골랐을 때 돌려주는 장소 id
+  static const String currentLocationId = 'device_current_location';
 
   @override
   State<PlaceSearchScreen> createState() => _PlaceSearchScreenState();
@@ -23,6 +32,43 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
   bool _isLoading = false;
   String? _errorMessage;
   int _requestId = 0;
+  Timer? _debounce;
+  bool _locating = false;
+
+  /// 글자를 칠 때마다 잠깐 기다렸다 찾아요 (지도 앱처럼)
+  void _onChanged(String _) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) _search();
+    });
+  }
+
+  Future<void> _pickCurrentLocation() async {
+    if (_locating) return;
+    setState(() => _locating = true);
+    try {
+      final p = await LocationAccess.current();
+      if (!mounted) return;
+      Navigator.pop(context, Place(
+        id: PlaceSearchScreen.currentLocationId,
+        name: '현재 위치',
+        address: '기기 위치',
+        latitude: p.latitude,
+        longitude: p.longitude,
+      ));
+    } on LocationAccessException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message),
+        action: SnackBarAction(
+          label: '켜는 방법',
+          onPressed: () => LocationAccess.showHelp(context, e.issue, onRetry: _pickCurrentLocation),
+        ),
+      ));
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
 
   @override
   void initState() {
@@ -84,6 +130,7 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
   @override
   void dispose() {
     _requestId++;
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -101,7 +148,9 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    autofocus: widget.initialQuery.isEmpty,
                     textInputAction: TextInputAction.search,
+                    onChanged: _onChanged,
                     onSubmitted: (_) => _search(),
                     decoration: const InputDecoration(
                       labelText: '장소명 또는 주소',
@@ -119,6 +168,17 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
               ],
             ),
           ),
+
+          if (widget.allowCurrentLocation)
+            ListTile(
+              leading: _locating
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.my_location, color: Color(0xFF4936D8)),
+              title: const Text('현재 위치', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('지금 있는 곳에서 출발'),
+              onTap: _pickCurrentLocation,
+            ),
+          if (widget.allowCurrentLocation) const Divider(height: 1),
 
           if (_isLoading) const LinearProgressIndicator(),
 

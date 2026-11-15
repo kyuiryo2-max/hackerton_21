@@ -34,7 +34,8 @@ class AppTheme {
       brightness: Brightness.light,
     ).copyWith(primary: primary, surface: surface);
 
-    final base = ThemeData(useMaterial3: true, colorScheme: colorScheme);
+    // 한글 글꼴을 앱에 넣어 두어, 웹에서 입력 중인 글자가 네모로 깨지지 않게 해요 (11/14)
+    final base = ThemeData(useMaterial3: true, colorScheme: colorScheme, fontFamily: 'NotoSansKR');
     final text = base.textTheme.apply(
       bodyColor: textStrong,
       displayColor: textStrong,

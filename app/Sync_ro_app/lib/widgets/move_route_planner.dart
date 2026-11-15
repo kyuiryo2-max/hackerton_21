@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../config/app_theme.dart';
@@ -18,6 +20,10 @@ import 'specialty_chips.dart';
 import '../models/trip_progress.dart';
 import '../services/server_ask_service.dart';
 import 'trip_panel.dart';
+import '../models/schedule.dart';
+import '../screens/schedule_form_screen.dart';
+import '../services/schedule_draft_parser.dart';
+import '../services/prep_notification_service.dart';
 
 /// 이동 탭 (팀장님 흐름도 기준)
 /// ① 일정 이름 · 출발지 → 목적지   ② 지도 (경로 · 출발지 · 목적지 · 경유 후보)
@@ -88,12 +94,40 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   String? _candidateId;
   final Map<String, int> _needOverride = {};
   bool _tripStarted = false;
+  /// 이동 중 화면을 그릴 때의 경로·경유 후보·계획 (이동 중 질문 버튼이 지금 위치를 계산할 때 써요)
+  RouteCandidate? _tripRoute;
+  StayEval? _tripChosen;
+  TripPlan? _tripNow;
+  /// 이동 중 경유지를 바꿔 다시 계산하면, 새 경로가 오는 대로 이동을 그 자리에서 다시 시작해요
+  bool _restartTripOnPlan = false;
 
   // ---------- 이동 중 (11/13): 시간 기준 단계 + 버튼으로 넘기기 ----------
   DateTime? _tripRealStart;
   int _tripSkipMinutes = 0;
   int _tripManualIndex = 0;
+  /// 버튼으로 다음 단계로 넘긴 시각. 계획보다 일찍 넘겼으면 그 단계는 이때부터 진행한 걸로 봐요 (11/14)
+  DateTime? _manualAt;
   Timer? _tripTick;
+  /// 실제 모드: 이동 중 실제 위치 (11/14). 시연 모드는 계획 시각 기준으로 추정해요
+  StreamSubscription<Position>? _gpsSub;
+  /// 실제 위치가 지금 단계의 길에서 이만큼(m) 안이면 실제 위치로, 더 멀면 계획 시각 기준으로 그려요
+  static const double _gpsOnPathMeters = 120;
+  LatLng? _gps;
+  double? _gpsHeading;
+
+  // ---------- 경로 이탈 알림 (11/14) ----------
+  /// 걷는 구간: 길에서 이만큼(m) 넘게 떨어지면 이탈. 타는 구간은 노선 좌표가 성글어서 넉넉하게
+  static const double _offWalkMeters = 50;
+  static const double _offRideMeters = 200;
+  /// 위치 오차로 한 번 튀는 건 무시: 연속으로 이만큼 벗어나야 알려요
+  static const int _offFixesNeeded = 2;
+  int _offCount = 0;
+  /// 이번 이탈을 이미 알렸어요 (다시 길로 돌아오면 풀려요)
+  bool _offAlerted = false;
+  static const int _offNotificationId = 9101;
+  /// 도착 단계가 되면 잠시 보여 준 뒤 이동을 자동으로 마쳐요 (#51 피드백 4)
+  Timer? _arriveEnd;
+  static const _arriveShowSeconds = 6;
   final _mapKey = GlobalKey();
   final _askService = ServerAskService();
 
@@ -109,12 +143,16 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   }
 
   void _startTrip() {
+    _arriveEnd?.cancel();
+    _arriveEnd = null;
     _tripRealStart = DateTime.now();
+    _startGps();
     _tripSkipMinutes = 0;
     _tripManualIndex = 0;
+    _manualAt = null;
     _tripTick?.cancel();
-    // 화면의 "N분 남음"이 바뀌도록 15초마다 다시 그려요
-    _tripTick = Timer.periodic(const Duration(seconds: 15), (_) {
+    // "N분 남음"과 지도 화살표가 움직이도록 5초마다 다시 그려요
+    _tripTick = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted) setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -123,13 +161,243 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     });
   }
 
+  /// 실제 모드에서 이동을 시작하면 위치를 계속 받아요 (움직일 때 3m마다).
+  /// 앱(안드로이드·iOS)은 화면이 꺼지거나 다른 앱을 봐도 계속 받아요 (11/14):
+  /// 안드로이드는 "길 안내 중" 알림을 띄워 두고(포그라운드 서비스), iOS는 백그라운드 위치를 켜요.
+  /// 웹은 브라우저가 화면이 열려 있을 때만 위치를 줘요.
+  LocationSettings _gpsSettings() {
+    if (kIsWeb) return const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 3);
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return AndroidSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 3,
+          intervalDuration: const Duration(seconds: 3),
+          foregroundNotificationConfig: const ForegroundNotificationConfig(
+            notificationTitle: 'Sync-ro 길 안내 중',
+            notificationText: '경로를 벗어나면 알려 드릴게요',
+            enableWakeLock: true,
+          ),
+        );
+      case TargetPlatform.iOS:
+        return AppleSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          activityType: ActivityType.fitness,
+          distanceFilter: 3,
+          pauseLocationUpdatesAutomatically: false,
+          showBackgroundLocationIndicator: true,
+          allowBackgroundLocationUpdates: true,
+        );
+      default:
+        return const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 3);
+    }
+  }
+
+  /// 화면이 꺼져도 위치를 받으려면 "항상 허용"이 필요해요. 이동을 시작할 때 한 번만 설명하고 물어봐요.
+  static bool _askedBackground = false;
+  Future<void> _askBackgroundLocation() async {
+    if (kIsWeb || _askedBackground) return;
+    if (defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS) return;
+    try {
+      final now = await Geolocator.checkPermission();
+      if (now != LocationPermission.whileInUse || !mounted) return;
+      _askedBackground = true;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('화면이 꺼져도 길 안내를 받을까요?'),
+          content: const Text('휴대폰 화면을 끄거나 다른 앱을 봐도 내 위치를 따라가고, '
+              '경로를 벗어나면 알림으로 알려 드려요. 다음 창에서 위치를 "항상 허용"으로 골라 주세요.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('화면 켤 때만')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('항상 허용하기')),
+          ],
+        ),
+      );
+      if (ok == true) await Geolocator.requestPermission();
+    } catch (_) {}
+  }
+
+  void _startGps() {
+    _stopGps();
+    if (widget.isDemo) return;
+    _askBackgroundLocation().whenComplete(() {
+      if (!mounted || !_tripStarted) return;
+      _listenGps();
+    });
+  }
+
+  void _listenGps() {
+    try {
+      _gpsSub = Geolocator.getPositionStream(
+        locationSettings: _gpsSettings(),
+      ).listen((p) {
+        if (!mounted) return;
+        final next = LatLng(p.latitude, p.longitude);
+        double? heading;
+        // 걷는 중이면 기기가 알려 주는 방향, 아니면 직전 위치에서 온 방향
+        if (p.heading >= 0 && p.speed > 0.7) {
+          heading = p.heading * math.pi / 180;
+        } else if (_gps != null && _meters(_gps!, next) > 3) {
+          heading = _heading(_gps!, next);
+        }
+        setState(() {
+          _gps = next;
+          if (heading != null) _gpsHeading = heading;
+        });
+        _checkOffRoute(next, p.accuracy);
+      }, onError: (_) {
+        // 위치를 못 받으면 계획 시각 기준 추정으로 돌아가요
+        if (mounted) setState(() => _gps = null);
+      });
+    } catch (_) {}
+  }
+
+  void _stopGps() {
+    _gpsSub?.cancel();
+    _gpsSub = null;
+    _gps = null;
+    _gpsHeading = null;
+    _offCount = 0;
+    _offAlerted = false;
+    if (mounted) ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+  }
+
+  /// 내 위치에서 지금 단계의 길까지 가장 가까운 거리(m)
+  static double _distToPath(LatLng p, List<LatLng> path) {
+    if (path.isEmpty) return double.infinity;
+    if (path.length == 1) return _meters(p, path.first);
+    final cos = math.cos(p.latitude * math.pi / 180);
+    var best = double.infinity;
+    for (var i = 0; i + 1 < path.length; i++) {
+      final a = path[i], b = path[i + 1];
+      final ax = a.longitude * cos, ay = a.latitude, bx = b.longitude * cos, by = b.latitude;
+      final px = p.longitude * cos, py = p.latitude;
+      final len = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+      final t = len == 0 ? 0.0 : (((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / len).clamp(0.0, 1.0);
+      final q = LatLng(ay + (by - ay) * t, (ax + (bx - ax) * t) / cos);
+      final d = _meters(p, q);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  /// 경로 이탈: 걷거나 타는 중에 지금 단계의 길(앞뒤 단계 포함)에서 많이 벗어나면 알려요.
+  /// 가게에 있거나 정류장에서 기다리는 중, 도착한 뒤에는 보지 않아요.
+  void _checkOffRoute(LatLng here, double accuracy) {
+    final plan = _tripNow, route = _tripRoute;
+    if (!_tripStarted || plan == null || route == null) return;
+    final index = _tripIndex(plan);
+    final phase = plan.steps[index].phase;
+    if (phase == TripPhase.atPlace || phase == TripPhase.waiting || phase == TripPhase.arrived) {
+      _offCount = 0;
+      return;
+    }
+    final now = _tripClock;
+    // 지금 단계와 바로 앞뒤 단계: 버튼을 늦게 눌렀거나 조금 앞서 걸어도 이탈로 보지 않게
+    var dist = double.infinity;
+    for (var i = math.max(0, index - 1); i <= math.min(plan.steps.length - 1, index + 1); i++) {
+      final d = _distToPath(here, _stepTrack(plan, i, route, _tripChosen, now).$1);
+      if (d < dist) dist = d;
+    }
+    if (dist == double.infinity) return;
+    final limit = (phase == TripPhase.riding ? _offRideMeters : _offWalkMeters) + math.min(accuracy, 50);
+    if (dist <= limit * 0.6) {
+      // 길로 돌아왔어요
+      _offCount = 0;
+      if (_offAlerted) {
+        _offAlerted = false;
+        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+      }
+      return;
+    }
+    if (dist <= limit) return;
+    _offCount++;
+    if (_offCount < _offFixesNeeded || _offAlerted) return;
+    _offAlerted = true;
+    _alertOffRoute(here, dist);
+  }
+
+  void _alertOffRoute(LatLng here, double dist) {
+    final meters = (dist / 10).round() * 10;
+    // 화면이 꺼져 있거나 다른 앱을 보고 있으면 휴대폰 알림으로
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (state != null && state != AppLifecycleState.resumed) {
+      PrepNotificationService.instance.showNow(
+        id: _offNotificationId,
+        title: '경로를 벗어났어요',
+        body: '추천 경로에서 약 ${meters}m 떨어졌어요. 눌러서 지금 위치에서 다시 찾아보세요.',
+      );
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(MaterialBanner(
+      backgroundColor: AppTheme.warnSoft,
+      leading: const Icon(Icons.wrong_location_rounded, color: AppTheme.warn),
+      content: Text('경로를 벗어났어요 · 추천 경로에서 약 ${meters}m'),
+      actions: [
+        TextButton(
+          onPressed: () => messenger.hideCurrentMaterialBanner(),
+          child: const Text('괜찮아요'),
+        ),
+        FilledButton(
+          onPressed: () {
+            messenger.hideCurrentMaterialBanner();
+            _rerouteFrom(here);
+          },
+          child: const Text('지금 위치에서 다시 찾기'),
+        ),
+      ],
+    ));
+  }
+
+  /// 지금 위치에서 목적지까지 다시 계산하고, 새 경로가 오면 이동을 그 자리에서 다시 시작해요
+  void _rerouteFrom(LatLng here) {
+    _offCount = 0;
+    _offAlerted = false;
+    _restartTripOnPlan = true;
+    activeRouteController.requestPlanRefresh(
+        from: (lat: here.latitude, lng: here.longitude, name: '지금 위치'));
+  }
+
+  static double _meters(LatLng a, LatLng b) {
+    final dx = (a.longitude - b.longitude) * 111320 * math.cos(a.latitude * math.pi / 180);
+    final dy = (a.latitude - b.latitude) * 110540;
+    return math.sqrt(dx * dx + dy * dy);
+  }
+
   void _stopTrip() {
+    _stopGps();
     _tripTick?.cancel();
     _tripTick = null;
+    _arriveEnd?.cancel();
+    _arriveEnd = null;
+  }
+
+  /// 이동 종료: 아래 버튼, 팝업 버튼, 도착 후 자동 종료가 모두 여기로 와요
+  void _endTrip({bool arrived = false}) {
+    if (!_tripStarted || !mounted) return;
+    setState(() {
+      _tripStarted = false;
+      _stopTrip();
+    });
+    if (arrived) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${widget.destinationName}에 도착해서 이동을 마쳤어요.')));
+    }
+  }
+
+  /// 도착 단계에 들어서면 한 번만 자동 종료를 걸어 둬요
+  void _maybeAutoEnd(TripPlan? trip, int index) {
+    if (trip == null || _arriveEnd != null) return;
+    if (trip.steps[index].phase != TripPhase.arrived) return;
+    _arriveEnd = Timer(const Duration(seconds: _arriveShowSeconds), () => _endTrip(arrived: true));
   }
 
   @override
   void dispose() {
+    _gpsSub?.cancel();
+    _arriveEnd?.cancel();
     _tripTick?.cancel();
     _askService.dispose();
     super.dispose();
@@ -146,14 +414,18 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final ride = firstRide.isEmpty ? null : firstRide.first;
     // 들르는 곳 (경유를 계산할 수 있을 때만). 지역 변수라 아래에서 null 검사가 그대로 이어져요
     final stop = times.viaStop && chosen != null && chosen.status != StayStatus.bad ? chosen : null;
-    final boardAt = o?.boardAt ?? times.depart.add(Duration(minutes: firstWalk));
+    final reachStop = stop != null
+        ? stop.leavePlace.add(Duration(minutes: stop.candidate.walkBack))
+        : times.depart.add(Duration(minutes: firstWalk));
+    // 계산한 탑승 시각이 정류장 도착보다 이르면(= 지금 오는 실시간 버스 시각) 정류장 도착 시각을 써요 (11/14)
+    final given = o?.boardAt;
+    final boardAt = given != null && !given.isBefore(reachStop) ? given : reachStop;
     final planNow = DateTime.tryParse('${widget.plan?.data['now'] ?? ''}') ?? widget.now;
     final raw = p?['next_vehicles_min'];
+    final transfers = _transfersOf(segs, boardAt, times.arrive);
     return TripPlan(
       depart: times.depart,
-      reachStop: stop != null
-          ? stop.leavePlace.add(Duration(minutes: stop.candidate.walkBack))
-          : times.depart.add(Duration(minutes: firstWalk)),
+      reachStop: reachStop,
       boardAt: boardAt,
       arriveAt: times.arrive,
       stopName: o?.boardStopName ?? ride?.startName ?? '정류장',
@@ -167,14 +439,64 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           for (final v in raw)
             if (v is num) planNow.add(Duration(minutes: v.toInt())),
       ],
+      transfers: transfers,
     );
+  }
+
+  static bool _isRide(RouteSegment s) => s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway;
+
+  /// 갈아탈 차들 (11/14). 버스 → 1호선처럼 탈것이 두 개 이상이면, 첫 차 탑승 시각부터 구간 시간을 더해
+  /// 내리는 시각 → 걸어서 갈아탈 곳 도착 → 탑승 시각을 차례로 계산해요.
+  /// 이렇게 더한 도착 시각이 카드의 도착 시각과 다르면, 그 차이는 첫 환승 대기 시간으로 맞춰요
+  /// (카드·진행 막대의 도착 시각과 같게 하려고요).
+  static List<TripTransfer> _transfersOf(List<RouteSegment> segs, DateTime boardAt, DateTime arriveAt) {
+    final rides = [for (var i = 0; i < segs.length; i++) if (_isRide(segs[i])) i];
+    if (rides.length < 2) return const [];
+    int sum(int from, int to, RouteSegmentType type) => [
+          for (var i = from; i < to; i++)
+            if (segs[i].type == type) segs[i].durationMinutes,
+        ].fold<int>(0, (a, b) => a + b);
+    final walks = <int>[], waits = <int>[];
+    for (var k = 1; k < rides.length; k++) {
+      walks.add(sum(rides[k - 1] + 1, rides[k], RouteSegmentType.walking));
+      waits.add(sum(rides[k - 1] + 1, rides[k], RouteSegmentType.waiting));
+    }
+    final rideMinutes = [for (final i in rides) segs[i].durationMinutes].fold<int>(0, (a, b) => a + b);
+    final lastWalk = sum(rides.last + 1, segs.length, RouteSegmentType.walking);
+    final planned = rideMinutes + lastWalk + [...walks, ...waits].fold<int>(0, (a, b) => a + b);
+    final slack = arriveAt.difference(boardAt).inMinutes - planned;
+    waits[0] = math.max(0, waits[0] + slack);
+
+    final out = <TripTransfer>[];
+    var t = boardAt.add(Duration(minutes: segs[rides[0]].durationMinutes));
+    for (var k = 1; k < rides.length; k++) {
+      final prev = segs[rides[k - 1]], next = segs[rides[k]];
+      final reach = t.add(Duration(minutes: walks[k - 1]));
+      final board = reach.add(Duration(minutes: waits[k - 1]));
+      final getOff = prev.endName?.trim().isNotEmpty == true ? prev.endName!.trim() : '환승 장소';
+      // 갈아탈 곳 좌표: 다음 차 구간의 첫 점, 없으면 앞 차 구간의 끝 점 (환승 지점 들르기 계산용, 11/14)
+      final at = next.geometry.isNotEmpty ? next.geometry.first : (prev.geometry.isNotEmpty ? prev.geometry.last : null);
+      out.add(TripTransfer(
+        lat: at?.latitude,
+        lng: at?.longitude,
+        getOffAt: t,
+        getOffName: getOff,
+        rideName: _rideNameOf(null, next),
+        stopName: next.startName?.trim().isNotEmpty == true ? next.startName!.trim() : getOff,
+        reachStop: reach,
+        boardAt: board,
+      ));
+      t = board.add(Duration(minutes: next.durationMinutes));
+    }
+    return out;
   }
 
   /// 안내에 쓸 노선 이름: 서버 ride_name → 버스 번호면 "번"을 붙여요 ("2115" → "2115번", "2호선" 그대로)
   static String _rideNameOf(Map<String, dynamic>? p, RouteSegment? ride) {
+    // "4호선·4호선·4호선" → "4호선" (11/15)
     final given = p?['ride_name'];
-    if (given is String && given.isNotEmpty) return given;
-    final name = '${p?['name'] ?? ride?.lineName ?? ''}'.trim();
+    if (given is String && given.isNotEmpty) return RouteSegment.uniqueLines(given);
+    final name = RouteSegment.uniqueLines('${p?['name'] ?? ride?.lineName ?? ''}'.trim());
     if (name.isEmpty) return ride?.description ?? '탈 차';
     final last = name.codeUnitAt(name.length - 1);
     final endsWithDigit = last >= 48 && last <= 57;
@@ -214,36 +536,162 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     return (now.difference(from).inSeconds / total).clamp(0.0, 1.0).toDouble();
   }
 
-  /// 시간 기준으로 지금 있을 것 같은 곳 (지도 파란 점)
-  LatLng? _tripDot(TripPlan plan, int index, RouteCandidate route, StayEval? chosen) {
-    final now = _tripClock;
-    final step = plan.steps[index];
+  /// 점들을 이은 선에서 처음부터 비율 f(0~1) 지점까지 (지나온 길). 마지막 점이 지금 위치예요
+  static List<LatLng> _prefix(List<LatLng> pts, double f) {
+    if (pts.length < 2) return List.of(pts);
+    final here = _along(pts, f)!;
+    double d(LatLng a, LatLng b) =>
+        math.sqrt(math.pow(a.latitude - b.latitude, 2) + math.pow(a.longitude - b.longitude, 2));
+    final lengths = [for (var i = 0; i + 1 < pts.length; i++) d(pts[i], pts[i + 1])];
+    var target = lengths.fold<double>(0, (a, b) => a + b) * f.clamp(0.0, 1.0);
+    final out = <LatLng>[pts.first];
+    for (var i = 0; i < lengths.length; i++) {
+      if (target <= lengths[i]) break;
+      target -= lengths[i];
+      out.add(pts[i + 1]);
+    }
+    out.add(here);
+    return out;
+  }
+
+  /// 지도 화면에서 a → b 방향 (북쪽 0, 시계 방향 라디안). 짧은 거리라 위도 보정만 해요
+  static double? _heading(LatLng a, LatLng b) {
+    final dx = (b.longitude - a.longitude) * math.cos(a.latitude * math.pi / 180);
+    final dy = b.latitude - a.latitude;
+    if (dx.abs() < 1e-9 && dy.abs() < 1e-9) return null;
+    return math.atan2(dx, dy);
+  }
+
+  /// 단계 하나에서 지나는 길과, 그 단계에서 얼마나 왔는지 (시간 기준)
+  (List<LatLng>, double) _stepTrack(TripPlan plan, int i, RouteCandidate route, StayEval? chosen, DateTime now) {
+    final step = plan.steps[i];
     final segs = route.segments;
     List<LatLng> geo(RouteSegment s) => [for (final p in s.geometry) LatLng(p.latitude, p.longitude)];
-    final rideAt = segs.indexWhere((s) => s.type == RouteSegmentType.bus || s.type == RouteSegmentType.subway);
+    // 탈것 구간 위치들 (버스 → 1호선이면 2개). 단계의 leg 번째 차를 따라가요 (11/14)
+    final rides = [for (var k = 0; k < segs.length; k++) if (_isRide(segs[k])) k];
+    final leg = step.leg.clamp(0, rides.isEmpty ? 0 : rides.length - 1).toInt();
+    final rideAt = rides.isEmpty ? -1 : rides[leg];
     final place = chosen?.candidate.point == null ? null : LatLng(chosen!.candidate.point!.lat, chosen.candidate.point!.lng);
+    final boardPt = rideAt < 0 || segs[rideAt].geometry.isEmpty ? null : geo(segs[rideAt]).first;
     switch (step.phase) {
       case TripPhase.toPlace:
         final path = [for (final p in chosen?.candidate.pathTo ?? const <GeoPoint>[]) LatLng(p.lat, p.lng)];
         final pts = path.length >= 2 ? path : [if (widget.origin != null) widget.origin!, if (place != null) place];
-        return _along(pts, _fraction(now, plan.depart, plan.arrivePlace!));
+        return (pts, _fraction(now, plan.depart, plan.arrivePlace!));
       case TripPhase.atPlace:
-        return place;
+        return ([if (place != null) place], 1);
       case TripPhase.toStop:
+        if (step.leg > 0 && rideAt >= 0) {
+          // 환승 걷기: 앞 차와 이번 차 사이 도보 구간. 없으면 앞 차 끝 → 이번 차 시작
+          final prevRide = rides[leg - 1];
+          final walk = [for (var k = prevRide + 1; k < rideAt; k++) if (segs[k].type == RouteSegmentType.walking) ...geo(segs[k])];
+          final prevGeo = geo(segs[prevRide]);
+          final pts = walk.length >= 2 ? walk : [if (prevGeo.isNotEmpty) prevGeo.last, if (boardPt != null) boardPt];
+          return (pts, _fraction(now, step.start, plan.reachOf(step.leg)));
+        }
         final back = [for (final p in chosen?.candidate.pathBack ?? const <GeoPoint>[]) LatLng(p.lat, p.lng)];
-        final boardPt = rideAt < 0 || segs[rideAt].geometry.isEmpty ? null : geo(segs[rideAt]).first;
         final pts = plan.hasStop
             ? (back.length >= 2 ? back : [if (place != null) place, if (boardPt != null) boardPt])
             : (segs.isNotEmpty && segs.first.type == RouteSegmentType.walking ? geo(segs.first) : <LatLng>[]);
-        return _along(pts, _fraction(now, step.start, plan.reachStop));
+        return (pts, _fraction(now, step.start, plan.reachStop));
       case TripPhase.waiting:
-        return rideAt < 0 || segs[rideAt].geometry.isEmpty ? null : geo(segs[rideAt]).first;
+        return ([if (boardPt != null) boardPt], 1);
       case TripPhase.riding:
-        final pts = [if (rideAt >= 0) for (final s in segs.skip(rideAt)) ...geo(s)];
-        return _along(pts, _fraction(now, plan.boardAt, plan.arriveAt));
+        // 마지막 차는 내려서 목적지까지 걷는 길까지, 갈아탈 차가 남았으면 이번 차 구간만
+        final last = plan.isLastLeg(step.leg);
+        final pts = [
+          if (rideAt >= 0)
+            for (final s in last ? segs.skip(rideAt) : [segs[rideAt]]) ...geo(s)
+        ];
+        return (pts, _fraction(now, plan.boardOf(step.leg), plan.alightOf(step.leg)));
       case TripPhase.arrived:
-        return widget.destination;
+        return ([if (widget.destination != null) widget.destination!], 1);
     }
+  }
+
+  /// 이동 중 지도 표시 (#51 피드백: 현 상황에 따라 움직이는 화살표와 지나온 길)
+  /// dot: 지금 있을 것 같은 곳, heading: 가는 방향, passed: 지나온 길 (회색으로 덮어요)
+  ({LatLng? dot, double? heading, List<LatLng> passed}) _tripTrack(
+      TripPlan plan, int index, RouteCandidate route, StayEval? chosen) {
+    final now = _tripClock;
+    final gps = _gps;
+    if (gps != null) {
+      final real = _gpsTrack(plan, index, route, chosen, now, gps);
+      if (real != null) return real;
+    }
+    final passed = <LatLng>[];
+    for (var i = 0; i < index; i++) {
+      passed.addAll(_stepTrack(plan, i, route, chosen, now).$1);
+    }
+    final (pts, f) = _stepTrack(plan, index, route, chosen, _stepClock(plan, index, now));
+    final upToNow = _prefix(pts, f);
+    passed.addAll(upToNow);
+    final dot = passed.isEmpty ? null : passed.last;
+    // 방향: 지나온 길의 마지막 구간, 아직 출발 전이면 앞으로 갈 첫 구간
+    double? heading;
+    for (var i = passed.length - 1; i > 0 && heading == null; i--) {
+      heading = _heading(passed[i - 1], passed[i]);
+    }
+    if (heading == null && dot != null) {
+      for (final p in pts) {
+        heading = _heading(dot, p);
+        if (heading != null) break;
+      }
+    }
+    return (dot: dot, heading: heading, passed: passed);
+  }
+
+  /// 지금 단계의 진행을 잴 시계. "탔어요" 같은 버튼을 계획보다 일찍 눌렀으면
+  /// 누른 순간을 그 단계의 시작으로 봐서, 점이 그 구간의 처음부터 움직이기 시작해요 (11/14)
+  DateTime _stepClock(TripPlan plan, int index, DateTime now) {
+    final at = _manualAt;
+    final start = plan.steps[index].start;
+    if (index != _tripManualIndex || at == null || !at.isBefore(start)) return now;
+    return now.add(start.difference(at));
+  }
+
+  /// 실제 모드: 지금 단계의 길 위에서 내 위치와 가장 가까운 곳까지를 지나온 길로 칠해요.
+  /// 버튼으로 정한 단계를 따라요: "탔어요"를 눌렀으면 버스 노선 위에서 찾아요.
+  /// 지금 단계의 길에서 많이 벗어나 있으면(책상에서 시험하거나 위치 오차가 클 때) null 을 돌려줘서
+  /// 계획 시각 기준 추정으로 그려요. 그래야 "탔어요"를 누르면 시연 모드처럼 버스 구간을 따라 움직여요.
+  ({LatLng? dot, double? heading, List<LatLng> passed})? _gpsTrack(
+      TripPlan plan, int index, RouteCandidate route, StayEval? chosen, DateTime now, LatLng gps) {
+    final before = <LatLng>[];
+    for (var i = 0; i < index; i++) {
+      before.addAll(_stepTrack(plan, i, route, chosen, now).$1);
+    }
+    final full = <LatLng>[];
+    for (final p in _stepTrack(plan, index, route, chosen, now).$1) {
+      if (full.isEmpty || full.last != p) full.add(p);
+    }
+    if (full.isEmpty) return null;
+    if (full.length < 2) {
+      // 가게에 있거나 정류장에서 기다리는 중: 가까이 있으면 실제 위치, 멀면 그 자리(추정)
+      if (_meters(gps, full.first) > _gpsOnPathMeters) return null;
+      return (dot: gps, heading: _gpsHeading, passed: [...before, full.first]);
+    }
+    // 경로의 각 구간에 내 위치를 수직으로 내려 가장 가까운 점을 찾아요
+    final cos = math.cos(gps.latitude * math.pi / 180);
+    var best = double.infinity, bestSeg = 0;
+    LatLng bestPt = full.first;
+    for (var i = 0; i + 1 < full.length; i++) {
+      final a = full[i], b = full[i + 1];
+      final ax = a.longitude * cos, ay = a.latitude, bx = b.longitude * cos, by = b.latitude;
+      final px = gps.longitude * cos, py = gps.latitude;
+      final len = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+      final t = len == 0 ? 0.0 : (((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / len).clamp(0.0, 1.0);
+      final qx = ax + (bx - ax) * t, qy = ay + (by - ay) * t;
+      final d = (px - qx) * (px - qx) + (py - qy) * (py - qy);
+      if (d < best) {
+        best = d;
+        bestSeg = i;
+        bestPt = LatLng(qy, qx / cos);
+      }
+    }
+    if (_meters(gps, bestPt) > _gpsOnPathMeters) return null;
+    final passed = [...before, ...full.take(bestSeg + 1), bestPt];
+    final heading = _gpsHeading ?? _heading(full[bestSeg], full[bestSeg + 1]);
+    return (dot: gps, heading: heading, passed: passed);
   }
 
   /// 지도 위에 이동 중 팝업을 얹어요. 이동 중이 아니면 지도만.
@@ -263,20 +711,175 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
         child: TripPanel(
           plan: trip,
           now: _tripClock,
+          stepNow: _stepClock(trip, tripIndex, _tripClock),
           index: tripIndex,
           stripRoute: stripRoute,
-          onAdvance: () => setState(() => _tripManualIndex = tripIndex + 1),
+          onAdvance: () => setState(() {
+                _tripManualIndex = tripIndex + 1;
+                _manualAt = _tripClock;
+              }),
+          onEnd: _endTrip,
           onSkip: widget.isDemo ? (m) => setState(() => _tripSkipMinutes += m) : null,
           onAsk: (text) async {
             // 질문하는 순간의 단계와 시각을 함께 보내요. 서버는 이 값으로 남은 시간·다음 차·늦어짐을 답해요
             final now = _tripClock;
-            final phase = trip.steps[_tripIndex(trip)].phase;
-            final res = await _askService.ask(text, trip: trip.toAskJson(phase, now));
-            return res.needsConfirm && res.question != null ? res.question! : res.answer;
+            final step = trip.steps[_tripIndex(trip)];
+            final res = await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
+            await _afterTodoChange(res);
+            return _tripReply(res);
           },
         ),
       ),
     ]);
+  }
+
+  // ---------- 이동 중 AI 답변 버튼 (11/14) ----------
+  // AI 탭을 없애서, AI 탭에 있던 버튼(#48 할 일·일정 초안, #50 경유지 추가)을 이동 중 팝업으로 옮겼어요.
+
+  TripAskReply _tripReply(ServerAskResponse res) {
+    if (res.needsConfirm) return TripAskReply(res.question ?? res.answer);
+    final r = res.result ?? const <String, dynamic>{};
+    final intent = r['intent']?.toString() ??
+        (res.intents.isEmpty ? null : res.intents.first['intent']?.toString());
+    final todo = res.todo;
+    final savedId = widget.isDemo ? null : todo?['id'];
+
+    // 0. 버스 안에서 물은 환승 지점 들르기 (11/14): 아직 내리기 전이라 지금 경로엔 넣지 않고 할 일로 남겨요
+    if (intent == 'stopover_check' && r['feasible'] == true && r['add_now'] == false && savedId != null) {
+      return TripAskReply('${res.answer} 할 일 목록에 남겨 뒀어요. 갈아타는 곳에서 다시 물어보면 경유지로 넣을 수 있어요.');
+    }
+    // 1. 들를 수 있는 들르기: 서버가 할 일로 저장해 뒀어요 → 지금 경로에 경유지로 넣을지 물어봐요
+    if (intent == 'stopover_check' && r['feasible'] == true && savedId != null) {
+      return TripAskReply('${res.answer} 경유지로 추가할까요?', actions: [
+        TripAskAction('경유지로 추가', Icons.add_location_alt_rounded, () => _addStopFromAsk('$savedId')),
+      ]);
+    }
+    // 2. 시간이 부족한 들르기(실제 모드): 서버가 할 일 목록에 남겨 뒀어요
+    if (intent == 'stopover_check' && r['feasible'] == false && savedId != null) {
+      return TripAskReply('${res.answer} 할 일 목록에는 남겨 뒀어요.');
+    }
+    // 3. 저장 전 할 일 초안 ("나중에 ~해야 해", 시연 모드 들르기) → 버튼을 눌러야 넣어요
+    if (todo != null && todo['id'] == null && (r['can_add_todo'] == true || intent == 'add_todo')) {
+      return TripAskReply(res.answer, actions: [
+        TripAskAction('할 일에 넣기', Icons.playlist_add_rounded, () => _addTodoFromAsk(todo)),
+      ]);
+    }
+    // 4. 일정 추가 초안 → 일정 입력 화면
+    final draft = ScheduleDraft.fromServerResult(r) ??
+        (res.schedule != null ? ScheduleDraft.fromScheduleMap(res.schedule!) : null);
+    if (intent == 'add_schedule' && draft != null) {
+      return TripAskReply(res.answer, actions: [
+        TripAskAction('일정 입력 열기', Icons.event_rounded, () => _openScheduleDraft(draft)),
+      ]);
+    }
+    return TripAskReply(res.answer);
+  }
+
+  /// "커피 샀어"·"약은 안 사도 돼"처럼 서버가 할 일을 바꿨으면 할 일 목록을 다시 불러와요 (11/14).
+  /// - 이동 중: 경로는 그대로 둬요. 가게 안에서 "샀어"라고 하는 게 보통이라 경로가 맞기 때문이에요.
+  ///   그 가게에 머무는 단계면 "나왔어요"를 누른 것처럼 다음 단계로 넘겨요.
+  /// - 이동 전: 완료·제외한 할 일은 경유지에서 빼고 경로를 다시 계산해요.
+  Future<void> _afterTodoChange(ServerAskResponse res) async {
+    final r = res.result;
+    if (widget.isDemo || res.needsConfirm || r == null || r['intent'] != 'change_todo' || r['todo_id'] == null) return;
+    await TodoScope.of(context).initialize();
+    if (!mounted) return;
+    final plan = _tripNow;
+    if (_tripStarted && plan != null) {
+      final index = _tripIndex(plan);
+      if (r['action'] == 'done' && plan.steps[index].phase == TripPhase.atPlace) {
+        setState(() {
+          _tripManualIndex = index + 1;
+          _manualAt = _tripClock;
+        });
+      }
+      return;
+    }
+    final id = '${r['todo_id']}';
+    final trip = _trip;
+    if ((r['action'] == 'done' || r['action'] == 'delete') && activeRouteController.appliedFor(trip)) {
+      final ids = (activeRouteController.appliedTaskId ?? '').split('+').where((x) => x.isNotEmpty && x != id).toList();
+      activeRouteController.setApplied(ids.isEmpty ? null : ids.join('+'), null, trip);
+    }
+    activeRouteController.requestPlanRefresh();
+  }
+
+  /// 이동 중 팝업이 시간으로 보여 주는 지금 위치 (GPS 아님). 지도 위 점과 같은 계산이에요.
+  LatLng? _timelinePoint(TripPlan plan, int index) {
+    final route = _tripRoute;
+    if (route == null) return null;
+    final now = _tripClock;
+    final passed = <LatLng>[];
+    for (var i = 0; i < index; i++) {
+      passed.addAll(_stepTrack(plan, i, route, _tripChosen, now).$1);
+    }
+    final (pts, f) = _stepTrack(plan, index, route, _tripChosen, _stepClock(plan, index, now));
+    passed.addAll(_prefix(pts, f));
+    return passed.isEmpty ? null : passed.last;
+  }
+
+  /// 서버가 저장한 할 일을 경유지로 넣고 다시 계산해요.
+  /// - 이동 전: 이미 넣은 곳과 같이 들러요 ('1+3').
+  /// - 이동 중: 팝업의 지금 위치(시간 기준)에서 목적지까지 다시 계산해요. 이미 들른 곳은 빼고,
+  ///   아직 가는 중인 곳(가게로 걷는 단계)은 같이 들러요. 새 경로가 오면 이동을 처음 단계부터 다시 시작해요.
+  Future<String?> _addStopFromAsk(String id) async {
+    await TodoScope.of(context).initialize();
+    if (!mounted) return null;
+    final trip = _trip;
+    final TripPlan? plan = _tripStarted ? _tripNow : null;
+    final int? index = plan == null ? null : _tripIndex(plan);
+    final keepOld = plan == null || plan.steps[index!].phase == TripPhase.toPlace;
+    final current = keepOld && activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
+    final ids = <String>{...?current?.split('+'), id};
+    activeRouteController.setApplied(ids.join('+'), null, trip);
+    if (plan == null || index == null) {
+      activeRouteController.requestPlanRefresh();
+      return '경유지에 넣었어요. 경로를 다시 계산할게요.';
+    }
+    final point = _timelinePoint(plan, index);
+    _restartTripOnPlan = true;
+    activeRouteController.requestPlanRefresh(
+        from: point == null ? null : (lat: point.latitude, lng: point.longitude, name: '이동 중 지금 위치'));
+    return '경유지에 넣었어요. 지금 위치에서 다시 계산할게요.';
+  }
+
+  Future<String?> _addTodoFromAsk(Map<String, dynamic> raw) async {
+    final title = '${raw['text'] ?? ''}'.trim();
+    if (title.isEmpty) return null;
+    final controller = TodoScope.of(context);
+    if (controller.todos.any((t) => t.title.trim() == title && !t.isCompleted)) {
+      return '「$title」은(는) 이미 할 일에 있어요.';
+    }
+    final types = raw['place_types'] is List
+        ? [for (final t in raw['place_types'] as List) '$t']
+        : const <String>[];
+    await controller.addTodo(
+      title: title,
+      minutes: (raw['stay_minutes'] as num?)?.toInt(),
+      requiresTravel: types.isNotEmpty,
+      placeTypes: types,
+      important: raw['importance'] == '필수',
+    );
+    return '「$title」 할 일에 넣었어요.';
+  }
+
+  Future<String?> _openScheduleDraft(ScheduleDraft d) async {
+    final saved = await Navigator.push<Schedule>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScheduleFormScreen(
+          initial: Schedule(
+            id: 0,
+            title: d.title,
+            location: d.location,
+            startTime: d.start,
+            endTime: d.end ?? d.start.add(const Duration(hours: 1)),
+          ),
+        ),
+      ),
+    );
+    if (saved == null) return null;
+    return '「${saved.title}」 일정을 추가했어요.';
   }
 
   /// 이 화면의 이동 (목적지 + 도착 시각)
@@ -291,6 +894,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       _appliedTaskId = null;
       _candidateId = null;
     }
+    _lastSharedKey = _appliedTaskId == null ? null : '$_appliedTaskId|$_candidateId';
   }
 
   @override
@@ -309,6 +913,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       if (!sameTrip) {
         _tripStarted = false;
         _stopTrip();
+      } else if (_restartTripOnPlan && _tripStarted) {
+        // 지금 위치에서 다시 계산한 경로라서, 이동도 새 경로의 처음 단계부터 이어 가요
+        _restartTripOnPlan = false;
+        _startTrip();
       }
     }
   }
@@ -405,9 +1013,15 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     return const [];
   }
 
+  /// 적용한 할 일. 여러 개를 고르면('1+3') 한 번에 들르는 묶음이에요 (11/14).
   StayTask? get _applied {
-    for (final t in _tasks) {
-      if (t.id == _appliedTaskId) return t;
+    final id = _appliedTaskId;
+    if (id == null) return null;
+    for (final r in widget.routes) {
+      final o = _overviewFor(r);
+      if (o == null || o.tasks.isEmpty) continue;
+      final t = o.taskFor(id, needOf: _needOf);
+      if (t != null) return t;
     }
     return null;
   }
@@ -418,9 +1032,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   List<StayEval>? _evals(RouteCandidate route, StayTask task) {
     final o = _overviewFor(route);
     if (o == null || !o.canPlanStay) return null;
-    final match = o.tasks.where((t) => t.id == task.id);
-    if (match.isEmpty) return null;
-    return o.rank(match.first, delayMinutes: 0, need: _needOf(task));
+    final match = o.taskFor(task.id, needOf: _needOf);
+    if (match == null) return null;
+    return o.rank(match, delayMinutes: 0, need: _needOverride[task.id] ?? match.needMinutes);
   }
 
   /// 할 일을 적용했을 때 경로 카드 순서 (11/13)
@@ -551,6 +1165,13 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     return '실시간 · ${live.name.isEmpty ? '' : '${live.name} '}${parts.join(' · ')}$later';
   }
 
+  /// 실시간 도착 정보가 없을 때: 서버 경로의 탑승 대기 시간 (11/14)
+  String? _waitText(RouteCandidate r) {
+    final w = (_planRouteFor(r)?['wait_min'] as num?)?.toInt();
+    if (w == null || w <= 0) return null;
+    return '정류장 대기 약 $w분 · 실시간 도착 정보는 출발 30분 전부터';
+  }
+
   /// 적용한 할 일이 빠듯하거나 시간이 부족할 때: 다음 차를 타면 더 머물 수 있는지 (카카오맵 "여유"처럼)
   String? _nextVehicleHint(RouteCandidate r, List<StayEval>? stay) {
     if (stay == null || stay.isEmpty) return null;
@@ -570,19 +1191,38 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     return '다음 차($next분 뒤)를 타면 ${e.candidate.name}에서 $dwell분 · ${KstTime.hm(arrive)} 도착';
   }
 
+  /// 이 화면이 마지막으로 홈과 맞춘 값. 다른 화면(AI 질문)이 경유지를 바꾸면 그 값을 따라가요 (11/14).
+  String? _lastSharedKey;
+
   /// 적용한 할 일·경유지를 홈과 함께 써요. 빌드 중에 알리면 안 돼서 화면을 그린 뒤에 알려요.
   void _shareApplied() {
     if (widget.isDemo) return;
     final trip = _trip;
-    final shared = _appliedTaskId == null
-        ? !activeRouteController.appliedFor(trip)
-        : activeRouteController.appliedFor(trip) &&
-            activeRouteController.appliedTaskId == _appliedTaskId &&
-            activeRouteController.appliedCandidateId == _candidateId;
-    if (shared) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) activeRouteController.setApplied(_appliedTaskId, _candidateId, trip);
-    });
+    final ctrlKey = activeRouteController.appliedFor(trip)
+        ? '${activeRouteController.appliedTaskId}|${activeRouteController.appliedCandidateId}'
+        : null;
+    final localKey = _appliedTaskId == null ? null : '$_appliedTaskId|$_candidateId';
+    if (ctrlKey == localKey) {
+      _lastSharedKey = localKey;
+      return;
+    }
+    if (localKey != _lastSharedKey) {
+      // 이 화면에서 바꿨어요 → 홈에 알려요
+      _lastSharedKey = localKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) activeRouteController.setApplied(_appliedTaskId, _candidateId, trip);
+      });
+    } else {
+      // 다른 화면에서 바꿨어요 → 이 화면이 따라가요
+      _lastSharedKey = ctrlKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _appliedTaskId = activeRouteController.appliedFor(trip) ? activeRouteController.appliedTaskId : null;
+          _candidateId = activeRouteController.appliedFor(trip) ? activeRouteController.appliedCandidateId : null;
+        });
+      });
+    }
   }
 
   // ---------- 할 일 적용 창 ----------
@@ -608,7 +1248,27 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
         hidden++;
       }
     }
-    String? chosen = _appliedTaskId;
+    // 여러 곳을 고를 수 있어요 (11/14). 고른 순서가 아니라 걷는 시간이 짧은 순서로 묶어서 계산해요.
+    final picked = <String>[
+      for (final id in (_appliedTaskId ?? '').split('+'))
+        if (feasible.any((f) => f.$1.id == id)) id,
+    ];
+    String? combinedLine() {
+      if (picked.length < 2) return null;
+      StayEval? best;
+      for (final r in widget.routes) {
+        final o = _overviewFor(r);
+        final t = o?.taskFor(picked.join('+'), needOf: _needOf);
+        if (o == null || t == null || !o.canPlanStay) continue;
+        final e = o.rank(t, delayMinutes: 0, need: t.needMinutes);
+        if (e.isNotEmpty && (best == null || e.first.maxDwell > best.maxDwell)) best = e.first;
+      }
+      if (best == null) return '이 조합은 계산할 수 없어요';
+      final route = best.candidate.via.map((c) => c.name).join(' → ');
+      return best.status == StayStatus.bad
+          ? '${picked.length}곳 모두는 ${best.shortBy}분 부족해요 · $route'
+          : '${picked.length}곳 모두 들를 수 있어요 · $route (${best.stayLabel})';
+    }
     final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -649,19 +1309,22 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 5),
                     child: Material(
-                      color: chosen == t.id ? AppTheme.primarySoft : Colors.white,
+                      color: picked.contains(t.id) ? AppTheme.primarySoft : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(14),
-                        onTap: () => setSheet(() => chosen = t.id),
+                        onTap: () => setSheet(() {
+                          if (!picked.remove(t.id)) picked.add(t.id);
+                        }),
                         child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: chosen == t.id ? AppTheme.primary : AppTheme.border, width: 2),
+                            border: Border.all(
+                                color: picked.contains(t.id) ? AppTheme.primary : AppTheme.border, width: 2),
                           ),
                           child: Row(children: [
-                            Icon(chosen == t.id ? Icons.radio_button_checked : Icons.radio_button_off,
+                            Icon(picked.contains(t.id) ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
                                 color: AppTheme.primary),
                             const SizedBox(width: 10),
                             Expanded(
@@ -698,14 +1361,22 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                       style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ),
               const SizedBox(height: 6),
-              const Text('한 번에 한 곳만 적용해요. 여러 곳을 들르려면 경로를 다시 확인해야 해서, 먼저 한 곳으로 계산해요.',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.4)),
+              if (combinedLine() case final line?)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: AppTheme.background, borderRadius: BorderRadius.circular(10)),
+                  child: Text(line, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                )
+              else
+                const Text('여러 곳을 고르면 걷는 시간이 가장 짧은 순서로 묶어서 한 번에 계산해요.',
+                    style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.4)),
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: chosen == null ? null : () => Navigator.pop(sheet, chosen),
-                  child: const Text('선택한 할 일로 경로 다시 찾기'),
+                  onPressed: picked.isEmpty ? null : () => Navigator.pop(sheet, picked.join('+')),
+                  child: Text(picked.length > 1 ? '${picked.length}곳 들르는 경로 찾기' : '선택한 할 일로 경로 다시 찾기'),
                 ),
               ),
               const SizedBox(height: 6),
@@ -720,6 +1391,24 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     );
     if (result == null || !mounted) return;
     // 카드 순서의 1번 경로(들를 수 있고 많이 느리지 않은 경로)로 바꿔 줘요.
+    if (result.contains('+')) {
+      final combined = _overviewFor(_selected)?.taskFor(result, needOf: _needOf) ??
+          (() {
+            for (final r in widget.routes) {
+              final t = _overviewFor(r)?.taskFor(result, needOf: _needOf);
+              if (t != null) return t;
+            }
+            return null;
+          })();
+      if (combined == null) return;
+      final best = widget.routes.isEmpty ? null : _orderedRoutes(combined).first;
+      setState(() {
+        _appliedTaskId = result;
+        _candidateId = null;
+      });
+      if (best != null && best.id != widget.selectedId) widget.onSelect(best.id);
+      return;
+    }
     final task = tasks.firstWhere((t) => t.id == result);
     // 병원인데 진료과가 없으면 먼저 물어봐요 (11/13). 진료과를 붙여 저장하면 경로를 다시 불러오고,
     // 같은 이동이라 적용한 할 일은 그대로 남아요.
@@ -756,9 +1445,24 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final ordered = _orderedRoutes(applied);
     _shareApplied();
     final trip = _tripStarted ? _tripPlan(route, applied, chosenEval) : null;
+    _tripRoute = route;
+    _tripChosen = chosenEval;
+    _tripNow = trip;
     final tripIndex = trip == null ? 0 : _tripIndex(trip);
+    _maybeAutoEnd(trip, tripIndex);
+    final track = trip == null ? null : _tripTrack(trip, tripIndex, route, chosenEval);
     // 지도에 들를 수 있는 곳을 모두 보여 주고, 누르면 그곳으로 경로를 바꿔요 (11/13)
     final stopChoices = <StopChoice>[
+      // 여러 곳을 들르면 두 번째 곳부터도 지도에 표시 (11/14)
+      if (chosenEval != null && chosenEval.candidate.isMulti)
+        for (var i = 1; i < chosenEval.candidate.via.length; i++)
+          if (chosenEval.candidate.via[i].point != null)
+            StopChoice(
+              id: chosenEval.candidate.id,
+              point: LatLng(chosenEval.candidate.via[i].point!.lat, chosenEval.candidate.via[i].point!.lng),
+              label: '${i + 1}. ${chosenEval.candidate.via[i].name}',
+              color: stayColor(chosenEval.status),
+            ),
       for (final e in evals ?? const <StayEval>[])
         if (e.candidate.point != null && e.candidate.id != chosenEval?.candidate.id)
           StopChoice(
@@ -843,8 +1547,12 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                 for (final p in [...chosenEval.candidate.pathTo, ...chosenEval.candidate.pathBack])
                   LatLng(p.lat, p.lng),
               ],
-        liveDot: trip == null ? null : _tripDot(trip, tripIndex, route, chosenEval),
-        height: trip == null ? 260 : 560,
+        liveDot: track?.dot,
+        liveHeading: track?.heading,
+        passedPath: track?.passed ?? const [],
+        // 이동 중: 내 위치(없으면 지금 있을 것 같은 곳)를 따라가며 크게 (11/14)
+        followPoint: trip == null ? null : (track?.dot ?? widget.origin),
+        height: trip == null ? 340 : 560,
       ),
       ),
       if (stopChoices.isNotEmpty)
@@ -887,7 +1595,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           badge: _badgeFor(i, ordered[i], ordered),
           stripRoute: _stripRoute(ordered[i], applied, chosen: ordered[i].id == route.id ? chosenEval : null),
           fare: _fareOf(ordered[i]),
-          live: _liveText(ordered[i]),
+          live: _liveText(ordered[i]) ?? _waitText(ordered[i]),
           liveHint: applied == null ? null : _nextVehicleHint(ordered[i], _evals(ordered[i], applied)),
         ),
 
@@ -983,9 +1691,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                 content: Text('경유 시간이 부족해요. 머물 시간을 줄이거나 다른 경로를 골라 주세요.')));
             return;
           }
+          if (_tripStarted) return _endTrip();
           setState(() {
-            _tripStarted = !_tripStarted;
-            _tripStarted ? _startTrip() : _stopTrip();
+            _tripStarted = true;
+            _startTrip();
           });
         },
         icon: Icon(_tripStarted ? Icons.stop_circle_outlined : Icons.navigation_rounded),
@@ -999,11 +1708,11 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           child: Row(children: [
             const Icon(Icons.circle, size: 10, color: AppTheme.ok),
             const SizedBox(width: 8),
+            // AI 탭으로 넘어가지 않고 지도 위 팝업에서 바로 물어요 (#51 피드백 4)
             const Expanded(
-              child: Text('이동 중 · 경유지 추가나 늦어질 때는 AI에게 물어보세요.',
+              child: Text('이동 중 · 늦어지거나 궁금하면 지도 위 칸에 물어보세요 (말로도 돼요).',
                   style: TextStyle(color: AppTheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
             ),
-            TextButton(onPressed: () => widget.onOpenAssistant?.call(null), child: const Text('AI 도우미')),
           ]),
         ),
       ],

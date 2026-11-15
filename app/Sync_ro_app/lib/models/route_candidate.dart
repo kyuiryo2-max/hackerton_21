@@ -35,7 +35,21 @@ class RouteSegment {
     this.startName,
     this.endName,
     this.lineName,
+    this.stopCount,
   });
+
+  /// 탄 뒤 지나는 정류장·역 수 (서버 stop_count, 11/14)
+  final int? stopCount;
+
+  /// "1호선·1호선·1호선"처럼 같은 노선이 반복되면 한 번만, 다른 노선은 "262 · 273"
+  static String uniqueLines(String raw) {
+    final seen = <String>[];
+    for (final part in raw.split(RegExp(r'\s*[·,/]\s*'))) {
+      final p = part.trim();
+      if (p.isNotEmpty && !seen.contains(p)) seen.add(p);
+    }
+    return seen.join(' · ');
+  }
 }
 
 // 전체 경로 후보
