@@ -3,7 +3,7 @@
 서버가 쓰는 함수(server/app/services/llm.py)를 그대로 불러서, 키·모델이 동작하는지 봐요.
 할 일 문장 1개, 질문 문장 1개 = 호출 2번. 결과는 화면에 나오고 ai/results/llm_first_call.json 에도 남아요.
 
-실행 (루트 .env 에 OPENAI_API_KEY, LLM_MODEL 필요. OPENAI_BASE_URL 은 비우면 Meta Model API):
+실행 (루트 .env 에 OPENAI_API_KEY, LLM_MODEL 필요. OPENAI_BASE_URL 은 비우면 OpenRouter):
   cd server
   uv run python ../scripts/check_llm.py
 """

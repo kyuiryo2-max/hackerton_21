@@ -1,15 +1,12 @@
 {
-  "at": "2026-11-14T14:36:35+09:00",
-  "base_url": "https://api.meta.ai/v1",
-  "model": "muse-spark-1.3-contributor",
-  "prompt_version": "v2",
-  "timeout_seconds": 30.0,
-  "reasoning_effort": "low",
+  "at": "2026-11-08T10:03:24+09:00",
+  "base_url": "https://openrouter.ai/api/v1",
+  "model": "google/gemma-4-31b-it",
   "calls": [
     {
       "label": "할 일 → 장소 종류",
       "input": "엄마 생신 선물 사야 해",
-      "seconds": 4.24,
+      "seconds": 5.48,
       "output": {
         "type": "todo",
         "text": "엄마 생신 선물",
@@ -25,25 +22,21 @@
     {
       "label": "질문 → 질문 종류",
       "input": "늦을 것 같은데 약국은 들를 수 있어?",
-      "seconds": 5.69,
+      "seconds": 1.14,
       "output": {
         "type": "question",
         "intents": [
           {
             "intent": "running_late",
-            "place_types": [],
             "delay_minutes": null
           },
           {
             "intent": "stopover_check",
             "place_types": [
               "약국"
-            ],
-            "delay_minutes": null
+            ]
           }
-        ],
-        "needs_confirm": false,
-        "question": null
+        ]
       },
       "error": null
     }
