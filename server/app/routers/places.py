@@ -2,12 +2,20 @@
 
 앱의 목적지 검색 화면(place_search_service.dart)이 이 주소를 불러요.
 응답은 목록 하나이고, 각 장소는 name, address, lat, lng 를 가져요.
+
+POST /api/places/recommend 는 로컬 규칙이 비었을 때 AI가 고른 매장 후보를
+카카오로 확인해 실제 주변 지점 3곳을 돌려주는 보조 API예요.
 """
+import logging
+
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app import config
-from app.services import kakao
+from app.services import kakao, place_recommendation
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["장소 검색"])
 
@@ -15,6 +23,14 @@ router = APIRouter(prefix="/api", tags=["장소 검색"])
 SEOUL_CITY_HALL = (126.9780, 37.5665)  # (경도, 위도)
 MAX_RADIUS_M = 20000
 RESULT_SIZE = 10
+RECOMMEND_LIMIT = 3
+
+
+class PlaceRecommendRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200)
+    lat: float | None = Field(default=None, ge=33, le=39)
+    lng: float | None = Field(default=None, ge=124, le=132)
+    limit: int = Field(default=RECOMMEND_LIMIT, ge=1, le=5)
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
@@ -43,3 +59,44 @@ def search_places(
     except kakao.KakaoError as e:
         return _error(502, "upstream_error", str(e))
     return [{k: p[k] for k in ("name", "address", "lat", "lng")} for p in found]
+
+
+@router.post("/places/recommend")
+def recommend_places_ai(body: PlaceRecommendRequest):
+    """AI가 고른 매장 후보를 실제 카카오 검색 결과로 확인해 돌려줘요.
+
+    위치를 안 주면 기존 장소 검색처럼 서울시청을 중심으로 찾고,
+    used_default_location=true 로 알려 줘요. 위치는 저장하지 않아요.
+    """
+    text = body.text.strip()
+    if not text:
+        return _error(422, "invalid_request", "text: 살 물건이나 할 일을 입력해 주세요")
+    if (body.lat is None) != (body.lng is None):
+        return _error(422, "invalid_request", "lat과 lng를 함께 주세요")
+    if not config.KAKAO_REST_API_KEY:
+        return _error(503, "not_configured", "서버에 장소 검색 API 키가 설정되지 않았어요")
+    if not (config.OPENAI_API_KEY and config.LLM_MODEL):
+        return _error(503, "ai_not_configured", "서버에 AI 추천 설정이 없어요")
+
+    used_default = body.lat is None
+    center = SEOUL_CITY_HALL if used_default else (body.lng, body.lat)
+    try:
+        places = place_recommendation.recommend(text, center, limit=body.limit)
+    except ValueError:
+        # AI가 JSON 모양을 어겼거나 매장 목록을 배열로 주지 않았어요.
+        log.info("AI 장소 추천 형식이 올바르지 않아요")
+        return _error(502, "ai_error", "AI 추천 결과를 읽지 못했어요")
+    except kakao.KakaoError as e:
+        return _error(502, "upstream_error", str(e))
+    except Exception:
+        # AI 연결·시간 초과처럼 형식 오류가 아닌 실패도 502로 안내해요.
+        log.warning("AI 장소 추천 호출 실패")
+        return _error(502, "ai_error", "AI 추천을 불러오지 못했어요")
+
+    return {
+        "places": places,
+        "source": "ai",
+        "engine": "ai+kakao",
+        "used_default_location": used_default,
+        "message": None if places else "현재 위치 주변에서 판매처를 찾지 못했어요.",
+    }

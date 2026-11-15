@@ -5,17 +5,33 @@ import 'config/runtime_mode.dart';
 import 'providers/todo_controller.dart';
 import 'providers/schedule_controller.dart';
 import 'screens/main_screen.dart';
+import 'services/home_widget_bridge.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  HomeWidgetBridge.init();
+  // 홈 화면 위젯을 눌러 앱이 열렸다면 메모 탭으로 바로 이동해요.
+  final launchTab = await HomeWidgetBridge.consumeLaunchTab();
+  // 하단 입력줄을 눌러 열었다면 빠른 메모 화면도 바로 띄워요.
+  final quickCapture = await HomeWidgetBridge.consumeQuickCapture();
   await RuntimeMode.instance.initialize(
-    defaultDemo: const bool.fromEnvironment('SYNC_RO_DEMO_MODE', defaultValue: true),
+    defaultDemo: const bool.fromEnvironment(
+      'SYNC_RO_DEMO_MODE',
+      defaultValue: true,
+    ),
   );
-  runApp(const SyncRoApp());
+  runApp(SyncRoApp(initialTab: launchTab ?? 0, openQuickCapture: quickCapture));
 }
 
 class SyncRoApp extends StatefulWidget {
-  const SyncRoApp({super.key});
+  const SyncRoApp({
+    super.key,
+    this.initialTab = 0,
+    this.openQuickCapture = false,
+  });
+
+  final int initialTab;
+  final bool openQuickCapture;
 
   @override
   State<SyncRoApp> createState() => _SyncRoAppState();
@@ -81,7 +97,11 @@ class _SyncRoAppState extends State<SyncRoApp> {
           title: 'Sync_ro',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
-          home: MainScreen(key: ValueKey(RuntimeMode.instance.storageNamespace)),
+          home: MainScreen(
+            key: ValueKey(RuntimeMode.instance.storageNamespace),
+            initialIndex: widget.initialTab,
+            openQuickCapture: widget.openQuickCapture,
+          ),
         ),
       ),
     );

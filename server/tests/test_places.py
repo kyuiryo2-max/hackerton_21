@@ -9,8 +9,9 @@ from app.services import llm, places
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_장소_종류는_10개에서_15개():
-    assert 10 <= len(places.place_searches()) <= 15
+def test_장소_종류는_10개에서_20개():
+    # 문구점을 추가해 16개가 됐어요. 너무 적거나 과하게 늘어나지 않는지만 봐요.
+    assert 10 <= len(places.place_searches()) <= 20
 
 
 def test_이름이_겹치지_않음():

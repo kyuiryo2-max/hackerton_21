@@ -22,9 +22,16 @@ import '../widgets/specialty_chips.dart';
 ///
 /// 일정 탭에는 장우 님이 만든 주간 달력(주 이동 + 요일 띠)과 시간표(매주 반복)를 그대로 두었어요.
 class PlannerScreen extends StatefulWidget {
-  const PlannerScreen({super.key, this.onOpenScheduleRoutes});
+  const PlannerScreen({
+    super.key,
+    this.onOpenScheduleRoutes,
+    this.requestedTab,
+  });
 
   final ValueChanged<Schedule>? onOpenScheduleRoutes;
+
+  /// 메모에서 일정/할일을 등록한 뒤 열 서브 탭 (0 = 일정, 1 = 할 일).
+  final ValueNotifier<int?>? requestedTab;
 
   @override
   State<PlannerScreen> createState() => _PlannerScreenState();
@@ -32,8 +39,22 @@ class PlannerScreen extends StatefulWidget {
 
 /// 서버 data/demo/place_types.csv 와 같은 목록이에요.
 const kPlaceTypes = [
-  '편의점', '다이소', '약국', '카페', '빵집', '케이크집', '꽃집', '올리브영',
-  '마트', '프린트', '우체국', '은행·ATM', '안경점', '음식점', '병원',
+  '편의점',
+  '다이소',
+  '약국',
+  '카페',
+  '빵집',
+  '케이크집',
+  '꽃집',
+  '올리브영',
+  '마트',
+  '프린트',
+  '우체국',
+  '은행·ATM',
+  '안경점',
+  '음식점',
+  '병원',
+  '문구점',
 ];
 
 const _weekdayNames = ['월', '화', '수', '목', '금', '토', '일'];
@@ -49,7 +70,8 @@ const _palette = <(Color, Color)>[
 ];
 
 DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-DateTime _mondayOf(DateTime d) => _dateOnly(d).subtract(Duration(days: d.weekday - 1));
+DateTime _mondayOf(DateTime d) =>
+    _dateOnly(d).subtract(Duration(days: d.weekday - 1));
 String _two(int v) => v.toString().padLeft(2, '0');
 String _hmMinutes(int m) => '${_two(m ~/ 60)}:${_two(m % 60)}';
 String _hm(DateTime d) => '${_two(d.hour)}:${_two(d.minute)}';
@@ -62,16 +84,19 @@ String _dayLabel(DateTime d, DateTime now) {
   return '${d.month}월 ${d.day}일 (${_weekdayNames[d.weekday - 1]})';
 }
 
-class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveClientMixin {
+class _PlannerScreenState extends State<PlannerScreen>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
   int _tab = 0; // 0 일정, 1 할 일
   final store = PlannerStore.instance;
   late DateTime _weekStart = _mondayOf(DateTime.now());
+
   /// 이번 주 일정을 한 날로 좁혀 볼 때 (null = 이번 주 전체)
   DateTime? _filterDay;
   bool _showDone = false;
+
   /// 새 할 일을 넣을 날 (null = 언제든)
   DateTime? _newTodoDay;
   bool _adding = false;
@@ -82,11 +107,25 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   @override
   void initState() {
     super.initState();
+    final requested = widget.requestedTab?.value;
+    if (requested != null) _tab = requested.clamp(0, 1).toInt();
+    widget.requestedTab?.addListener(_onRequestedTab);
     store.addListener(_changed);
     RuntimeMode.instance.addListener(_modeChanged);
     store.ensureLoaded();
     _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
+    });
+  }
+
+  void _onRequestedTab() {
+    final tab = widget.requestedTab?.value;
+    if (!mounted || tab == null) return;
+    setState(() => _tab = tab.clamp(0, 1).toInt());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.requestedTab?.value == tab) {
+        widget.requestedTab?.value = null;
+      }
     });
   }
 
@@ -97,37 +136,56 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   void _modeChanged() => store.ensureLoaded();
 
   void _moveWeek(int delta) => setState(() {
-        _weekStart = _weekStart.add(Duration(days: 7 * delta));
-        _filterDay = null;
-      });
+    _weekStart = _weekStart.add(Duration(days: 7 * delta));
+    _filterDay = null;
+  });
 
   void _goToday() => setState(() {
-        _weekStart = _mondayOf(DateTime.now());
-        _filterDay = null;
-      });
+    _weekStart = _mondayOf(DateTime.now());
+    _filterDay = null;
+  });
 
   // ---------- 반복 일정 (시간표) ----------
 
   /// 시간표 빈 칸: 그 요일·시각으로 "매주 반복" 일정 추가
   Future<void> _addRoutineAt(int weekday, int minutes) async {
-    final probe = Routine(id: 0, title: '', weekdays: [weekday], startMinutes: minutes, endMinutes: minutes + 60);
+    final probe = Routine(
+      id: 0,
+      title: '',
+      weekdays: [weekday],
+      startMinutes: minutes,
+      endMinutes: minutes + 60,
+    );
     final start = probe.nextStart(DateTime.now());
     final saved = await Navigator.push<Schedule>(
       context,
-      MaterialPageRoute(builder: (_) => ScheduleFormScreen(
-        startRepeating: true,
-        initial: Schedule(id: 0, title: '', location: '', startTime: start, endTime: start.add(const Duration(hours: 1))),
-      )),
+      MaterialPageRoute(
+        builder: (_) => ScheduleFormScreen(
+          startRepeating: true,
+          initial: Schedule(
+            id: 0,
+            title: '',
+            location: '',
+            startTime: start,
+            endTime: start.add(const Duration(hours: 1)),
+          ),
+        ),
+      ),
     );
     _afterSave(saved);
   }
 
   Future<void> _editRoutine(Routine r) async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => ScheduleFormScreen(routine: r)));
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ScheduleFormScreen(routine: r)),
+    );
   }
 
-  String _routineDays(Routine r) =>
-      [for (var d = 1; d <= 7; d++) if (r.weekdays.contains(d)) _weekdayNames[d - 1]].join('·');
+  String _routineDays(Routine r) => [
+    for (var d = 1; d <= 7; d++)
+      if (r.weekdays.contains(d)) _weekdayNames[d - 1],
+  ].join('·');
 
   /// 반복 일정의 한 회차(기본: 다음 회차)로 경로 보기. 그 회차 일정이 서버에 없으면 지금 만들어요.
   Future<void> _routeRoutine(Routine r, {DateTime? at}) async {
@@ -139,7 +197,11 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
     final next = r.occurrence(at ?? r.nextStart(DateTime.now()));
     Schedule? found;
     for (final s in controller.schedules) {
-      if (s.title == next.title && s.startTime == next.startTime && s.location == next.location) found = s;
+      if (s.title == next.title &&
+          s.startTime == next.startTime &&
+          s.location == next.location) {
+        found = s;
+      }
     }
     try {
       found ??= await controller.addSchedule(
@@ -172,27 +234,44 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       context: context,
       showDragHandle: true,
       builder: (sheet) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            title: Text(r.title, style: const TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: Text('매주 ${_routineDays(r)} ${_hmMinutes(r.startMinutes)}까지'
-                '${r.location.isEmpty ? '' : ' · ${r.location}'}'),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.route_rounded, color: AppTheme.primary),
-            title: Text(r.canRoute ? '다음 회차 경로 보기' : '장소 정하고 경로 보기'),
-            subtitle: Text('${_dayLabel(next, DateTime.now())} ${_hm(next)}까지 도착'),
-            onTap: () => Navigator.pop(sheet, 'route'),
-          ),
-          ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('수정'), onTap: () => Navigator.pop(sheet, 'edit')),
-          ListTile(
-            leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
-            title: const Text('반복 그만하기 (시간표에서 삭제)', style: TextStyle(color: AppTheme.danger)),
-            onTap: () => Navigator.pop(sheet, 'delete'),
-          ),
-          const SizedBox(height: 8),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                r.title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                '매주 ${_routineDays(r)} ${_hmMinutes(r.startMinutes)}까지'
+                '${r.location.isEmpty ? '' : ' · ${r.location}'}',
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.route_rounded, color: AppTheme.primary),
+              title: Text(r.canRoute ? '다음 회차 경로 보기' : '장소 정하고 경로 보기'),
+              subtitle: Text(
+                '${_dayLabel(next, DateTime.now())} ${_hm(next)}까지 도착',
+              ),
+              onTap: () => Navigator.pop(sheet, 'route'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('수정'),
+              onTap: () => Navigator.pop(sheet, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+              title: const Text(
+                '반복 그만하기 (시간표에서 삭제)',
+                style: TextStyle(color: AppTheme.danger),
+              ),
+              onTap: () => Navigator.pop(sheet, 'delete'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
     if (!mounted || action == null) return;
@@ -208,6 +287,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
   @override
   void dispose() {
+    widget.requestedTab?.removeListener(_onRequestedTab);
     store.removeListener(_changed);
     RuntimeMode.instance.removeListener(_modeChanged);
     _ticker?.cancel();
@@ -216,7 +296,9 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   }
 
   void _snack(String text) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
   }
 
   // ---------- 일정 ----------
@@ -237,14 +319,21 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       _filterDay = null;
     });
     final repeating = saved.id == 0;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(repeating
-          ? '「${saved.title}」 매주 반복 일정을 저장했어요. 목록과 시간표에서 볼 수 있어요.'
-          : '「${saved.title}」 일정을 저장했어요.'),
-      action: repeating
-          ? null
-          : SnackBarAction(label: '경로 보기', onPressed: () => widget.onOpenScheduleRoutes?.call(saved)),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          repeating
+              ? '「${saved.title}」 매주 반복 일정을 저장했어요. 목록과 시간표에서 볼 수 있어요.'
+              : '「${saved.title}」 일정을 저장했어요.',
+        ),
+        action: repeating
+            ? null
+            : SnackBarAction(
+                label: '경로 보기',
+                onPressed: () => widget.onOpenScheduleRoutes?.call(saved),
+              ),
+      ),
+    );
   }
 
   /// 시간표의 한 번만 있는 일정 블록을 눌렀을 때
@@ -254,26 +343,41 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       context: context,
       showDragHandle: true,
       builder: (sheet) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            title: Text(s.title, style: const TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: Text('${_dayLabel(s.startTime, DateTime.now())} ${_hm(s.startTime)}까지 도착 · ${s.location}'),
-          ),
-          const Divider(height: 1),
-          if (upcoming)
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             ListTile(
-              leading: const Icon(Icons.route_rounded, color: AppTheme.primary),
-              title: const Text('경로 보기'),
-              onTap: () => Navigator.pop(sheet, 'route'),
+              title: Text(
+                s.title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                '${_dayLabel(s.startTime, DateTime.now())} ${_hm(s.startTime)}까지 도착 · ${s.location}',
+              ),
             ),
-          ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('수정'), onTap: () => Navigator.pop(sheet, 'edit')),
-          ListTile(
-            leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
-            title: const Text('삭제', style: TextStyle(color: AppTheme.danger)),
-            onTap: () => Navigator.pop(sheet, 'delete'),
-          ),
-          const SizedBox(height: 8),
-        ]),
+            const Divider(height: 1),
+            if (upcoming)
+              ListTile(
+                leading: const Icon(
+                  Icons.route_rounded,
+                  color: AppTheme.primary,
+                ),
+                title: const Text('경로 보기'),
+                onTap: () => Navigator.pop(sheet, 'route'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('수정'),
+              onTap: () => Navigator.pop(sheet, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+              title: const Text('삭제', style: TextStyle(color: AppTheme.danger)),
+              onTap: () => Navigator.pop(sheet, 'delete'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
     if (!mounted || action == null) return;
@@ -287,7 +391,9 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   /// 서버 일정이 반복 일정의 한 회차인지 (같은 이름·장소·요일·시각)
   Routine? _routineOf(Schedule s) {
     for (final r in store.routines) {
-      if (r.title == s.title && r.location == s.location && r.weekdays.contains(s.startTime.weekday) &&
+      if (r.title == s.title &&
+          r.location == s.location &&
+          r.weekdays.contains(s.startTime.weekday) &&
           r.startMinutes == s.startTime.hour * 60 + s.startTime.minute) {
         return r;
       }
@@ -299,10 +405,21 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
     final controller = ScheduleScope.of(context);
     switch (action) {
       case 'detail':
-        await Navigator.push(context, MaterialPageRoute(
-          builder: (_) => DetailScreen(title: s.title, schedule: s, onOpenScheduleRoutes: widget.onOpenScheduleRoutes)));
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DetailScreen(
+              title: s.title,
+              schedule: s,
+              onOpenScheduleRoutes: widget.onOpenScheduleRoutes,
+            ),
+          ),
+        );
       case 'edit':
-        await Navigator.push<Schedule>(context, MaterialPageRoute(builder: (_) => ScheduleFormScreen(existing: s)));
+        await Navigator.push<Schedule>(
+          context,
+          MaterialPageRoute(builder: (_) => ScheduleFormScreen(existing: s)),
+        );
       case 'delete':
         try {
           await controller.deleteSchedule(s.id);
@@ -313,8 +430,9 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   }
 
   Schedule? _nextSchedule(List<Schedule> all) {
-    final upcoming = all.where((s) => !s.isCompleted && s.startTime.isAfter(_now)).toList()
-      ..sort((a, b) => a.startTime.compareTo(b.startTime));
+    final upcoming =
+        all.where((s) => !s.isCompleted && s.startTime.isAfter(_now)).toList()
+          ..sort((a, b) => a.startTime.compareTo(b.startTime));
     return upcoming.isEmpty ? null : upcoming.first;
   }
 
@@ -384,34 +502,54 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
       builder: (sheet) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('언제 할까요?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 4),
-            const Text('날을 정하면 일정 탭 달력의 그날에 같이 보여요.',
-                style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-            const SizedBox(height: 12),
-            Wrap(spacing: 6, runSpacing: 6, children: [
-              ChoiceChip(
-                label: const Text('언제든'),
-                selected: current == null,
-                onSelected: (_) => Navigator.pop(sheet, 'none'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '언제 할까요?',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
               ),
-              for (var i = 0; i < 7; i++)
-                Builder(builder: (_) {
-                  final d = today.add(Duration(days: i));
-                  return ChoiceChip(
-                    label: Text(i < 2 ? _dayLabel(d, today) : '${d.month}/${d.day} (${_weekdayNames[d.weekday - 1]})'),
-                    selected: current == d,
-                    onSelected: (_) => Navigator.pop(sheet, PlannerStore.dayKey(d)),
-                  );
-                }),
-              ActionChip(
-                avatar: const Icon(Icons.calendar_month, size: 16),
-                label: const Text('다른 날짜'),
-                onPressed: () => Navigator.pop(sheet, 'pick'),
+              const SizedBox(height: 4),
+              const Text(
+                '날을 정하면 일정 탭 달력의 그날에 같이 보여요.',
+                style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
               ),
-            ]),
-          ]),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ChoiceChip(
+                    label: const Text('언제든'),
+                    selected: current == null,
+                    onSelected: (_) => Navigator.pop(sheet, 'none'),
+                  ),
+                  for (var i = 0; i < 7; i++)
+                    Builder(
+                      builder: (_) {
+                        final d = today.add(Duration(days: i));
+                        return ChoiceChip(
+                          label: Text(
+                            i < 2
+                                ? _dayLabel(d, today)
+                                : '${d.month}/${d.day} (${_weekdayNames[d.weekday - 1]})',
+                          ),
+                          selected: current == d,
+                          onSelected: (_) =>
+                              Navigator.pop(sheet, PlannerStore.dayKey(d)),
+                        );
+                      },
+                    ),
+                  ActionChip(
+                    avatar: const Icon(Icons.calendar_month, size: 16),
+                    label: const Text('다른 날짜'),
+                    onPressed: () => Navigator.pop(sheet, 'pick'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -436,9 +574,9 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
   /// 일정 탭 달력의 어느 날에서 "+ 할 일"을 누르면, 그날로 할 일 탭을 열어요
   void _addTodoOn(DateTime day) => setState(() {
-        _newTodoDay = day;
-        _tab = 1;
-      });
+    _newTodoDay = day;
+    _tab = 1;
+  });
 
   /// 장소 종류·머무는 시간·꼭 여부를 한 창에서 고쳐요
   Future<void> _editTodo(TodoItem todo) async {
@@ -472,7 +610,10 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
-            const Text('일정 · 할 일', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            const Text(
+              '일정 · 할 일',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 14),
             _TabSwitch(
               index: _tab,
@@ -492,17 +633,34 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
     final controller = ScheduleScope.of(context);
     final weekEnd = _weekStart.add(const Duration(days: 7));
     final serverWeek = controller.schedules
-        .where((s) => !s.startTime.isBefore(_weekStart) && s.startTime.isBefore(weekEnd))
+        .where(
+          (s) =>
+              !s.startTime.isBefore(_weekStart) &&
+              s.startTime.isBefore(weekEnd),
+        )
         .toList();
 
     // 이번 주 목록 = 서버 일정 + 반복 일정의 이번 주 회차 (시간표와 같은 내용)
-    final items = <(Schedule, Routine?)>[for (final s in serverWeek) (s, _routineOf(s))];
+    final items = <(Schedule, Routine?)>[
+      for (final s in serverWeek) (s, _routineOf(s)),
+    ];
     for (final r in store.routines) {
       if (r.isTodo) continue;
       for (final wd in r.weekdays) {
         final d = _weekStart.add(Duration(days: wd - 1));
-        final start = DateTime(d.year, d.month, d.day, r.startMinutes ~/ 60, r.startMinutes % 60);
-        final saved = serverWeek.any((s) => s.title == r.title && s.location == r.location && s.startTime == start);
+        final start = DateTime(
+          d.year,
+          d.month,
+          d.day,
+          r.startMinutes ~/ 60,
+          r.startMinutes % 60,
+        );
+        final saved = serverWeek.any(
+          (s) =>
+              s.title == r.title &&
+              s.location == r.location &&
+              s.startTime == start,
+        );
         if (!saved) items.add((r.occurrence(start), r));
       }
     }
@@ -510,8 +668,9 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
     // 날을 정한 할 일도 그날에 같이
     final todos = TodoScope.of(context).todos;
-    List<TodoItem> todosOn(DateTime day) =>
-        todos.where((t) => store.dayOf(t.id) == PlannerStore.dayKey(day)).toList();
+    List<TodoItem> todosOn(DateTime day) => todos
+        .where((t) => store.dayOf(t.id) == PlannerStore.dayKey(day))
+        .toList();
 
     final filterDay = _filterDay;
     final days = <(DateTime, List<(Schedule, Routine?)>, List<TodoItem>)>[];
@@ -529,70 +688,113 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
         onPressed: _addSchedule,
         icon: const Icon(Icons.add),
-        label: const Text('일정 추가', style: TextStyle(fontWeight: FontWeight.w700)),
+        label: const Text(
+          '일정 추가',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
       ),
       const SizedBox(height: 6),
-      const Text('목적지와 도착 시각을 넣으면, 언제 나가야 하는지 거꾸로 계산해 드려요.',
-          style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+      const Text(
+        '목적지와 도착 시각을 넣으면, 언제 나가야 하는지 거꾸로 계산해 드려요.',
+        style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+      ),
       const SizedBox(height: 16),
 
       // 주 이동 + 요일 띠 (장우 님 달력)
-      Row(children: [
-        IconButton(onPressed: () => _moveWeek(-1), icon: const Icon(Icons.chevron_left_rounded)),
-        Expanded(
-          child: Text(
-            '${_weekStart.month}월 ${_weekStart.day}일 – ${lastDay.month}월 ${lastDay.day}일',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+      Row(
+        children: [
+          IconButton(
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left_rounded),
           ),
-        ),
-        IconButton(onPressed: () => _moveWeek(1), icon: const Icon(Icons.chevron_right_rounded)),
-        TextButton(onPressed: _goToday, child: const Text('오늘')),
-      ]),
+          Expanded(
+            child: Text(
+              '${_weekStart.month}월 ${_weekStart.day}일 – ${lastDay.month}월 ${lastDay.day}일',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+            ),
+          ),
+          IconButton(
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+          TextButton(onPressed: _goToday, child: const Text('오늘')),
+        ],
+      ),
       _WeekStrip(
         weekStart: _weekStart,
         selected: filterDay,
         today: _dateOnly(_now),
         counts: {
           for (var i = 0; i < 7; i++)
-            i: items.where((e) => _dateOnly(e.$1.startTime) == _weekStart.add(Duration(days: i))).length +
-                todosOn(_weekStart.add(Duration(days: i))).where((t) => !t.isCompleted).length,
+            i:
+                items
+                    .where(
+                      (e) =>
+                          _dateOnly(e.$1.startTime) ==
+                          _weekStart.add(Duration(days: i)),
+                    )
+                    .length +
+                todosOn(
+                  _weekStart.add(Duration(days: i)),
+                ).where((t) => !t.isCompleted).length,
         },
-        onSelect: (d) => setState(() => _filterDay = _filterDay == d ? null : d),
+        onSelect: (d) =>
+            setState(() => _filterDay = _filterDay == d ? null : d),
       ),
       const SizedBox(height: 12),
 
       if (controller.isLoading)
-        const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+        const Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: CircularProgressIndicator()),
+        )
       else if (days.isEmpty) ...[
-        _Empty(icon: Icons.event_available,
-            text: filterDay != null ? '이 날은 일정도 할 일도 없어요.' : '이번 주에 잡힌 일정이 없어요.\n위의 "일정 추가"로 가야 할 곳을 넣어 보세요.'),
+        _Empty(
+          icon: Icons.event_available,
+          text: filterDay != null
+              ? '이 날은 일정도 할 일도 없어요.'
+              : '이번 주에 잡힌 일정이 없어요.\n위의 "일정 추가"로 가야 할 곳을 넣어 보세요.',
+        ),
         if (filterDay != null)
           Center(
-            child: Wrap(spacing: 8, children: [
-              TextButton(onPressed: () => setState(() => _filterDay = null), child: const Text('이번 주 전체 보기')),
-              TextButton.icon(
-                onPressed: () => _addTodoOn(filterDay),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('이 날 할 일'),
-              ),
-            ]),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                TextButton(
+                  onPressed: () => setState(() => _filterDay = null),
+                  child: const Text('이번 주 전체 보기'),
+                ),
+                TextButton.icon(
+                  onPressed: () => _addTodoOn(filterDay),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('이 날 할 일'),
+                ),
+              ],
+            ),
           ),
       ] else
         for (final (day, ev, td) in days) ...[
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
-            child: Row(children: [
-              Expanded(
-                child: Text(_dayLabel(day, _now),
-                    style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textMuted)),
-              ),
-              TextButton.icon(
-                onPressed: () => _addTodoOn(day),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('할 일', style: TextStyle(fontSize: 12)),
-              ),
-            ]),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _dayLabel(day, _now),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () => _addTodoOn(day),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('할 일', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
           ),
           for (final t in td)
             _CalendarTodoRow(
@@ -609,8 +811,8 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
                 repeating: r != null,
                 onRoute: !s.isCompleted && s.startTime.isAfter(_now)
                     ? () => s.id == 0 && r != null
-                        ? _routeRoutine(r, at: s.startTime)
-                        : widget.onOpenScheduleRoutes?.call(s)
+                          ? _routeRoutine(r, at: s.startTime)
+                          : widget.onOpenScheduleRoutes?.call(s)
                     : null,
                 onMenu: (action) {
                   // 반복 일정 회차: 수정·삭제는 반복 일정 전체에
@@ -637,7 +839,10 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         now: _now,
         routines: store.routines,
         // 한 번만 있는 일정도 시간표에 같이 (반복 일정 회차는 반복 블록으로 이미 보여요)
-        schedules: [for (final (s, r) in items) if (r == null) s],
+        schedules: [
+          for (final (s, r) in items)
+            if (r == null) s,
+        ],
         onTapRoutine: _openRoutine,
         onTapSchedule: _openScheduleSheet,
         onTapEmpty: _addRoutineAt,
@@ -658,83 +863,124 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
     final open = controller.todos.where((t) => !t.isCompleted).toList()
       ..sort((a, b) {
         final byDay = (_todoDay(a) ?? far).compareTo(_todoDay(b) ?? far);
-        return byDay != 0 ? byDay : (b.important ? 1 : 0) - (a.important ? 1 : 0);
+        return byDay != 0
+            ? byDay
+            : (b.important ? 1 : 0) - (a.important ? 1 : 0);
       });
     final done = controller.todos.where((t) => t.isCompleted).toList();
 
     return [
       // ① 추가: 문장 하나만
-      _Card(children: [
-        const Text('가는 길에 할 일', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 4),
-        const Text('적기만 하면 들를 장소는 AI가 찾아 줘요.',
-            style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(
-            child: TextField(
-              controller: _todoInput,
-              enabled: !_adding,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _addTodo(),
-              decoration: const InputDecoration(
-                hintText: '예: 이어폰 사기, 택배 부치기',
-                border: OutlineInputBorder(),
-                isDense: true,
+      _Card(
+        children: [
+          const Text(
+            '가는 길에 할 일',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '적기만 하면 들를 장소는 AI가 찾아 줘요.',
+            style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _todoInput,
+                  enabled: !_adding,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _addTodo(),
+                  decoration: const InputDecoration(
+                    hintText: '예: 이어폰 사기, 택배 부치기',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _adding ? null : _addTodo,
+                child: _adding
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('추가'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text(
+                '언제: ',
+                style: TextStyle(fontSize: 13, color: AppTheme.textMuted),
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.event, size: 16),
+                label: Text(_todoDayLabel(_newTodoDay)),
+                onPressed: () async {
+                  final (picked, day) = await _pickTodoDay(_newTodoDay);
+                  if (picked && mounted) setState(() => _newTodoDay = day);
+                },
+              ),
+            ],
+          ),
+          if (_adding)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'AI가 들를 장소를 찾는 중이에요…',
+                style: TextStyle(fontSize: 12, color: AppTheme.primary),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          FilledButton(
-            onPressed: _adding ? null : _addTodo,
-            child: _adding
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('추가'),
-          ),
-        ]),
-        const SizedBox(height: 8),
-        Row(children: [
-          const Text('언제: ', style: TextStyle(fontSize: 13, color: AppTheme.textMuted)),
-          ActionChip(
-            avatar: const Icon(Icons.event, size: 16),
-            label: Text(_todoDayLabel(_newTodoDay)),
-            onPressed: () async {
-              final (picked, day) = await _pickTodoDay(_newTodoDay);
-              if (picked && mounted) setState(() => _newTodoDay = day);
-            },
-          ),
-        ]),
-        if (_adding)
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
-            child: Text('AI가 들를 장소를 찾는 중이에요…', style: TextStyle(fontSize: 12, color: AppTheme.primary)),
-          ),
-      ]),
+        ],
+      ),
       const SizedBox(height: 12),
 
       // ② 등록과 적용은 별개라는 안내 (스케치 그대로)
       Container(
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: AppTheme.primarySoft, borderRadius: BorderRadius.circular(12)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('할 일을 등록하는 것과 이번 이동에 넣는 것은 따로예요. '
+        decoration: BoxDecoration(
+          color: AppTheme.primarySoft,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '할 일을 등록하는 것과 이번 이동에 넣는 것은 따로예요. '
               '이동 탭에서 경로를 받은 뒤 "할 일 적용하기"로 이번에 들를 곳을 골라요.',
-              style: TextStyle(fontSize: 13, color: AppTheme.primary, height: 1.4)),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _openRoutesForTodos,
-            icon: const Icon(Icons.alt_route, size: 18),
-            label: const Text('이동 경로에서 고르기'),
-          ),
-        ]),
+              style: TextStyle(
+                fontSize: 13,
+                color: AppTheme.primary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _openRoutesForTodos,
+              icon: const Icon(Icons.alt_route, size: 18),
+              label: const Text('이동 경로에서 고르기'),
+            ),
+          ],
+        ),
       ),
       const SizedBox(height: 16),
 
       // ③ 목록
       if (controller.isLoading)
-        const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+        const Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: CircularProgressIndicator()),
+        )
       else if (open.isEmpty)
-        const _Empty(icon: Icons.checklist, text: '아직 할 일이 없어요.\n나가는 길에 하고 싶은 일을 적어 보세요.')
+        const _Empty(
+          icon: Icons.checklist,
+          text: '아직 할 일이 없어요.\n나가는 길에 하고 싶은 일을 적어 보세요.',
+        )
       else
         for (final t in open)
           _TodoRow(
@@ -771,7 +1017,12 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 // ---------- 작은 부품 ----------
 
 class _TabSwitch extends StatelessWidget {
-  const _TabSwitch({required this.index, required this.labels, required this.icons, required this.onChanged});
+  const _TabSwitch({
+    required this.index,
+    required this.labels,
+    required this.icons,
+    required this.onChanged,
+  });
   final int index;
   final List<String> labels;
   final List<IconData> icons;
@@ -781,34 +1032,59 @@ class _TabSwitch extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: AppTheme.primarySoft, borderRadius: BorderRadius.circular(14)),
-      child: Row(children: [
-        for (var i = 0; i < labels.length; i++)
-          Expanded(
-            child: GestureDetector(
-              onTap: () => onChanged(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: i == index ? Colors.white : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                  boxShadow: i == index
-                      ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 6, offset: const Offset(0, 2))]
-                      : null,
+      decoration: BoxDecoration(
+        color: AppTheme.primarySoft,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            Expanded(
+              child: GestureDetector(
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: i == index ? Colors.white : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: i == index
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.06),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        icons[i],
+                        size: 18,
+                        color: i == index
+                            ? AppTheme.primary
+                            : AppTheme.textMuted,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        labels[i],
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: i == index
+                              ? AppTheme.primary
+                              : AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(icons[i], size: 18, color: i == index ? AppTheme.primary : AppTheme.textMuted),
-                  const SizedBox(width: 6),
-                  Text(labels[i], style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: i == index ? AppTheme.primary : AppTheme.textMuted,
-                  )),
-                ]),
               ),
             ),
-          ),
-      ]),
+        ],
+      ),
     );
   }
 }
@@ -819,14 +1095,17 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
-      );
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppTheme.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    ),
+  );
 }
 
 class _Empty extends StatelessWidget {
@@ -836,17 +1115,28 @@ class _Empty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 28),
-        child: Column(children: [
-          Icon(icon, size: 36, color: AppTheme.textMuted),
-          const SizedBox(height: 8),
-          Text(text, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textMuted, height: 1.5)),
-        ]),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 28),
+    child: Column(
+      children: [
+        Icon(icon, size: 36, color: AppTheme.textMuted),
+        const SizedBox(height: 8),
+        Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: AppTheme.textMuted, height: 1.5),
+        ),
+      ],
+    ),
+  );
 }
 
 class _ScheduleCard extends StatelessWidget {
-  const _ScheduleCard({required this.schedule, required this.onMenu, this.onRoute, this.repeating = false});
+  const _ScheduleCard({
+    required this.schedule,
+    required this.onMenu,
+    this.onRoute,
+    this.repeating = false,
+  });
   final Schedule schedule;
   final bool repeating;
   final VoidCallback? onRoute;
@@ -863,62 +1153,137 @@ class _ScheduleCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.border),
       ),
-      child: Row(children: [
-        Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          Text(_hm(s.startTime), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          const Text('도착', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-        ]),
-        Container(width: 3, height: 40, margin: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(2))),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Flexible(child: Text(s.title, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
-              if (repeating) ...[
-                const SizedBox(width: 6),
-                const Icon(Icons.repeat, size: 14, color: AppTheme.primary),
-                const Text(' 매주', style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w700)),
-              ],
-            ]),
-            const SizedBox(height: 2),
-            Row(children: [
-              const Icon(Icons.place_outlined, size: 14, color: AppTheme.textMuted),
-              const SizedBox(width: 2),
-              Expanded(
-                child: Text(s.location, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13, color: AppTheme.textMuted)),
+      child: Row(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                _hm(s.startTime),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ]),
-          ]),
-        ),
-        if (onRoute != null)
-          FilledButton.tonal(
-            onPressed: onRoute,
-            style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12)),
-            child: const Text('경로 보기'),
+              const Text(
+                '도착',
+                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+              ),
+            ],
           ),
-        PopupMenuButton<String>(
-          onSelected: onMenu,
-          itemBuilder: (_) => repeating && schedule.id == 0
-              ? const [
-                  PopupMenuItem(value: 'edit', child: Text('반복 일정 수정')),
-                  PopupMenuItem(value: 'delete', child: Text('반복 그만하기', style: TextStyle(color: AppTheme.danger))),
-                ]
-              : const [
-                  PopupMenuItem(value: 'detail', child: Text('상세 보기')),
-                  PopupMenuItem(value: 'edit', child: Text('수정')),
-                  PopupMenuItem(value: 'delete', child: Text('삭제', style: TextStyle(color: AppTheme.danger))),
-                ],
-        ),
-      ]),
+          Container(
+            width: 3,
+            height: 40,
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.primary,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        s.title,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    if (repeating) ...[
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.repeat,
+                        size: 14,
+                        color: AppTheme.primary,
+                      ),
+                      const Text(
+                        ' 매주',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.place_outlined,
+                      size: 14,
+                      color: AppTheme.textMuted,
+                    ),
+                    const SizedBox(width: 2),
+                    Expanded(
+                      child: Text(
+                        s.location,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (onRoute != null)
+            FilledButton.tonal(
+              onPressed: onRoute,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              child: const Text('경로 보기'),
+            ),
+          PopupMenuButton<String>(
+            onSelected: onMenu,
+            itemBuilder: (_) => repeating && schedule.id == 0
+                ? const [
+                    PopupMenuItem(value: 'edit', child: Text('반복 일정 수정')),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text(
+                        '반복 그만하기',
+                        style: TextStyle(color: AppTheme.danger),
+                      ),
+                    ),
+                  ]
+                : const [
+                    PopupMenuItem(value: 'detail', child: Text('상세 보기')),
+                    PopupMenuItem(value: 'edit', child: Text('수정')),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text(
+                        '삭제',
+                        style: TextStyle(color: AppTheme.danger),
+                      ),
+                    ),
+                  ],
+          ),
+        ],
+      ),
     );
   }
 }
 
 /// 일정 탭 달력의 그날 할 일 (작게)
 class _CalendarTodoRow extends StatelessWidget {
-  const _CalendarTodoRow({required this.todo, required this.onToggle, required this.onTap});
+  const _CalendarTodoRow({
+    required this.todo,
+    required this.onToggle,
+    required this.onTap,
+  });
   final TodoItem todo;
   final VoidCallback onToggle;
   final VoidCallback onTap;
@@ -926,6 +1291,7 @@ class _CalendarTodoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = todo;
+    final placeName = t.placeName?.trim();
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -936,31 +1302,65 @@ class _CalendarTodoRow extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        child: Row(children: [
-          Checkbox(value: t.isCompleted, onChanged: (_) => onToggle()),
-          Expanded(
-            child: Text.rich(
-              TextSpan(children: [
-                TextSpan(text: t.title, style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  decoration: t.isCompleted ? TextDecoration.lineThrough : null,
-                  color: t.isCompleted ? AppTheme.textMuted : AppTheme.textStrong,
-                )),
-                if (t.placeTypes.isNotEmpty)
-                  TextSpan(text: '  ${t.placeTypes.join('·')}',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-              ]),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+        child: Row(
+          children: [
+            Checkbox(value: t.isCompleted, onChanged: (_) => onToggle()),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: t.title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        decoration: t.isCompleted
+                            ? TextDecoration.lineThrough
+                            : null,
+                        color: t.isCompleted
+                            ? AppTheme.textMuted
+                            : AppTheme.textStrong,
+                      ),
+                    ),
+                    if (placeName != null && placeName.isNotEmpty)
+                      TextSpan(
+                        text: '  $placeName',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    if (t.placeTypes.isNotEmpty)
+                      TextSpan(
+                        text: '  ${t.placeTypes.join('·')}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          Container(
-            margin: const EdgeInsets.only(right: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(color: AppTheme.okSoft, borderRadius: BorderRadius.circular(8)),
-            child: const Text('할 일', style: TextStyle(fontSize: 11, color: AppTheme.ok, fontWeight: FontWeight.w700)),
-          ),
-        ]),
+            Container(
+              margin: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.okSoft,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                '할 일',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppTheme.ok,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -993,76 +1393,130 @@ class _TodoRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.important && !t.isCompleted ? AppTheme.primary : AppTheme.border),
+        border: Border.all(
+          color: t.important && !t.isCompleted
+              ? AppTheme.primary
+              : AppTheme.border,
+        ),
       ),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Tooltip(
-          message: t.isCompleted ? '완료 취소' : '완료',
-          child: Checkbox(value: t.isCompleted, onChanged: (_) => onToggle()),
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(t.title, style: TextStyle(
-                fontWeight: FontWeight.w700,
-                decoration: t.isCompleted ? TextDecoration.lineThrough : null,
-                color: t.isCompleted ? AppTheme.textMuted : AppTheme.textStrong,
-              )),
-              const SizedBox(height: 8),
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                ActionChip(
-                  avatar: const Icon(Icons.event, size: 16),
-                  label: Text(dayLabel),
-                  labelStyle: const TextStyle(fontSize: 12),
-                  backgroundColor: AppTheme.background,
-                  side: BorderSide.none,
-                  onPressed: onDay,
-                ),
-                if (t.placeTypes.isEmpty)
-                  ActionChip(
-                    avatar: const Icon(Icons.add_location_alt_outlined, size: 16, color: AppTheme.warn),
-                    label: const Text('장소 고르기'),
-                    labelStyle: const TextStyle(color: AppTheme.warn, fontSize: 12),
-                    backgroundColor: AppTheme.warnSoft,
-                    side: BorderSide.none,
-                    onPressed: onEdit,
-                  )
-                else
-                  for (final p in t.placeTypes)
-                    ActionChip(
-                      label: Text(p),
-                      labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w600),
-                      backgroundColor: AppTheme.primarySoft,
-                      side: BorderSide.none,
-                      onPressed: onEdit,
-                    ),
-                ActionChip(
-                  avatar: const Icon(Icons.timer_outlined, size: 16),
-                  label: Text('약 ${t.estimatedMinutes}분 머물기'),
-                  labelStyle: const TextStyle(fontSize: 12),
-                  backgroundColor: AppTheme.background,
-                  side: BorderSide.none,
-                  onPressed: onEdit,
-                ),
-              ]),
-            ]),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Tooltip(
+            message: t.isCompleted ? '완료 취소' : '완료',
+            child: Checkbox(value: t.isCompleted, onChanged: (_) => onToggle()),
           ),
-        ),
-        IconButton(
-          tooltip: t.important ? '꼭 해야 해요 (끄기)' : '꼭 해야 해요',
-          onPressed: onStar,
-          icon: Icon(t.important ? Icons.star_rounded : Icons.star_outline_rounded,
-              color: t.important ? AppTheme.primary : AppTheme.textMuted),
-        ),
-        PopupMenuButton<String>(
-          onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'edit', child: Text('장소·시간 바꾸기')),
-            PopupMenuItem(value: 'delete', child: Text('삭제', style: TextStyle(color: AppTheme.danger))),
-          ],
-        ),
-      ]),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t.title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      decoration: t.isCompleted
+                          ? TextDecoration.lineThrough
+                          : null,
+                      color: t.isCompleted
+                          ? AppTheme.textMuted
+                          : AppTheme.textStrong,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.event, size: 16),
+                        label: Text(dayLabel),
+                        labelStyle: const TextStyle(fontSize: 12),
+                        backgroundColor: AppTheme.background,
+                        side: BorderSide.none,
+                        onPressed: onDay,
+                      ),
+                      if (t.placeName?.trim().isNotEmpty ?? false)
+                        ActionChip(
+                          avatar: const Icon(
+                            Icons.storefront_outlined,
+                            size: 16,
+                            color: AppTheme.primary,
+                          ),
+                          label: Text(t.placeName!),
+                          labelStyle: const TextStyle(
+                            color: AppTheme.primary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          backgroundColor: AppTheme.primarySoft,
+                          side: BorderSide.none,
+                          onPressed: onEdit,
+                        ),
+                      if (t.placeTypes.isEmpty)
+                        ActionChip(
+                          avatar: const Icon(
+                            Icons.add_location_alt_outlined,
+                            size: 16,
+                            color: AppTheme.warn,
+                          ),
+                          label: const Text('장소 고르기'),
+                          labelStyle: const TextStyle(
+                            color: AppTheme.warn,
+                            fontSize: 12,
+                          ),
+                          backgroundColor: AppTheme.warnSoft,
+                          side: BorderSide.none,
+                          onPressed: onEdit,
+                        )
+                      else
+                        for (final p in t.placeTypes)
+                          ActionChip(
+                            label: Text(p),
+                            labelStyle: const TextStyle(
+                              color: AppTheme.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            backgroundColor: AppTheme.primarySoft,
+                            side: BorderSide.none,
+                            onPressed: onEdit,
+                          ),
+                      ActionChip(
+                        avatar: const Icon(Icons.timer_outlined, size: 16),
+                        label: Text('약 ${t.estimatedMinutes}분 머물기'),
+                        labelStyle: const TextStyle(fontSize: 12),
+                        backgroundColor: AppTheme.background,
+                        side: BorderSide.none,
+                        onPressed: onEdit,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: t.important ? '꼭 해야 해요 (끄기)' : '꼭 해야 해요',
+            onPressed: onStar,
+            icon: Icon(
+              t.important ? Icons.star_rounded : Icons.star_outline_rounded,
+              color: t.important ? AppTheme.primary : AppTheme.textMuted,
+            ),
+          ),
+          PopupMenuButton<String>(
+            onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('장소·시간 바꾸기')),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text('삭제', style: TextStyle(color: AppTheme.danger)),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1078,69 +1532,149 @@ class _TodoEditSheet extends StatefulWidget {
 
 class _TodoEditSheetState extends State<_TodoEditSheet> {
   late final Set<String> _types = {...widget.todo.placeTypes};
-  late int _minutes = widget.todo.estimatedMinutes > 0 ? widget.todo.estimatedMinutes : 5;
+  late final TextEditingController _placeNameController = TextEditingController(
+    text: widget.todo.placeName ?? '',
+  );
+  late int _minutes = widget.todo.estimatedMinutes > 0
+      ? widget.todo.estimatedMinutes
+      : 5;
   late bool _important = widget.todo.important;
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + MediaQuery.of(context).viewInsets.bottom),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(widget.todo.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 16),
-          const Text('어디에 들르면 돼요?', style: TextStyle(fontWeight: FontWeight.w700)),
-          const Text('여러 개를 고르면 그중 가까운 곳을 찾아요.',
-              style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            for (final p in kPlaceTypes)
-              FilterChip(
-                label: Text(p),
-                selected: _types.contains(p),
-                onSelected: (on) => setState(() => on ? _types.add(p) : _types.remove(p)),
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.todo.title,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '어느 가게에 들러요? (선택)',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _placeNameController,
+              decoration: const InputDecoration(
+                hintText: '예: 스타벅스 강남점, 집 앞 다이소',
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
-          ]),
-          const SizedBox(height: 18),
-          const Text('얼마나 머물러요?', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          Row(children: [
-            IconButton.outlined(
-              onPressed: _minutes > 1 ? () => setState(() => _minutes = (_minutes - 1).clamp(1, 120)) : null,
-              icon: const Icon(Icons.remove),
             ),
-            SizedBox(
-              width: 80,
-              child: Text('$_minutes분', textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 16),
+            const Text(
+              '어디에 들르면 돼요?',
+              style: TextStyle(fontWeight: FontWeight.w700),
             ),
-            IconButton.outlined(
-              onPressed: _minutes < 120 ? () => setState(() => _minutes = (_minutes + 1).clamp(1, 120)) : null,
-              icon: const Icon(Icons.add),
+            const Text(
+              '여러 개를 고르면 그중 가까운 곳을 찾아요.',
+              style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
             ),
-          ]),
-          const SizedBox(height: 10),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _important,
-            onChanged: (v) => setState(() => _important = v),
-            title: const Text('꼭 해야 해요', style: TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: const Text('시간이 부족해도 빼지 않고 "이번엔 빼기 / 늦더라도 들르기"로 물어봐요.'),
-          ),
-          const SizedBox(height: 8),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            onPressed: () => Navigator.pop(context, widget.todo.copyWith(
-              placeTypes: [for (final p in kPlaceTypes) if (_types.contains(p)) p],
-              requiresTravel: _types.isNotEmpty,
-              estimatedMinutes: _minutes,
-              important: _important,
-            )),
-            child: const Text('저장'),
-          ),
-        ]),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final p in kPlaceTypes)
+                  FilterChip(
+                    label: Text(p),
+                    selected: _types.contains(p),
+                    onSelected: (on) =>
+                        setState(() => on ? _types.add(p) : _types.remove(p)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              '얼마나 머물러요?',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                IconButton.outlined(
+                  onPressed: _minutes > 1
+                      ? () => setState(
+                          () => _minutes = (_minutes - 1).clamp(1, 120),
+                        )
+                      : null,
+                  icon: const Icon(Icons.remove),
+                ),
+                SizedBox(
+                  width: 80,
+                  child: Text(
+                    '$_minutes분',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton.outlined(
+                  onPressed: _minutes < 120
+                      ? () => setState(
+                          () => _minutes = (_minutes + 1).clamp(1, 120),
+                        )
+                      : null,
+                  icon: const Icon(Icons.add),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _important,
+              onChanged: (v) => setState(() => _important = v),
+              title: const Text(
+                '꼭 해야 해요',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text('시간이 부족해도 빼지 않고 "이번엔 빼기 / 늦더라도 들르기"로 물어봐요.'),
+            ),
+            const SizedBox(height: 8),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              onPressed: () => Navigator.pop(
+                context,
+                widget.todo.copyWith(
+                  placeName: _placeNameController.text.trim(),
+                  placeTypes: [
+                    for (final p in kPlaceTypes)
+                      if (_types.contains(p)) p,
+                  ],
+                  requiresTravel:
+                      _types.isNotEmpty ||
+                      _placeNameController.text.trim().isNotEmpty,
+                  estimatedMinutes: _minutes,
+                  important: _important,
+                ),
+              ),
+              child: const Text('저장'),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _placeNameController.dispose();
+    super.dispose();
   }
 }
 
@@ -1155,27 +1689,52 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
               if (subtitle != null)
-                Text(subtitle!, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-            ]),
+                Text(
+                  subtitle!,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textMuted,
+                  ),
+                ),
+            ],
           ),
-        ]),
-      );
+        ),
+      ],
+    ),
+  );
 }
-
 
 // ======================================================================
 // 주간 시간표
 // ======================================================================
 
 class _Block {
-  _Block({required this.weekday, required this.start, required this.end, required this.title,
-      required this.sub, required this.colors, this.routine, this.schedule});
+  _Block({
+    required this.weekday,
+    required this.start,
+    required this.end,
+    required this.title,
+    required this.sub,
+    required this.colors,
+    this.routine,
+    this.schedule,
+  });
   final int weekday;
   final int start;
   final int end;
@@ -1217,18 +1776,18 @@ class _TimetableState extends State<_Timetable> {
 
   @override
   Widget build(BuildContext context) => _TimetableView(
-        weekStart: widget.weekStart,
-        now: widget.now,
-        routines: widget.routines,
-        schedules: widget.schedules,
-        onTapRoutine: widget.onTapRoutine,
-        onTapSchedule: widget.onTapSchedule,
-        onTapEmpty: widget.onTapEmpty,
-        hover: _hover,
-        onHover: (slot) {
-          if (slot != _hover) setState(() => _hover = slot);
-        },
-      );
+    weekStart: widget.weekStart,
+    now: widget.now,
+    routines: widget.routines,
+    schedules: widget.schedules,
+    onTapRoutine: widget.onTapRoutine,
+    onTapSchedule: widget.onTapSchedule,
+    onTapEmpty: widget.onTapEmpty,
+    hover: _hover,
+    onHover: (slot) {
+      if (slot != _hover) setState(() => _hover = slot);
+    },
+  );
 }
 
 class _TimetableView extends StatelessWidget {
@@ -1263,35 +1822,44 @@ class _TimetableView extends StatelessWidget {
     final out = <_Block>[];
     for (final r in routines) {
       for (final d in r.weekdays) {
-        out.add(_Block(
-          weekday: d,
-          start: r.startMinutes,
-          end: r.endMinutes > r.startMinutes ? r.endMinutes : r.startMinutes + 30,
-          title: r.title,
-          sub: r.location,
-          colors: _palette[r.colorIndex % _palette.length],
-          routine: r,
-        ));
+        out.add(
+          _Block(
+            weekday: d,
+            start: r.startMinutes,
+            end: r.endMinutes > r.startMinutes
+                ? r.endMinutes
+                : r.startMinutes + 30,
+            title: r.title,
+            sub: r.location,
+            colors: _palette[r.colorIndex % _palette.length],
+            routine: r,
+          ),
+        );
       }
     }
     for (final s in schedules) {
       final start = s.startTime.hour * 60 + s.startTime.minute;
-      final sameDay = s.endTime.year == s.startTime.year &&
-          s.endTime.month == s.startTime.month && s.endTime.day == s.startTime.day;
+      final sameDay =
+          s.endTime.year == s.startTime.year &&
+          s.endTime.month == s.startTime.month &&
+          s.endTime.day == s.startTime.day;
       final endRaw = sameDay ? s.endTime.hour * 60 + s.endTime.minute : 24 * 60;
-      out.add(_Block(
-        weekday: s.startTime.weekday,
-        start: start,
-        end: endRaw > start ? endRaw : start + 60,
-        title: s.title,
-        sub: s.location,
-        colors: (AppTheme.textStrong, Colors.white),
-        schedule: s,
-      ));
+      out.add(
+        _Block(
+          weekday: s.startTime.weekday,
+          start: start,
+          end: endRaw > start ? endRaw : start + 60,
+          title: s.title,
+          sub: s.location,
+          colors: (AppTheme.textStrong, Colors.white),
+          schedule: s,
+        ),
+      );
     }
     // 같은 요일에 겹치면 나란히 놓아요
     for (var d = 1; d <= 7; d++) {
-      final day = out.where((b) => b.weekday == d).toList()..sort((a, b) => a.start.compareTo(b.start));
+      final day = out.where((b) => b.weekday == d).toList()
+        ..sort((a, b) => a.start.compareTo(b.start));
       final group = <_Block>[];
       var groupEnd = -1;
       void flush() {
@@ -1311,6 +1879,7 @@ class _TimetableView extends StatelessWidget {
         }
         group.clear();
       }
+
       for (final b in day) {
         if (group.isNotEmpty && b.start >= groupEnd) flush();
         group.add(b);
@@ -1342,194 +1911,288 @@ class _TimetableView extends StatelessWidget {
         border: Border.all(color: AppTheme.border),
       ),
       clipBehavior: Clip.antiAlias,
-      child: LayoutBuilder(builder: (context, c) {
-        final colWidth = (c.maxWidth - timeColumn) / 7;
-        return Column(children: [
-          // 요일 머리
-          SizedBox(
-            height: headerHeight,
-            child: Row(children: [
-              const SizedBox(width: timeColumn),
-              for (var i = 0; i < 7; i++)
-                SizedBox(
-                  width: colWidth,
-                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Text(_weekdayNames[i],
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: i == todayIndex ? AppTheme.primary : (i >= 5 ? AppTheme.danger : AppTheme.textMuted))),
-                    const SizedBox(height: 2),
-                    Container(
-                      width: 22,
-                      height: 22,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: i == todayIndex ? AppTheme.primary : Colors.transparent,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text('${weekStart.add(Duration(days: i)).day}',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: i == todayIndex ? Colors.white : AppTheme.textStrong)),
-                    ),
-                  ]),
-                ),
-            ]),
-          ),
-          const Divider(height: 1),
-          SizedBox(
-            height: bodyHeight,
-            child: Stack(children: [
-              // 오늘 열 배경
-              if (todayIndex >= 0 && todayIndex < 7)
-                Positioned(
-                  left: timeColumn + colWidth * todayIndex,
-                  top: 0,
-                  bottom: 0,
-                  width: colWidth,
-                  child: Container(color: AppTheme.primarySoft.withValues(alpha: 0.45)),
-                ),
-              // 시간 줄 + 시각
-              for (var h = 0; h < hours; h++) ...[
-                Positioned(
-                  left: timeColumn,
-                  right: 0,
-                  top: h * hourHeight,
-                  child: Container(height: 1, color: AppTheme.border),
-                ),
-                Positioned(
-                  left: 0,
-                  width: timeColumn - 4,
-                  top: h * hourHeight + 2,
-                  child: Text('${startHour + h}',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(fontSize: 10, color: AppTheme.textMuted)),
-                ),
-              ],
-              // 세로 줄
-              for (var i = 0; i < 7; i++)
-                Positioned(
-                  left: timeColumn + colWidth * i,
-                  top: 0,
-                  bottom: 0,
-                  child: Container(width: 1, color: AppTheme.border.withValues(alpha: 0.6)),
-                ),
-              // 빈 칸: 마우스를 올리면 그 요일·30분 칸이 어둡게 보이고, 누르면 그 시각으로 반복 일정 추가
-              for (var i = 0; i < 7; i++)
-                Positioned(
-                  left: timeColumn + colWidth * i,
-                  top: 0,
-                  width: colWidth,
-                  height: bodyHeight,
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    onHover: (e) {
-                      final minutes = startHour * 60 + (e.localPosition.dy / hourHeight * 60).floor();
-                      onHover((i + 1, (minutes ~/ 30) * 30));
-                    },
-                    onExit: (_) => onHover(null),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTapUp: (d) {
-                        final minutes = startHour * 60 + (d.localPosition.dy / hourHeight * 60).floor();
-                        onHover(null);
-                        onTapEmpty(i + 1, (minutes ~/ 30) * 30);
-                      },
-                    ),
-                  ),
-                ),
-              // 마우스가 가리키는 칸 (누르면 들어갈 요일·시각)
-              if (hover != null)
-                Positioned(
-                  left: timeColumn + colWidth * (hover!.$1 - 1) + 1.5,
-                  width: colWidth - 3,
-                  top: (hover!.$2 - startHour * 60) / 60 * hourHeight + 1,
-                  height: hourHeight / 2 - 2,
-                  child: IgnorePointer(
-                    child: Container(
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: AppTheme.textStrong.withValues(alpha: 0.8),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('+ ${_weekdayNames[hover!.$1 - 1]} ${_hmMinutes(hover!.$2)}',
-                            style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                  ),
-                ),
-              // 블록
-              for (final b in blocks)
-                Positioned(
-                  left: timeColumn + colWidth * (b.weekday - 1) + 1.5 + (colWidth - 3) * b.lane / b.lanes,
-                  width: (colWidth - 3) / b.lanes - 1,
-                  top: (b.start - startHour * 60) / 60 * hourHeight + 1,
-                  height: ((b.end - b.start) / 60 * hourHeight - 2).clamp(16, double.infinity).toDouble(),
-                  child: GestureDetector(
-                    onTap: () {
-                      if (b.routine != null) onTapRoutine(b.routine!);
-                      if (b.schedule != null) onTapSchedule(b.schedule!);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(3, 3, 2, 2),
-                      decoration: BoxDecoration(
-                        color: b.routine?.isTodo == true ? Colors.white : b.colors.$1,
-                        borderRadius: BorderRadius.circular(6),
-                        border: b.schedule != null
-                            ? null
-                            : b.routine?.isTodo == true
-                                ? Border.all(color: b.colors.$2, width: 1.2)
-                                : Border(left: BorderSide(color: b.colors.$2, width: 2.5)),
-                      ),
-                      child: ClipRect(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(b.routine?.isTodo == true ? '✓ ${b.title}' : b.title,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final colWidth = (c.maxWidth - timeColumn) / 7;
+          return Column(
+            children: [
+              // 요일 머리
+              SizedBox(
+                height: headerHeight,
+                child: Row(
+                  children: [
+                    const SizedBox(width: timeColumn),
+                    for (var i = 0; i < 7; i++)
+                      SizedBox(
+                        width: colWidth,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              _weekdayNames[i],
                               style: TextStyle(
-                                  fontSize: 10,
-                                  height: 1.15,
-                                  fontWeight: FontWeight.w800,
-                                  color: b.schedule != null ? Colors.white : b.colors.$2)),
-                          if (b.sub.isNotEmpty && b.end - b.start >= 50)
-                            Text(b.sub,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: i == todayIndex
+                                    ? AppTheme.primary
+                                    : (i >= 5
+                                          ? AppTheme.danger
+                                          : AppTheme.textMuted),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Container(
+                              width: 22,
+                              height: 22,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: i == todayIndex
+                                    ? AppTheme.primary
+                                    : Colors.transparent,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '${weekStart.add(Duration(days: i)).day}',
                                 style: TextStyle(
-                                    fontSize: 9,
-                                    height: 1.1,
-                                    color: b.schedule != null ? Colors.white70 : b.colors.$2.withValues(alpha: 0.8))),
-                        ]),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: i == todayIndex
+                                      ? Colors.white
+                                      : AppTheme.textStrong,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ),
+                  ],
                 ),
-              // 지금 시각 줄
-              if (todayIndex >= 0 && todayIndex < 7)
-                Builder(builder: (context) {
-                  final m = now.hour * 60 + now.minute - startHour * 60;
-                  if (m < 0 || m > hours * 60) return const SizedBox.shrink();
-                  final top = m / 60 * hourHeight;
-                  return Positioned(
-                    left: timeColumn + colWidth * todayIndex - 3,
-                    width: colWidth + 3,
-                    top: top - 3,
-                    child: IgnorePointer(
-                      child: Row(children: [
-                        Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppTheme.danger, shape: BoxShape.circle)),
-                        Expanded(child: Container(height: 1.5, color: AppTheme.danger)),
-                      ]),
-                    ),
-                  );
-                }),
-            ]),
-          ),
-        ]);
-      }),
+              ),
+              const Divider(height: 1),
+              SizedBox(
+                height: bodyHeight,
+                child: Stack(
+                  children: [
+                    // 오늘 열 배경
+                    if (todayIndex >= 0 && todayIndex < 7)
+                      Positioned(
+                        left: timeColumn + colWidth * todayIndex,
+                        top: 0,
+                        bottom: 0,
+                        width: colWidth,
+                        child: Container(
+                          color: AppTheme.primarySoft.withValues(alpha: 0.45),
+                        ),
+                      ),
+                    // 시간 줄 + 시각
+                    for (var h = 0; h < hours; h++) ...[
+                      Positioned(
+                        left: timeColumn,
+                        right: 0,
+                        top: h * hourHeight,
+                        child: Container(height: 1, color: AppTheme.border),
+                      ),
+                      Positioned(
+                        left: 0,
+                        width: timeColumn - 4,
+                        top: h * hourHeight + 2,
+                        child: Text(
+                          '${startHour + h}',
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.textMuted,
+                          ),
+                        ),
+                      ),
+                    ],
+                    // 세로 줄
+                    for (var i = 0; i < 7; i++)
+                      Positioned(
+                        left: timeColumn + colWidth * i,
+                        top: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 1,
+                          color: AppTheme.border.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    // 빈 칸: 마우스를 올리면 그 요일·30분 칸이 어둡게 보이고, 누르면 그 시각으로 반복 일정 추가
+                    for (var i = 0; i < 7; i++)
+                      Positioned(
+                        left: timeColumn + colWidth * i,
+                        top: 0,
+                        width: colWidth,
+                        height: bodyHeight,
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          onHover: (e) {
+                            final minutes =
+                                startHour * 60 +
+                                (e.localPosition.dy / hourHeight * 60).floor();
+                            onHover((i + 1, (minutes ~/ 30) * 30));
+                          },
+                          onExit: (_) => onHover(null),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTapUp: (d) {
+                              final minutes =
+                                  startHour * 60 +
+                                  (d.localPosition.dy / hourHeight * 60)
+                                      .floor();
+                              onHover(null);
+                              onTapEmpty(i + 1, (minutes ~/ 30) * 30);
+                            },
+                          ),
+                        ),
+                      ),
+                    // 마우스가 가리키는 칸 (누르면 들어갈 요일·시각)
+                    if (hover != null)
+                      Positioned(
+                        left: timeColumn + colWidth * (hover!.$1 - 1) + 1.5,
+                        width: colWidth - 3,
+                        top: (hover!.$2 - startHour * 60) / 60 * hourHeight + 1,
+                        height: hourHeight / 2 - 2,
+                        child: IgnorePointer(
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppTheme.textStrong.withValues(alpha: 0.8),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '+ ${_weekdayNames[hover!.$1 - 1]} ${_hmMinutes(hover!.$2)}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // 블록
+                    for (final b in blocks)
+                      Positioned(
+                        left:
+                            timeColumn +
+                            colWidth * (b.weekday - 1) +
+                            1.5 +
+                            (colWidth - 3) * b.lane / b.lanes,
+                        width: (colWidth - 3) / b.lanes - 1,
+                        top: (b.start - startHour * 60) / 60 * hourHeight + 1,
+                        height: ((b.end - b.start) / 60 * hourHeight - 2)
+                            .clamp(16, double.infinity)
+                            .toDouble(),
+                        child: GestureDetector(
+                          onTap: () {
+                            if (b.routine != null) onTapRoutine(b.routine!);
+                            if (b.schedule != null) onTapSchedule(b.schedule!);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(3, 3, 2, 2),
+                            decoration: BoxDecoration(
+                              color: b.routine?.isTodo == true
+                                  ? Colors.white
+                                  : b.colors.$1,
+                              borderRadius: BorderRadius.circular(6),
+                              border: b.schedule != null
+                                  ? null
+                                  : b.routine?.isTodo == true
+                                  ? Border.all(color: b.colors.$2, width: 1.2)
+                                  : Border(
+                                      left: BorderSide(
+                                        color: b.colors.$2,
+                                        width: 2.5,
+                                      ),
+                                    ),
+                            ),
+                            child: ClipRect(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    b.routine?.isTodo == true
+                                        ? '✓ ${b.title}'
+                                        : b.title,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      height: 1.15,
+                                      fontWeight: FontWeight.w800,
+                                      color: b.schedule != null
+                                          ? Colors.white
+                                          : b.colors.$2,
+                                    ),
+                                  ),
+                                  if (b.sub.isNotEmpty && b.end - b.start >= 50)
+                                    Text(
+                                      b.sub,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        height: 1.1,
+                                        color: b.schedule != null
+                                            ? Colors.white70
+                                            : b.colors.$2.withValues(
+                                                alpha: 0.8,
+                                              ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // 지금 시각 줄
+                    if (todayIndex >= 0 && todayIndex < 7)
+                      Builder(
+                        builder: (context) {
+                          final m = now.hour * 60 + now.minute - startHour * 60;
+                          if (m < 0 || m > hours * 60) {
+                            return const SizedBox.shrink();
+                          }
+                          final top = m / 60 * hourHeight;
+                          return Positioned(
+                            left: timeColumn + colWidth * todayIndex - 3,
+                            width: colWidth + 3,
+                            top: top - 3,
+                            child: IgnorePointer(
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: AppTheme.danger,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Container(
+                                      height: 1.5,
+                                      color: AppTheme.danger,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -1555,51 +2218,79 @@ class _WeekStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(children: [
-      for (var i = 0; i < 7; i++)
-        Expanded(
-          child: Builder(builder: (context) {
-            final day = weekStart.add(Duration(days: i));
-            final isSel = day == selected;
-            final isToday = day == today;
-            final count = counts[i] ?? 0;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Material(
-                color: isSel ? AppTheme.primary : Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: () => onSelect(day),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
+    return Row(
+      children: [
+        for (var i = 0; i < 7; i++)
+          Expanded(
+            child: Builder(
+              builder: (context) {
+                final day = weekStart.add(Duration(days: i));
+                final isSel = day == selected;
+                final isToday = day == today;
+                final count = counts[i] ?? 0;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Material(
+                    color: isSel ? AppTheme.primary : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: isSel ? AppTheme.primary : (isToday ? AppTheme.primary : AppTheme.border)),
-                    ),
-                    child: Column(children: [
-                      Text(_weekdayNames[i],
-                          style: TextStyle(fontSize: 11, color: isSel ? Colors.white70 : AppTheme.textMuted)),
-                      const SizedBox(height: 2),
-                      Text('${day.day}',
-                          style: TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w800, color: isSel ? Colors.white : AppTheme.textStrong)),
-                      const SizedBox(height: 3),
-                      Container(
-                        width: 6,
-                        height: 6,
+                      onTap: () => onSelect(day),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: count == 0 ? Colors.transparent : (isSel ? Colors.white : AppTheme.primary),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isSel
+                                ? AppTheme.primary
+                                : (isToday
+                                      ? AppTheme.primary
+                                      : AppTheme.border),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              _weekdayNames[i],
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isSel
+                                    ? Colors.white70
+                                    : AppTheme.textMuted,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${day.day}',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: isSel
+                                    ? Colors.white
+                                    : AppTheme.textStrong,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: count == 0
+                                    ? Colors.transparent
+                                    : (isSel ? Colors.white : AppTheme.primary),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ]),
+                    ),
                   ),
-                ),
-              ),
-            );
-          }),
-        ),
-    ]);
+                );
+              },
+            ),
+          ),
+      ],
+    );
   }
 }

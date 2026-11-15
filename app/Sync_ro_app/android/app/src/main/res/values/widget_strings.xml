@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_memo_title">메모</string>
+    <string name="widget_memo_description">할 일과 일정을 홈 화면에서 바로 적는 메모 위젯</string>
+    <string name="widget_memo_count">할일 %1$d · 일정 %2$d</string>
+    <string name="widget_memo_count_empty">아래 입력줄로 AI 메모를 남겨 보세요</string>
+    <string name="widget_memo_count_done">모두 완료했어요</string>
+    <string name="widget_memo_empty">아직 메모가 없어요.\n+ 로 직접 추가하거나, 아래 입력줄에 한 줄을 적어 보세요.</string>
+    <string name="widget_memo_add">메모 추가</string>
+    <string name="widget_capture_hint">메모 입력 · AI가 분류해요</string>
+    <string name="widget_capture_action">AI 메모 입력</string>
+    <string name="widget_memo_done">완료 표시</string>
+    <string name="widget_memo_delete">메모 삭제</string>
+    <string name="widget_tag_todo">할일</string>
+    <string name="widget_tag_schedule">일정</string>
+
+    <string name="quick_add_title">메모 추가</string>
+    <string name="quick_edit_title">메모 수정</string>
+    <string name="quick_add_hint">무엇을 기억할까요?</string>
+    <string name="quick_add_help">할일과 일정 중 하나를 골라 적어 두세요.</string>
+    <string name="quick_add_cancel">취소</string>
+    <string name="quick_add_save">저장</string>
+    <string name="quick_add_delete">삭제</string>
+    <string name="quick_add_empty">메모 내용을 입력해 주세요.</string>
+</resources>

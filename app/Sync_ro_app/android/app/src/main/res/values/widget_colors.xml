@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 앱의 AppTheme 색과 같은 값이에요 -->
+    <color name="widget_primary">#4936D8</color>
+    <color name="widget_primary_soft">#EEEBFF</color>
+    <color name="widget_text_strong">#17162B</color>
+    <color name="widget_text_muted">#6E6C85</color>
+    <color name="widget_border">#E8E7F0</color>
+    <color name="widget_surface">#FFFFFF</color>
+    <color name="widget_row">#F7F7FC</color>
+    <color name="widget_todo_text">#B26A00</color>
+    <color name="widget_todo_bg">#FFF3DC</color>
+    <color name="widget_schedule_text">#4936D8</color>
+    <color name="widget_schedule_bg">#EEEBFF</color>
+    <color name="widget_danger">#E5484D</color>
+</resources>
