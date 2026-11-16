@@ -834,7 +834,7 @@ def test_갈아탈_때_들르는_게_가장_덜_늦으면_환승역에서(client
     body = plan(client).json()
     stop = body["routes"][0]["todo_stops"][0]
     assert (stop["kind"], stop["leg"]) == ("transfer", 1)
-    assert stop["label"] == "회기역에서 갈아타기 전"
+    assert stop["label"] == "회기역에서 갈아타기 전"  # 버스 정류장 이름은 그대로
     assert stop["extra_min"] == 5  # 더 걷는 1분 + 편의점 머무는 4분
     assert {a["kind"] for a in stop["alternatives"]} == {"before", "transfer", "after"}
     todo = body["todos"][0]
@@ -846,7 +846,7 @@ def test_내려서_들르는_게_가장_덜_늦으면_하차역에서(client, wo
     setup_user(client, hours=3)
     stop = plan(client).json()["routes"][0]["todo_stops"][0]
     assert (stop["kind"], stop["leg"]) == ("after", 2)
-    assert stop["label"] == "청량리역에서 내려서 목적지 가기 전"
+    assert stop["label"] == "청량리역에서 내려서 목적지 가기 전"  # 이미 "역"으로 끝나면 안 붙여요
 
 
 def test_시간이_부족하면_고른_구간에서도_제외하거나_대기(client, world, monkeypatch):
@@ -854,3 +854,11 @@ def test_시간이_부족하면_고른_구간에서도_제외하거나_대기(cl
     setup_user(client, hours=0.5)  # 30분 뒤 도착: 경로만 29분이라 들를 시간이 없어요
     todo = plan(client).json()["todos"][0]
     assert todo["status"] == "대기"
+
+
+
+def test_구간_이름은_역을_붙이고_겹친_노선은_한_번만():
+    assert planner._stop_name({"type": "SUBWAY", "stops": ["서울역", "시청"]}, end=True) == "시청역"
+    assert planner._stop_name({"type": "SUBWAY", "stops": ["동대문역사문화공원(DDP)"]}, end=True) == "동대문역사문화공원역(DDP)"
+    assert planner._stop_name({"type": "BUS", "stops": ["안암역", "고려대앞"]}, end=True) == "고려대앞"
+    assert planner._unique_lines("1호선·1호선·1호선") == "1호선"

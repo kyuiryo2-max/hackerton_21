@@ -538,8 +538,23 @@ def _detour_walk(start: kakao.Coord, end: kakao.Coord, p: dict, cache: dict) -> 
 
 
 def _stop_name(leg: dict, end: bool) -> str:
+    """구간의 타는 곳·내리는 곳 이름. 지하철은 "시청" → "시청역"처럼 역을 붙여요."""
     stops = leg.get("stops") or []
-    return (stops[-1] if end else stops[0]) if stops else ""
+    name = (stops[-1] if end else stops[0]) if stops else ""
+    if name and leg.get("type") == "SUBWAY" and not name.split("(")[0].endswith("역"):
+        base, _, rest = name.partition("(")
+        name = f"{base}역" + (f"({rest}" if rest else "")
+    return name
+
+
+def _unique_lines(name: str) -> str:
+    """"1호선·1호선·1호선" → "1호선" (카카오가 같은 노선을 여러 번 줘요, 앱 RouteSegment.uniqueLines와 같아요)"""
+    seen: list[str] = []
+    for part in name.split("·"):
+        part = part.strip()
+        if part and part not in seen:
+            seen.append(part)
+    return "·".join(seen)
 
 
 def _later_segments(todo: dict, route: dict, destination: kakao.Coord, last_walk: int, cache: dict) -> list[dict]:
@@ -582,7 +597,7 @@ def _later_segments(todo: dict, route: dict, destination: kakao.Coord, last_walk
 
 
 def _first_ride_label(option: "RouteOption") -> str:
-    name = _ride_name(option.card) if option.card.get("name") else ""
+    name = _unique_lines(_ride_name(option.card)) if option.card.get("name") else ""
     return f"{name} 타기 전" if name else "출발해서 타기 전"
 
 
