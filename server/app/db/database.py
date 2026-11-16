@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS todos (
     importance      TEXT NOT NULL DEFAULT '선택',  -- 필수 / 선택
     status          TEXT NOT NULL DEFAULT '대기',  -- 대기 / 포함 / 제외 / 완료
     source          TEXT NOT NULL DEFAULT '입력',  -- 입력(할 일 화면) / 질문(이동 중 질문)
-    stay_minutes    INTEGER                 -- 그곳에 머무를 시간(분). NULL이면 기본 4분
+    stay_minutes    INTEGER,                -- 그곳에 머무를 시간(분). NULL이면 기본 4분
+    place_name      TEXT                    -- 사용자가 고른 실제 가게 이름 (선택)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -71,6 +72,7 @@ _ADDED_COLUMNS = {
         ("status", "TEXT NOT NULL DEFAULT '대기'"),
         ("source", "TEXT NOT NULL DEFAULT '입력'"),
         ("stay_minutes", "INTEGER"),
+        ("place_name", "TEXT"),
     ],
 }
 
@@ -95,7 +97,10 @@ def init_db(path: str | None = None) -> None:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """예전 DB 파일에 새 열(status·source, 11/12 stay_minutes)을 더해요. 완료(done=1)였던 할 일은 상태 '완료'."""
+    """예전 DB 파일에 새 열(status·source·stay_minutes·place_name)을 더해요.
+
+    완료(done=1)였던 할 일은 상태 '완료'로 옮겨요.
+    """
     for table, columns in _ADDED_COLUMNS.items():
         existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, definition in columns:

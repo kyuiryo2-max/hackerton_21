@@ -106,7 +106,9 @@ class TodoController extends ChangeNotifier {
     final saved = RuntimeMode.instance.isDemo
         ? updated.copyWith(
             requiresTravel:
-                (placeType?.isNotEmpty ?? false) || updated.requiresTravel,
+                (placeType?.isNotEmpty ?? false) ||
+                updated.hasStopover ||
+                updated.requiresTravel,
           )
         : await _remote.updateTodo(
             updated,

@@ -28,7 +28,7 @@
 | --- | --- | --- | --- | --- |
 | 있음 | `GET /health` | 서버 확인, 무료 서버 깨우기 | `{"status": "ok"}` | main.py |
 | 있음 | `POST·GET /api/schedules`, `GET·PATCH·DELETE /api/schedules/{id}` | 일정 | [schedules.json](api-examples/schedules.json) | routers/storage.py |
-| 있음 | `POST·GET /api/todos`, `PATCH·DELETE /api/todos/{id}` | 할 일 (상태·출처 포함) | [todos.json](api-examples/todos.json) | routers/storage.py |
+| 있음 | `POST·GET /api/todos`, `PATCH·DELETE /api/todos/{id}` | 할 일 (상태·출처·고른 가게 이름 포함) | [todos.json](api-examples/todos.json) | routers/storage.py |
 | 있음 | `GET /api/messages` | 질문 기록 조회 (대화창 다시 그리기) | [messages.json](api-examples/messages.json) | routers/storage.py |
 | 있음 | `GET·PUT /api/settings/{user_id}` | 경로 선호 가중치 | [settings.json](api-examples/settings.json) | routers/storage.py |
 | 있음 | `POST·GET /api/choices` | 고른 경로 기록 (⑧) | [choices.json](api-examples/choices.json) | routers/storage.py |

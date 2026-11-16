@@ -70,8 +70,9 @@ class TodoScreen extends StatelessWidget {
     if (place != null && place.isNotEmpty) {
       return '예상 ${todo.estimatedMinutes}분 · $place';
     }
+    final hasStopover = todo.requiresTravel || todo.hasStopover;
     return '예상 ${todo.estimatedMinutes}분 · '
-        '${todo.isCompleted ? '완료' : (todo.requiresTravel ? '경유지 추천 후보' : '경유 장소 미분류 · 수정에서 장소 종류 선택')}';
+        '${todo.isCompleted ? '완료' : (hasStopover ? '경유지 추천 후보' : '경유 장소 미분류 · 수정에서 장소 종류 선택')}';
   }
 
   @override

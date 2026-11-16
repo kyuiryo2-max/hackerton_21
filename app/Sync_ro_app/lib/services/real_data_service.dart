@@ -160,6 +160,13 @@ class RealDataService {
     final types = json['place_types'] is List
         ? (json['place_types'] as List).whereType<String>().toList()
         : <String>[];
+    final hasServerPlaceName = json.containsKey('place_name');
+    final serverPlaceName = hasServerPlaceName
+        ? (json['place_name'] as String?)?.trim()
+        : null;
+    final effectivePlaceName = hasServerPlaceName
+        ? serverPlaceName
+        : (placeName ?? previous?.placeName);
     return TodoItem(
       id: (json['id'] as num).toInt(),
       title: '${json['text']}',
@@ -169,10 +176,9 @@ class RealDataService {
           previous?.estimatedMinutes ??
           5,
       requiresTravel:
-          types.isNotEmpty ||
-          ((placeName ?? previous?.placeName)?.trim().isNotEmpty ?? false),
+          types.isNotEmpty || (effectivePlaceName?.isNotEmpty ?? false),
       isCompleted: json['done'] == true || json['status'] == '완료',
-      placeName: placeName ?? previous?.placeName,
+      placeName: effectivePlaceName,
       placeTypes: types,
       important: json['importance'] == '필수',
     );
@@ -229,6 +235,8 @@ class RealDataService {
         'importance': important ? '필수' : '선택',
         'status': '대기',
         'source': '입력',
+        if (placeName != null && placeName.trim().isNotEmpty)
+          'place_name': placeName.trim(),
         if (minutes != null && minutes > 0)
           'stay_minutes': minutes.clamp(1, 120),
       },
@@ -262,6 +270,7 @@ class RealDataService {
       body: {
         'text': updated.title,
         'done': updated.isCompleted,
+        'place_name': updated.placeName?.trim() ?? '',
         if (places != null) 'place_types': places,
         if (updated.estimatedMinutes > 0)
           'stay_minutes': updated.estimatedMinutes.clamp(1, 120),

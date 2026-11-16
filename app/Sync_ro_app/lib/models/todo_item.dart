@@ -12,6 +12,11 @@ class TodoItem {
   /// "꼭" 할 일 (서버 importance 필수). 시간이 부족해도 빼지 않고 물어봐요.
   final bool important;
 
+  /// 장소 종류가 있거나 실제 가게 이름을 골랐으면 들를 곳이 있는 할 일이에요.
+  /// [requiresTravel]이 예전 데이터에서 false로 남아 있어도 화면 판정은 이 값을 써요.
+  bool get hasStopover =>
+      placeTypes.isNotEmpty || (placeName?.trim().isNotEmpty ?? false);
+
   /// [estimatedMinutes]는 그곳에 머무는 시간(서버 stay_minutes)이에요.
   const TodoItem({
     required this.id,
@@ -64,7 +69,9 @@ class TodoItem {
       requiresTravel: json['requires_travel'] as bool? ?? false,
       isCompleted: json['is_completed'] as bool? ?? false,
       placeName: json['place_name'] as String?,
-      placeTypes: (json['place_types'] as List?)?.whereType<String>().toList() ?? const [],
+      placeTypes:
+          (json['place_types'] as List?)?.whereType<String>().toList() ??
+          const [],
       important: json['important'] as bool? ?? false,
     );
   }
