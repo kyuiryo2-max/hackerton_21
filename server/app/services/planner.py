@@ -559,41 +559,46 @@ def _unique_lines(name: str) -> str:
 
 def _later_segments(todo: dict, route: dict, destination: kakao.Coord, last_walk: int, cache: dict) -> list[dict]:
     """갈아탈 때와 마지막에 내린 뒤 들를 후보. 구간마다 가장 가까운 한 곳이에요."""
-    out = []
     legs = route["legs"]
     rides = [i for i, leg in enumerate(legs) if leg["type"] in TRANSIT_TYPES and leg["start"]]
     stay = stay_seconds(todo)
 
-    def row(kind: str, leg_no: int, label: str, start, end, base: int) -> None:
+    def row(kind: str, leg_no: int, label: str, start, end, base: int) -> dict | None:
         if not start or not end:
-            return
+            return None
         p = _nearest_place(todo, tuple(start), cache)
         if p is None:
-            return
+            return None
         walk = _detour_walk(tuple(start), tuple(end), p, cache)
         if walk is None:
-            return
+            return None
         detour = max(walk["to"] + walk["back"] - base, 0)
-        out.append({"kind": kind, "leg": leg_no, "label": label,
-                    "place": {"place_type": p["place_type"], "name": p["name"], "address": p["address"],
-                              "lng": p["lng"], "lat": p["lat"], "stay_seconds": stay,
-                              "round_trip_walk_seconds": detour,
-                              "walk_to_seconds": walk["to"], "walk_back_seconds": walk["back"],
-                              "walk_to_points": walk["to_points"], "walk_back_points": walk["back_points"]},
-                    "extra_seconds": detour + stay})
+        return {"kind": kind, "leg": leg_no, "label": label,
+                "place": {"place_type": p["place_type"], "name": p["name"], "address": p["address"],
+                          "lng": p["lng"], "lat": p["lat"], "stay_seconds": stay,
+                          "round_trip_walk_seconds": detour,
+                          "walk_to_seconds": walk["to"], "walk_back_seconds": walk["back"],
+                          "walk_to_points": walk["to_points"], "walk_back_points": walk["back_points"]},
+                "extra_seconds": detour + stay}
 
+    jobs = []
     for k in range(len(rides) - 1):
         off, on = legs[rides[k]], legs[rides[k + 1]]
         between = sum(leg["seconds"] for leg in legs[rides[k] + 1:rides[k + 1]] if leg["type"] not in TRANSIT_TYPES)
         name = _stop_name(off, end=True) or _stop_name(on, end=False)
-        row(SEGMENT_TRANSFER, k + 1, f"{name}에서 갈아타기 전" if name else "갈아타기 전",
-            off["end"] or off["start"], on["start"], between)
+        jobs.append((SEGMENT_TRANSFER, k + 1, f"{name}에서 갈아타기 전" if name else "갈아타기 전",
+                     off["end"] or off["start"], on["start"], between))
     if rides:
         last = legs[rides[-1]]
         name = _stop_name(last, end=True)
-        row(SEGMENT_AFTER, len(rides), f"{name}에서 내려서 목적지 가기 전" if name else "내려서 목적지 가기 전",
-            last["end"] or last["start"], destination, last_walk)
-    return out
+        jobs.append((SEGMENT_AFTER, len(rides), f"{name}에서 내려서 목적지 가기 전" if name else "내려서 목적지 가기 전",
+                     last["end"] or last["start"], destination, last_walk))
+    if not jobs:
+        return []
+    # 구간마다 장소 검색 + 도보를 부르는데 서로 상관없어서 동시에 물어봐요 (11/16: 할 일을 넣으면 길찾기가 느려짐)
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        rows = list(pool.map(lambda job: row(*job), jobs))
+    return [r for r in rows if r]
 
 
 def _first_ride_label(option: "RouteOption") -> str:
@@ -683,6 +688,16 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
         spare = max((route["kakao_total_seconds"] or 0) - route["moving_seconds"], 0)
         first_walk, last_walk = (first_walk if first_walk is not None else spare), (last_walk or 0)
     stop = tuple(first["start"])
+    # 할 일마다 타기 전 장소·갈아탈 때·내린 뒤 후보를 동시에 찾아요 (11/16)
+    places: dict = {}
+    later: dict = {}
+    if todos:
+        with ThreadPoolExecutor(max_workers=min(2 * len(todos), 8)) as pool:
+            near_jobs = {t["id"]: pool.submit(_near_place, t, stop, place_cache, origin, first_walk) for t in todos}
+            later_jobs = {t["id"]: pool.submit(_later_segments, t, route, destination, last_walk, place_cache)
+                          for t in todos}
+            places = {k: f.result() for k, f in near_jobs.items()}
+            later = {k: f.result() for k, f in later_jobs.items()}
     plain = first_walk + route["moving_seconds"] + last_walk
     far = deadline is not None and deadline - plain > REALTIME_WINDOW_SECONDS
     return RouteOption(
@@ -693,9 +708,9 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
               "guidance": first["guidance"], "transfers": route["transfers"], "fare": route["fare_min"],
               "stops": first["stops"],
               "legs": _live_legs(route, origin, destination, first_walk, last_walk, first_points, last_points)},
-        places={t["id"]: _near_place(t, stop, place_cache, origin, first_walk) for t in todos},
+        places=places,
         leg=first,
-        later={t["id"]: _later_segments(t, route, destination, last_walk, place_cache) for t in todos},
+        later=later,
     )
 
 
