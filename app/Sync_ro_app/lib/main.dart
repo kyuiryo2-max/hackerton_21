@@ -94,7 +94,7 @@ class _SyncRoAppState extends State<SyncRoApp> {
       child: ScheduleScope(
         controller: _scheduleController,
         child: MaterialApp(
-          title: 'Sync_ro',
+          title: 'Via',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           home: MainScreen(

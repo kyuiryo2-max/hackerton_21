@@ -293,43 +293,100 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
+      body: Column(
         children: [
-          PageView(
-            // 지도를 끌 때 탭이 넘어가지 않게 좌우 넘김은 끄고 하단 탭으로만 이동해요
-            physics: const NeverScrollableScrollPhysics(),
-            controller: _pageController,
-            onPageChanged: _onPageChanged,
-            children: _screens,
+          // 맨 위 앱 로고 (11/16)
+          Container(
+            width: double.infinity,
+            color: Colors.white,
+            child: SafeArea(
+              bottom: false,
+              child: Container(
+                height: 44,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: AppTheme.border)),
+                ),
+                alignment: Alignment.centerLeft,
+                child: Image.asset('assets/branding/via_logo.png', height: 32, semanticLabel: 'Via'),
+              ),
+            ),
           ),
-          // 떠 있는 "AI 질문" 버튼은 뺐어요. AI 질문은 이동 중 지도 팝업에서만 해요 (#51 피드백 4, 11/14)
+          Expanded(
+            // 로고 줄이 상태 표시줄 자리를 썼으니 아래 화면들은 위쪽 여백을 다시 넣지 않아요
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: Stack(
+                children: [
+                  PageView(
+                    // 지도를 끌 때 탭이 넘어가지 않게 좌우 넘김은 끄고 하단 탭으로만 이동해요
+                    physics: const NeverScrollableScrollPhysics(),
+                    controller: _pageController,
+                    onPageChanged: _onPageChanged,
+                    children: _screens,
+                  ),
+                  // 떠 있는 "AI 질문" 버튼은 뺐어요. AI 질문은 이동 중 지도 팝업에서만 해요 (#51 피드백 4, 11/14)
+                ],
+              ),
+            ),
+          ),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: AppTheme.border)),
-        ),
-        child: NavigationBar(
-          selectedIndex: _selectedIndex,
-          onDestinationSelected: _onDestinationSelected,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home),
-              label: '홈',
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: AppTheme.border)),
             ),
-            NavigationDestination(
-              icon: Icon(Icons.alt_route_outlined),
-              selectedIcon: Icon(Icons.alt_route),
-              label: '이동',
+            child: MediaQuery.removePadding(
+              context: context,
+              removeBottom: true,
+              child: NavigationBar(
+                selectedIndex: _selectedIndex,
+                onDestinationSelected: _onDestinationSelected,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: '홈',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.alt_route_outlined),
+                    selectedIcon: Icon(Icons.alt_route),
+                    label: '이동',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.calendar_month_outlined),
+                    selectedIcon: Icon(Icons.calendar_month),
+                    label: '할 일·일정',
+                  ),
+                ],
+              ),
             ),
-            NavigationDestination(
-              icon: Icon(Icons.calendar_month_outlined),
-              selectedIcon: Icon(Icons.calendar_month),
-              label: '할 일·일정',
+          ),
+          // 맨 아래 아주 작게 팀 로고 (11/16)
+          Container(
+            width: double.infinity,
+            color: Theme.of(context).navigationBarTheme.backgroundColor ??
+                Theme.of(context).colorScheme.surfaceContainer,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Opacity(
+                  opacity: 0.45,
+                  child: Image.asset(
+                    'assets/branding/team_logo.png',
+                    height: 12,
+                    semanticLabel: '팀 Sync-ro',
+                  ),
+                ),
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

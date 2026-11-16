@@ -76,6 +76,80 @@ class MoveRoutePlanner extends StatefulWidget {
 }
 
 /// 경로 한 개의 시각
+/// 서버가 고른 들를 구간 하나 (11/16 피드백 3). 경로 카드의 todo_stops 한 줄이에요
+class _SegStop {
+  const _SegStop({
+    required this.kind,
+    required this.leg,
+    required this.label,
+    required this.extraMin,
+    required this.stayMin,
+    required this.detourMin,
+    required this.place,
+  });
+  /// before(첫 차 타기 전) / transfer(갈아타기 전) / after(내려서 목적지 가기 전)
+  final String kind;
+  /// transfer면 몇 번째 갈아타기인지(1부터), after면 탈것 수
+  final int leg;
+  final String label;
+  final int extraMin;
+  final int stayMin;
+  final int detourMin;
+  final Map<String, dynamic> place;
+
+  static _SegStop? parse(Object? raw) {
+    if (raw is! Map) return null;
+    final place = raw['place'];
+    if (place is! Map) return null;
+    int n(Object? v) => v is num ? v.toInt() : 0;
+    return _SegStop(
+      kind: '${raw['kind'] ?? 'before'}',
+      leg: n(raw['leg']),
+      label: '${raw['label'] ?? ''}',
+      extraMin: n(raw['extra_min']),
+      stayMin: n(raw['stay_min']),
+      detourMin: n(raw['detour_min']),
+      place: Map<String, dynamic>.from(place),
+    );
+  }
+
+  StayCandidate candidate(String id, {String? address}) {
+    double? d(Object? v) => v is num ? v.toDouble() : null;
+    List<GeoPoint> pts(Object? v) => [
+          if (v is List)
+            for (final p in v)
+              if (p is List && p.length >= 2 && p[0] is num && p[1] is num)
+                GeoPoint('', (p[1] as num).toDouble(), (p[0] as num).toDouble()),
+        ];
+    final lat = d(place['lat']), lng = d(place['lng']);
+    final name = '${place['name'] ?? '들를 곳'}';
+    return StayCandidate(
+      id: id,
+      name: name,
+      detourMinutes: detourMin,
+      address: address ?? '${place['address'] ?? ''}',
+      placeType: place['place_type'] as String?,
+      point: lat == null || lng == null ? null : GeoPoint(name, lat, lng),
+      walkToMinutes: (place['walk_to_min'] as num?)?.toInt(),
+      walkBackMinutes: (place['walk_back_min'] as num?)?.toInt(),
+      pathTo: pts(place['walk_to_points']),
+      pathBack: pts(place['walk_back_points']),
+    );
+  }
+}
+
+/// 갈아탈 때·내린 뒤 들르는 판정에 붙여 두는 값 (StayEval에 없는 것)
+class _SegInfo {
+  const _SegInfo(this.seg, this.extraMin, this.arrive, this.getOff);
+  final _SegStop seg;
+  /// 머물 시간을 바꾼 것까지 넣은, 도착이 늦어지는 분
+  final int extraMin;
+  /// 들렀다 갈 때 목적지 도착 시각
+  final DateTime arrive;
+  /// 들르러 걷기 시작하는 시각 (차에서 내리는 시각)
+  final DateTime getOff;
+}
+
 class _RouteTimes {
   const _RouteTimes(this.depart, this.arrive, this.derived, [this.viaStop = false]);
   final DateTime depart;
@@ -289,11 +363,17 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     if (!_tripStarted || plan == null || route == null) return;
     final index = _tripIndex(plan);
     final phase = plan.steps[index].phase;
-    if (phase == TripPhase.atPlace || phase == TripPhase.waiting || phase == TripPhase.arrived) {
+    final now = _tripClock;
+    // 아직 출발 시각 전이면(이동 시작을 일찍 눌렀으면) 길을 벗어난 게 아니에요 (11/16: 집에서 2.7km 이탈로 뜸)
+    final beforeDepart = index == 0 && plan.beforeDepart(now);
+    if (beforeDepart || phase == TripPhase.atPlace || phase == TripPhase.waiting || phase == TripPhase.arrived) {
       _offCount = 0;
+      if (_offAlerted) {
+        _offAlerted = false;
+        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+      }
       return;
     }
-    final now = _tripClock;
     // 지금 단계와 바로 앞뒤 단계: 버튼을 늦게 눌렀거나 조금 앞서 걸어도 이탈로 보지 않게
     var dist = double.infinity;
     for (var i = math.max(0, index - 1); i <= math.min(plan.steps.length - 1, index + 1); i++) {
@@ -422,6 +502,50 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final boardAt = given != null && !given.isBefore(reachStop) ? given : reachStop;
     final planNow = DateTime.tryParse('${widget.plan?.data['now'] ?? ''}') ?? widget.now;
     final raw = p?['next_vehicles_min'];
+    // 갈아탈 때·내린 뒤 들르기 (11/16): 첫 차까지는 그대로, 들른 뒤의 차는 늘어난 만큼 늦게 타요
+    final seg = chosen == null || chosen.status == StayStatus.bad ? null : _segOf[chosen];
+    if (seg != null && chosen != null) {
+      final base = _times(route);
+      final plain = _transfersOf(segs, boardAt, base.arrive);
+      final k = seg.seg.kind == 'transfer' ? seg.seg.leg : plain.length + 1;
+      final shift = Duration(minutes: seg.extraMin);
+      final moved = [
+        for (var i = 0; i < plain.length; i++)
+          if (i < k - 1)
+            plain[i]
+          else
+            TripTransfer(
+              lat: plain[i].lat,
+              lng: plain[i].lng,
+              getOffAt: i == k - 1 ? plain[i].getOffAt : plain[i].getOffAt.add(shift),
+              getOffName: plain[i].getOffName,
+              rideName: plain[i].rideName,
+              stopName: plain[i].stopName,
+              reachStop: i == k - 1 ? chosen.reachStop : plain[i].reachStop.add(shift),
+              boardAt: plain[i].boardAt.add(shift),
+            ),
+      ];
+      return TripPlan(
+        depart: times.depart,
+        reachStop: reachStop,
+        boardAt: boardAt,
+        arriveAt: seg.arrive,
+        stopName: o?.boardStopName ?? ride?.startName ?? '정류장',
+        rideName: _rideNameOf(p, ride),
+        destination: widget.destinationName,
+        placeName: chosen.candidate.name,
+        arrivePlace: chosen.arrivePlace,
+        leavePlace: chosen.leavePlace,
+        stopLeg: k,
+        stopStart: seg.getOff,
+        vehicleTimes: [
+          if (raw is List)
+            for (final v in raw)
+              if (v is num) planNow.add(Duration(minutes: v.toInt())),
+        ],
+        transfers: moved,
+      );
+    }
     final transfers = _transfersOf(segs, boardAt, times.arrive);
     return TripPlan(
       depart: times.depart,
@@ -576,11 +700,23 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     switch (step.phase) {
       case TripPhase.toPlace:
         final path = [for (final p in chosen?.candidate.pathTo ?? const <GeoPoint>[]) LatLng(p.lat, p.lng)];
-        final pts = path.length >= 2 ? path : [if (widget.origin != null) widget.origin!, if (place != null) place];
-        return (pts, _fraction(now, plan.depart, plan.arrivePlace!));
+        // 갈아탈 때·내린 뒤 들르면 내린 곳에서 걸어가요 (11/16)
+        LatLng? from = widget.origin;
+        if (plan.stopLeg > 0 && rideAt >= 0) {
+          final g = geo(segs[plan.stopsAfterRide ? rideAt : rides[(step.leg - 1).clamp(0, rides.length - 1).toInt()]]);
+          from = g.isEmpty ? null : g.last;
+        }
+        final pts = path.length >= 2 ? path : [if (from != null) from, if (place != null) place];
+        return (pts, _fraction(now, step.start, plan.arrivePlace!));
       case TripPhase.atPlace:
         return ([if (place != null) place], 1);
       case TripPhase.toStop:
+        if (step.leg > 0 && rideAt >= 0 && plan.hasStop && plan.stopLeg == step.leg) {
+          // 갈아타기 전에 들렀으면 가게 → 갈아탈 곳 (11/16)
+          final back = [for (final p in chosen?.candidate.pathBack ?? const <GeoPoint>[]) LatLng(p.lat, p.lng)];
+          final pts = back.length >= 2 ? back : [if (place != null) place, if (boardPt != null) boardPt];
+          return (pts, _fraction(now, step.start, plan.reachOf(step.leg)));
+        }
         if (step.leg > 0 && rideAt >= 0) {
           // 환승 걷기: 앞 차와 이번 차 사이 도보 구간. 없으면 앞 차 끝 → 이번 차 시작
           final prevRide = rides[leg - 1];
@@ -590,7 +726,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           return (pts, _fraction(now, step.start, plan.reachOf(step.leg)));
         }
         final back = [for (final p in chosen?.candidate.pathBack ?? const <GeoPoint>[]) LatLng(p.lat, p.lng)];
-        final pts = plan.hasStop
+        final pts = plan.hasStop && plan.stopLeg == 0
             ? (back.length >= 2 ? back : [if (place != null) place, if (boardPt != null) boardPt])
             : (segs.isNotEmpty && segs.first.type == RouteSegmentType.walking ? geo(segs.first) : <LatLng>[]);
         return (pts, _fraction(now, step.start, plan.reachStop));
@@ -598,7 +734,8 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
         return ([if (boardPt != null) boardPt], 1);
       case TripPhase.riding:
         // 마지막 차는 내려서 목적지까지 걷는 길까지, 갈아탈 차가 남았으면 이번 차 구간만
-        final last = plan.isLastLeg(step.leg);
+        // 내린 뒤 들르면 걷는 길은 가게로 가는 단계에서 그려요 (11/16)
+        final last = plan.isLastLeg(step.leg) && !plan.stopsAfterRide;
         final pts = [
           if (rideAt >= 0)
             for (final s in last ? segs.skip(rideAt) : [segs[rideAt]]) ...geo(s)
@@ -1034,7 +1171,76 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     if (o == null || !o.canPlanStay) return null;
     final match = o.taskFor(task.id, needOf: _needOf);
     if (match == null) return null;
-    return o.rank(match, delayMinutes: 0, need: _needOverride[task.id] ?? match.needMinutes);
+    // 서버가 이 경로에서 고른 구간 (11/16 피드백 3): 갈아탈 때·내린 뒤면 그 구간으로 판정해요
+    final seg = _segStopFor(route, task.id);
+    if (seg != null && seg.kind != 'before') {
+      final e = _segEval(route, match, seg);
+      return e == null ? null : [e];
+    }
+    // 타기 전인데 1순위가 아닌 경로면, 그 경로의 첫 정류장 근처 가게로 판정해요 (예전엔 1순위 경로 가게를 썼어요)
+    var task2 = match;
+    final rank = (_planRouteFor(route)?['rank'] as num?)?.toInt();
+    if (seg != null && rank != null && rank != 1) {
+      task2 = StayTask(
+        id: match.id,
+        title: match.title,
+        importance: match.importance,
+        serverStatus: match.serverStatus,
+        needMinutes: match.needMinutes,
+        needFromServer: match.needFromServer,
+        candidates: [seg.candidate('${match.id}-r$rank')],
+        reason: match.reason,
+      );
+    }
+    return o.rank(task2, delayMinutes: 0, need: _needOverride[task.id] ?? match.needMinutes);
+  }
+
+  /// 갈아탈 때·내린 뒤 들르는 판정 (11/16). 판정 값은 [_segOf]에 붙여 둬요
+  final Expando<_SegInfo> _segOf = Expando<_SegInfo>('segStop');
+
+  _SegStop? _segStopFor(RouteCandidate route, String todoId) {
+    final raw = _planRouteFor(route)?['todo_stops'];
+    if (raw is! List) return null;
+    for (final r in raw) {
+      if (r is Map && '${r['todo_id']}' == todoId) return _SegStop.parse(r);
+    }
+    return null;
+  }
+
+  StayEval? _segEval(RouteCandidate route, StayTask task, _SegStop seg) {
+    final base = _times(route);
+    final segs = route.segments;
+    final rides = [for (var i = 0; i < segs.length; i++) if (_isRide(segs[i])) i];
+    if (rides.isEmpty) return null;
+    // 내리는 곳: 갈아타기 전이면 seg.leg번째 차, 내린 뒤면 마지막 차. 그 뒤 구간 시간을 도착 시각에서 빼요
+    final rideIdx = seg.kind == 'transfer' ? (seg.leg - 1).clamp(0, rides.length - 1).toInt() : rides.length - 1;
+    final after = [for (var i = rides[rideIdx] + 1; i < segs.length; i++) segs[i].durationMinutes]
+        .fold<int>(0, (a, b) => a + b);
+    final getOff = base.arrive.subtract(Duration(minutes: after));
+    final need = _needOverride[task.id] ?? task.needMinutes;
+    final extra = math.max(0, seg.extraMin - seg.stayMin + need);
+    final arrive = base.arrive.add(Duration(minutes: extra));
+    final candidate = seg.candidate('${task.id}-${seg.kind}${seg.leg}', address: '${seg.label} 들르기 · 도착 +$extra분');
+    final arrivePlace = getOff.add(Duration(minutes: candidate.walkTo));
+    final leavePlace = arrivePlace.add(Duration(minutes: need));
+    final target = widget.arriveBy;
+    final over = target == null ? 0 : arrive.difference(target).inMinutes;
+    final tooLate = over > 0;
+    final e = StayEval(
+      candidate: candidate,
+      status: tooLate ? StayStatus.bad : StayStatus.ok,
+      dwell: tooLate ? need - over : need,
+      need: need,
+      depart: base.depart,
+      arrivePlace: arrivePlace,
+      waitMinutes: 0,
+      leavePlace: leavePlace,
+      reachStop: leavePlace.add(Duration(minutes: candidate.walkBack)),
+      missesVehicle: false,
+      closeLimited: false,
+    );
+    _segOf[e] = _SegInfo(seg, extra, arrive, getOff);
+    return e;
   }
 
   /// 할 일을 적용했을 때 경로 카드 순서 (11/13)
@@ -1069,6 +1275,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     if (evals == null || evals.isEmpty) return base;
     final e = evals.first;
     if (e.status == StayStatus.bad) return base;
+    // 갈아탈 때·내린 뒤 들르면 출발은 그대로, 도착이 늦어져요 (11/16)
+    final seg = _segOf[e];
+    if (seg != null) return _RouteTimes(base.depart, seg.arrive, base.derived, false);
     return _RouteTimes(e.depart, base.arrive, base.derived, true);
   }
 

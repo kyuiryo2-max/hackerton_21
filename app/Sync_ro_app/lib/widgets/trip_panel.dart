@@ -201,6 +201,13 @@ class _TripPanelState extends State<TripPanel> {
     return '${a.month}/${a.day} ';
   }
 
+  /// 가게에서 나온 다음 일 (11/16): 타기 전이면 첫 차, 갈아타기 전이면 갈아탈 차, 내린 뒤면 목적지 도착
+  static String _afterPlace(TripPlan p, String Function(DateTime?) hm) {
+    if (p.stopsAfterRide) return '${hm(p.leavePlace)}에 나오면 ${p.destination}에 ${hm(p.arriveAt)} 도착';
+    final leg = p.stopLeg;
+    return '${hm(p.leavePlace)}에 나오면 ${p.rideOf(leg)} ${hm(p.boardOf(leg))} 탑승';
+  }
+
   ({String title, String sub, String? action}) _status() {
     final p = widget.plan;
     final now = widget.stepNow ?? widget.now;
@@ -215,7 +222,7 @@ class _TripPanelState extends State<TripPanel> {
     if (widget.index == 0 && p.beforeDepart(now) && left(p.depart) >= 1) {
       return (
         title: '${_day(p.depart, widget.now)}${hm(p.depart)}에 출발하면 돼요',
-        sub: '아직 ${left(p.depart)}분 여유 · ${p.hasStop ? '${p.placeName} 들러서 ' : ''}${p.rideName} ${hm(p.boardAt)} 탑승',
+        sub: '아직 ${left(p.depart)}분 여유 · ${p.hasStop && p.stopLeg == 0 ? '${p.placeName} 들러서 ' : ''}${p.rideName} ${hm(p.boardAt)} 탑승',
         action: '지금 출발했어요',
       );
     }
@@ -230,7 +237,7 @@ class _TripPanelState extends State<TripPanel> {
         final m = left(p.leavePlace!);
         return (
           title: m > 0 ? '${p.placeName}에서 $m분 더 있어도 돼요' : '지금 나가야 해요',
-          sub: '${hm(p.leavePlace)}에 나오면 ${p.rideName} ${hm(p.boardAt)} 탑승',
+          sub: _afterPlace(p, hm),
           action: '나왔어요',
         );
       case TripPhase.toStop:
@@ -375,7 +382,7 @@ class _TripPanelState extends State<TripPanel> {
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _send(),
                 decoration: InputDecoration(
-                  hintText: _listening ? '듣고 있어요… 말이 끝나면 바로 물어봐요' : '예: 몇 분 남았어? · 5분 늦을 것 같아',
+                  hintText: _listening ? '듣고 있어요… 말이 끝나면 바로 물어봐요' : '예: 편의점 들러도 돼? · 다음 버스 언제 와?',
                   isDense: true,
                   border: const OutlineInputBorder(),
                 ),
