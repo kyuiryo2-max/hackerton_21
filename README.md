@@ -1,11 +1,11 @@
-# (가칭) 이동 보조 서비스
+# Via
 
 > 일정과 할 일을 말로 적어 두면, 언제 준비하고 출발할지 알려 주고, 이동 중 남는 시간에 어떤 할 일을 끼워 넣을 수 있는지 판단해 주며, 이동 중 궁금한 걸 물으면 내 상황에 맞춰 답해 주는 이동 보조 서비스
 
 2026 인공지능학과 대학 연합 해커톤 · 팀 Sync-ro
 
-- 배포 주소: (https://kyuiryo2-max.github.io/hackerton_21/)
-- 시연 영상: (녹화 후 추가)
+- 배포 주소: https://kyuiryo2-max.github.io/hackerton_21/
+- 시연 영상: https://youtu.be/nGj3LZLiiOc
 
 ## 서비스 흐름
 
