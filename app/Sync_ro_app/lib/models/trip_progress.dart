@@ -65,6 +65,8 @@ class TripPlan {
     this.leavePlace,
     this.vehicleTimes = const [],
     this.transfers = const [],
+    this.stopLeg = 0,
+    this.stopStart,
   });
 
   final DateTime depart;
@@ -85,10 +87,20 @@ class TripPlan {
   /// 첫 차 다음에 갈아탈 차들 (버스 → 1호선이면 1개). 없으면 한 번에 가는 경로
   final List<TripTransfer> transfers;
 
+  /// 어디서 들르는지 (11/16 피드백 3). 0 = 첫 차 타기 전, k(1..갈아탄 횟수) = k번째로 갈아타기 전,
+  /// 갈아탄 횟수 + 1 = 마지막 차에서 내려 목적지 가기 전
+  final int stopLeg;
+  /// 들르러 걷기 시작하는 시각. 타기 전이면 출발 시각, 갈아탈 때·내린 뒤면 차에서 내리는 시각
+  final DateTime? stopStart;
+
   bool get hasStop => placeName != null && arrivePlace != null && leavePlace != null;
+  /// 마지막 차에서 내려서 들르는지
+  bool get stopsAfterRide => hasStop && stopLeg > transfers.length;
+  /// 들르는 단계(가게로·가게)에 붙는 leg 번호. 내린 뒤 들르면 마지막 차 번호예요
+  int get stopStepLeg => stopLeg > transfers.length ? transfers.length : stopLeg;
 
   late final List<TripStep> steps = _inOrder([
-    if (hasStop) ...[
+    if (hasStop && stopLeg == 0) ...[
       TripStep(TripPhase.toPlace, depart),
       TripStep(TripPhase.atPlace, arrivePlace!),
       TripStep(TripPhase.toStop, leavePlace!),
@@ -98,10 +110,21 @@ class TripPlan {
     TripStep(TripPhase.riding, boardAt),
     // 갈아타기: 내려서 다음 정류장·역으로 걷고, 기다렸다가, 다시 타요 (11/14)
     for (var i = 0; i < transfers.length; i++) ...[
-      TripStep(TripPhase.toStop, transfers[i].getOffAt, i + 1),
+      // 갈아타기 전에 들르면: 내려서 가게로 → 가게 → 갈아탈 곳으로 (11/16)
+      if (hasStop && stopLeg == i + 1) ...[
+        TripStep(TripPhase.toPlace, stopStart ?? transfers[i].getOffAt, i + 1),
+        TripStep(TripPhase.atPlace, arrivePlace!, i + 1),
+        TripStep(TripPhase.toStop, leavePlace!, i + 1),
+      ] else
+        TripStep(TripPhase.toStop, transfers[i].getOffAt, i + 1),
       TripStep(TripPhase.waiting,
           transfers[i].reachStop.isAfter(transfers[i].boardAt) ? transfers[i].boardAt : transfers[i].reachStop, i + 1),
       TripStep(TripPhase.riding, transfers[i].boardAt, i + 1),
+    ],
+    // 마지막 차에서 내려 목적지 가기 전에 들르면: 내려서 가게로 → 가게 → 도착 (11/16)
+    if (stopsAfterRide) ...[
+      TripStep(TripPhase.toPlace, stopStart ?? arrivePlace!, transfers.length),
+      TripStep(TripPhase.atPlace, arrivePlace!, transfers.length),
     ],
     TripStep(TripPhase.arrived, arriveAt),
   ]);
@@ -127,8 +150,10 @@ class TripPlan {
   /// leg 번째 차가 마지막 차인지 (내리면 목적지 쪽으로 걸어가요)
   bool isLastLeg(int leg) => leg >= transfers.length;
 
-  /// leg 번째 차에서 내리는 시각. 마지막 차는 목적지 도착 시각을 써요
-  DateTime alightOf(int leg) => isLastLeg(leg) ? arriveAt : transfers[leg].getOffAt;
+  /// leg 번째 차에서 내리는 시각. 마지막 차는 목적지 도착 시각을 써요 (내린 뒤 들르면 내리는 시각)
+  DateTime alightOf(int leg) => isLastLeg(leg)
+      ? (stopsAfterRide ? (stopStart ?? arrivePlace!) : arriveAt)
+      : transfers[leg].getOffAt;
 
   /// 출발 시각 전인지 (이동 시작을 일찍 눌렀을 때)
   bool beforeDepart(DateTime now) => now.isBefore(depart);
@@ -182,8 +207,8 @@ class TripPlan {
   Map<String, dynamic> toAskJson(TripPhase phase, DateTime now, [int leg = 0]) => {
         'phase': phase.code,
         'now': _iso(now),
-        if (hasStop && leg == 0) 'place_name': placeName,
-        if (hasStop && leg == 0) 'leave_place_at': _iso(leavePlace!),
+        if (hasStop && leg == stopStepLeg) 'place_name': placeName,
+        if (hasStop && leg == stopStepLeg) 'leave_place_at': _iso(leavePlace!),
         'stop_name': stopOf(leg),
         'board_at': _iso(boardOf(leg)),
         'ride_name': rideOf(leg),
