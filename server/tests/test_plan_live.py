@@ -235,7 +235,8 @@ def walks(world, monkeypatch):
     return asked
 
 
-def test_장소_종류_여러_개에서_후보를_모아_도보가_짧은_순(client, walks):
+def test_장소_종류_여러_개에서_후보를_모아_도보가_짧은_순(client, walks, monkeypatch):
+    monkeypatch.setattr(planner, "_later_segments", lambda *a, **k: [])  # 버스 타기 전 후보만 봐요
     setup_user(client, todos=(("이어폰 사기", ["편의점", "다이소"], "필수"),))
     todo = plan(client).json()["todos"][0]
     assert [c["name"] for c in todo["candidates"]] == ["GS25 안암점", "CU 안암역점", "다이소 안암점"]
@@ -246,7 +247,8 @@ def test_장소_종류_여러_개에서_후보를_모아_도보가_짧은_순(cl
     assert (todo["place"]["lng"], todo["place"]["lat"]) == (GS["lng"], GS["lat"])
 
 
-def test_후보는_최대_3곳이고_먼_곳은_도보를_재지_않음(client, walks, world):
+def test_후보는_최대_3곳이고_먼_곳은_도보를_재지_않음(client, walks, world, monkeypatch):
+    monkeypatch.setattr(planner, "_later_segments", lambda *a, **k: [])  # 버스 타기 전 후보만 봐요
     world["places"] = {"편의점": [{**CU, "distance_m": 80}, GS, FAR], "다이소": [DAISO]}
     setup_user(client, todos=(("이어폰 사기", ["편의점", "다이소"], "필수"),))
     todos = plan(client).json()["todos"]
@@ -769,3 +771,109 @@ def test_첫차_시각으로_출발하면_실시간_없이_그_시각_기준(cli
     first = res.json()["routes"][0]
     assert first["basis"] == "scheduled" and first["has_realtime"] is False
     assert first["depart_at"].startswith("2026-11-16T05:30")
+
+
+def test_목적지를_고르고_도착_희망_시간을_넣으면_거꾸로_계산(client, world):
+    """이동 탭에서 출발·도착을 직접 골라도 도착 희망 시간 기준으로 계산해요 (11/16 피드백 5)"""
+    target = (datetime.now(planner.KST) + timedelta(hours=3)).replace(microsecond=0)
+    res = plan(client, todo_ids=[], arrive_by=target.isoformat(),
+               destination={"name": "서울역", "lat": 37.5547, "lng": 126.9707})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["basis"] == "arrive_by"
+    assert datetime.fromisoformat(body["schedule"]["arrive_by"]) == target
+    assert target - datetime.fromisoformat(body["arrive_at"]) == timedelta(minutes=5)
+
+
+def test_도착_희망_시간이_지났으면_안내(client, world):
+    past = (datetime.now(planner.KST) - timedelta(minutes=10)).isoformat(timespec="seconds")
+    res = plan(client, todo_ids=[], arrive_by=past,
+               destination={"name": "서울역", "lat": 37.5547, "lng": 126.9707})
+    assert res.status_code == 422
+    assert "지났어요" in res.json()["error"]["message"]
+
+
+def test_도착_희망_시간_없이_목적지만_고르면_지금_출발(client, world):
+    res = plan(client, todo_ids=[], destination={"name": "서울역", "lat": 37.5547, "lng": 126.9707})
+    assert res.json()["basis"] == "now" and res.json()["schedule"]["arrive_by"] is None
+
+
+
+# ---------- 어느 구간에서 들를지 (11/16 피드백 3) ----------
+TRANSFER_ROUTES = [{
+    "type": "BUS_AND_SUBWAY", "moving_seconds": 1500, "kakao_total_seconds": 1800, "transfers": 1,
+    "fare_min": 1550, "fare_max": 1550,
+    "legs": [
+        {"type": "BUS", "seconds": 600, "guidance": "273", "stops": ["안암역", "회기역"], "vehicles": ["273"],
+         "start": (127.0300, 37.5860), "end": (127.0580, 37.5900), "points": []},
+        {"type": "WALKING", "seconds": 120, "guidance": "", "stops": [], "vehicles": [],
+         "start": (127.0580, 37.5900), "end": (127.0582, 37.5902), "points": []},
+        {"type": "SUBWAY", "seconds": 780, "guidance": "1호선", "stops": ["회기역", "청량리역"], "vehicles": ["1호선"],
+         "start": (127.0582, 37.5902), "end": (127.0469, 37.5803), "points": []},
+    ],
+}]
+
+
+def _segment_world(monkeypatch, world, extra_by_start):
+    """출발 좌표별로 경유하면 더 걷는 초를 정해요. 출발지·환승역·하차역 어디서 들를지 비교하려고요."""
+    world["routes"] = TRANSFER_ROUTES
+
+    def route(s, e, via=None, **kw):
+        if not via:
+            return {"seconds": 120, "legs": [{"seconds": 120, "points": []}]}
+        total = 120 + extra_by_start.get(tuple(s), 600)
+        return {"seconds": total, "legs": [{"seconds": total // 2, "points": [list(s), list(via[0])]},
+                                           {"seconds": total - total // 2, "points": [list(via[0]), list(e)]}]}
+    monkeypatch.setattr(planner.kakao, "walk_route", route)
+
+
+def test_갈아탈_때_들르는_게_가장_덜_늦으면_환승역에서(client, world, monkeypatch):
+    # 출발지에서는 10분 더 걷고, 회기역(환승)에서는 1분, 하차역에서는 5분 더 걸어요
+    _segment_world(monkeypatch, world, {(127.0580, 37.5900): 60, (127.0469, 37.5803): 300})
+    setup_user(client, hours=3)
+    body = plan(client).json()
+    stop = body["routes"][0]["todo_stops"][0]
+    assert (stop["kind"], stop["leg"]) == ("transfer", 1)
+    assert stop["label"] == "회기역에서 갈아타기 전"  # 버스 정류장 이름은 그대로
+    assert stop["extra_min"] == 5  # 더 걷는 1분 + 편의점 머무는 4분
+    assert {a["kind"] for a in stop["alternatives"]} == {"before", "transfer", "after"}
+    todo = body["todos"][0]
+    assert todo["segment"]["kind"] == "transfer" and todo["status"] == "포함"
+
+
+def test_내려서_들르는_게_가장_덜_늦으면_하차역에서(client, world, monkeypatch):
+    _segment_world(monkeypatch, world, {(127.0580, 37.5900): 600, (127.0469, 37.5803): 30})
+    setup_user(client, hours=3)
+    stop = plan(client).json()["routes"][0]["todo_stops"][0]
+    assert (stop["kind"], stop["leg"]) == ("after", 2)
+    assert stop["label"] == "청량리역에서 내려서 목적지 가기 전"  # 이미 "역"으로 끝나면 안 붙여요
+
+
+def test_시간이_부족하면_고른_구간에서도_제외하거나_대기(client, world, monkeypatch):
+    _segment_world(monkeypatch, world, {(127.0580, 37.5900): 60})
+    setup_user(client, hours=0.5)  # 30분 뒤 도착: 경로만 29분이라 들를 시간이 없어요
+    todo = plan(client).json()["todos"][0]
+    assert todo["status"] == "대기"
+
+
+
+def test_구간_이름은_역을_붙이고_겹친_노선은_한_번만():
+    assert planner._stop_name({"type": "SUBWAY", "stops": ["서울역", "시청"]}, end=True) == "시청역"
+    assert planner._stop_name({"type": "SUBWAY", "stops": ["동대문역사문화공원(DDP)"]}, end=True) == "동대문역사문화공원역(DDP)"
+    assert planner._stop_name({"type": "BUS", "stops": ["안암역", "고려대앞"]}, end=True) == "고려대앞"
+    assert planner._unique_lines("1호선·1호선·1호선") == "1호선"
+
+
+def test_역_이름을_말하면_그_역_근처에서_장소를_찾음(client, live_ask, world, monkeypatch):
+    """'동대문역에 꽃집 없어?'를 지금 정류장 근처로 답하던 문제 (11/16)"""
+    world["places"] = {"꽃집": [{**CU, "name": "동대문꽃집"}]}
+    centers = []
+    monkeypatch.setattr(planner.places, "search_by_place_type",
+                        lambda t, center, radius_m=300, size=1, **kw: centers.append(center) or world["places"].get(t, []))
+    monkeypatch.setattr(planner.kakao, "search_places",
+                        lambda near, keyword=None, **kw: [{"name": keyword, "lng": 127.0091, "lat": 37.5657}])
+    setup_user(client)
+    plan(client)
+    body = live_ask("동대문역에 꽃집 어디야?")
+    assert centers[-1] == (127.0091, 37.5657)
+    assert body["answer"].startswith("동대문역 근처에서 가까운 곳은") and "동대문역에서 왕복" in body["answer"]

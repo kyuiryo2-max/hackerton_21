@@ -34,6 +34,9 @@ class PlanIn(BaseModel):
     depart_at: datetime | None = Field(
         default=None, description="destination과 함께 주면 이 시각에 출발하는 기준으로 계산해요 (11/15). "
                                   "밤이라 지금 다니는 차가 없을 때 다음 첫차 시각으로 써요. 실시간 도착은 보지 않아요")
+    arrive_by: datetime | None = Field(
+        default=None, description="destination과 함께 주면 이 도착 희망 시각에서 거꾸로 계산해요 (11/16). "
+                                  "일정 기준과 같아서 출발 30분 전부터는 실시간 차로 계산해요. depart_at가 있으면 쓰지 않아요")
     demo: bool = False
 
 
@@ -54,6 +57,7 @@ def plan(body: PlanIn):
         origin = (body.origin.lng, body.origin.lat)
         destination = body.destination.model_dump() if body.destination else None
         return planner.plan_live(body.user_id, origin, body.schedule_id, body.todo_ids, destination=destination,
-                                 depart_at=body.depart_at if destination else None)
+                                 depart_at=body.depart_at if destination else None,
+                                 arrive_by=body.arrive_by if destination else None)
     except planner.PlanError as e:
         return _error(e.status, e.code, e.message)

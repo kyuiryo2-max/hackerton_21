@@ -242,7 +242,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
           title: next?.title,
           destination: active.destination,
           fallbackPrepMinutes: next?.preparationMinutes,
-          fallbackArriveBy: active.arrival,
+          fallbackArriveBy: active.target,
         );
       }
       final route = active.selected;
