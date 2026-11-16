@@ -313,9 +313,11 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           Expanded(
-            // 로고 줄이 상태 표시줄 자리를 썼으니 아래 화면들은 위쪽 여백을 다시 넣지 않아요
-            child: MediaQuery.removePadding(
-              context: context,
+            // 로고 줄이 상태 표시줄 자리를 썼으니 아래 화면들은 위쪽 여백을 다시 넣지 않아요.
+            // Builder로 Scaffold 안쪽 MediaQuery를 써야 키보드 높이가 두 번 빠지지 않아요
+            // (11/16: 입력할 때 화면이 거의 다 가려지던 문제)
+            child: Builder(builder: (inner) => MediaQuery.removePadding(
+              context: inner,
               removeTop: true,
               child: Stack(
                 children: [
@@ -329,7 +331,7 @@ class _MainScreenState extends State<MainScreen> {
                   // 떠 있는 "AI 질문" 버튼은 뺐어요. AI 질문은 이동 중 지도 팝업에서만 해요 (#51 피드백 4, 11/14)
                 ],
               ),
-            ),
+            )),
           ),
         ],
       ),
