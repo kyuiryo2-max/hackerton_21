@@ -637,6 +637,53 @@ def test_추천_경로는_동시에_계산해서_빠름(client, world, monkeypat
     assert took < 0.8, f"{took:.2f}초 걸렸어요"
 
 
+def test_장소_종류가_여러_개면_검색을_동시에(monkeypatch):
+    """편의점·다이소처럼 장소 종류가 둘이면 검색 두 번을 순서대로 기다리지 않아요."""
+    import time as clock
+    calls = []
+
+    def slow(place_type, center, radius_m=300, size=1, **kw):
+        clock.sleep(0.3)
+        calls.append(place_type)
+        return []
+
+    monkeypatch.setattr(planner.places, "search_by_place_type", slow)
+    todo = {"id": 1, "text": "이어폰 사기", "place_types": ["편의점", "다이소"], "importance": "필수"}
+    started = clock.monotonic()
+    result = planner._near_place(todo, (127.0, 37.5), {})
+    took = clock.monotonic() - started
+    assert result is None
+    assert set(calls) == {"편의점", "다이소"}
+    assert took < 0.55, f"{took:.2f}초 걸렸어요"
+
+
+def test_실시간_도착은_경유_후보와_동시에_계산(client, world, monkeypatch):
+    """실시간 도착 조회가 경유 후보 검색이 끝날 때까지 기다리지 않아요."""
+    import time as clock
+
+    def slow_vehicle(leg):
+        clock.sleep(0.3)
+        return [600]
+
+    def slow_near(*args, **kwargs):
+        clock.sleep(0.3)
+        return None
+
+    def slow_later(*args, **kwargs):
+        clock.sleep(0.3)
+        return []
+
+    monkeypatch.setattr(planner, "_vehicle_seconds", slow_vehicle)
+    monkeypatch.setattr(planner, "_near_place", slow_near)
+    monkeypatch.setattr(planner, "_later_segments", slow_later)
+    setup_user(client)
+    started = clock.monotonic()
+    res = plan(client)
+    took = clock.monotonic() - started
+    assert res.status_code == 200
+    assert took < 0.55, f"{took:.2f}초 걸렸어요"
+
+
 def test_이동_중_들르기는_지난_출발_시각을_말하지_않음(client, far_plan):
     """11/14: 이동 중(18:33)에 '커피 사도 돼?'라고 물었더니 '17시 58분에 출발하시면 돼요'라고 답하던 문제."""
     trip = {"phase": "waiting", "now": datetime.now().astimezone().isoformat(), "stop_name": "정류장",
