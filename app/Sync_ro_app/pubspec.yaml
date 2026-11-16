@@ -69,6 +69,11 @@ flutter:
   # 한글 글꼴 (11/14): 웹에서 한글을 입력하는 중인 글자가 네모(□)로 깨져 보여서 넣었어요.
   # Noto Sans KR(OFL)에서 자주 쓰는 한글 2,350자·자모·영문·기호만 남겨 줄인 파일이에요.
   # 여기에 없는 드문 글자는 브라우저가 예전처럼 글꼴을 따로 받아서 보여 줘요.
+  # 앱 로고(Via)와 팀 로고(Sync-ro) (11/16)
+  assets:
+    - assets/branding/via_logo.png
+    - assets/branding/team_logo.png
+
   fonts:
     - family: NotoSansKR
       fonts:

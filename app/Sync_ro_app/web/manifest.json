@@ -1,11 +1,11 @@
 {
-    "name": "sync_ro_app",
-    "short_name": "sync_ro_app",
+    "name": "Via",
+    "short_name": "Via",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#3B2E7E",
+    "description": "가는 길에 들러도 될까? 들를 곳과 출발 시각을 계산해 주는 이동 도우미",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
