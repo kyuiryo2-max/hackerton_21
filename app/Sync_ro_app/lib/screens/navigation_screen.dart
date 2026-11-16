@@ -134,13 +134,14 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       if (!mounted) return;
       // Manual searches have no server schedule id, so do not fabricate a
       // stopover plan; ask the user to run the search again.
+      // 직접 검색도 할 일을 같이 계산해서, 할 일이 바뀌면 같은 출발·도착으로 다시 찾아요 (11/16)
       if (_manualIsActive) {
-        activeRouteController.takeReplanFrom();
-        activeRouteController.clearSearch();
-        setState(() {
-          _manualIsActive = false;
-          _manualError = '할 일이 변경되었습니다. 실제 경유 할 일을 반영하려면 일정을 선택해 다시 추천받아 주세요.';
-        });
+        final from = activeRouteController.takeReplanFrom();
+        if (from != null) {
+          _manualOrigin = Place(id: 'trip_point', name: from.name, address: '', latitude: from.lat, longitude: from.lng);
+          _manualOriginController.text = from.name;
+        }
+        _loadManualRoutes();
         return;
       }
       final schedule = _explicitSchedule ??
@@ -539,6 +540,8 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
         origin: _manualOriginController.text.trim(), destination: _manualDestinationController.text.trim(),
         desiredArrivalTime: _manualArrival ?? DateTime.now(), originPlace: _manualOrigin, destinationPlace: _manualDestination,
         arriveBy: _manualArrival,
+        // 완료 안 한 할 일을 같이 보내요. 예전엔 직접 검색은 길만 찾아서 할 일 적용이 비어 있었어요 (11/16)
+        todoIds: TodoScope.of(context).todos.where((t) => !t.isCompleted).map((t) => t.id).toList(),
       ));
       if (!mounted || serial != _manualRequestSerial) return;
       final routes = [...result.routes]..sort(_fastestFirst);

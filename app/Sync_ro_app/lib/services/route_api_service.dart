@@ -94,6 +94,7 @@ class RouteApiService {
             destinationLng: request.destinationPlace?.longitude,
             departAt: departAt,
             arriveBy: departAt == null ? request.arriveBy : null,
+            todoIds: request.todoIds,
           );
       var plan = await fetch();
       String? notice;
