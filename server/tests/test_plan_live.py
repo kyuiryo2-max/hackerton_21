@@ -862,3 +862,18 @@ def test_구간_이름은_역을_붙이고_겹친_노선은_한_번만():
     assert planner._stop_name({"type": "SUBWAY", "stops": ["동대문역사문화공원(DDP)"]}, end=True) == "동대문역사문화공원역(DDP)"
     assert planner._stop_name({"type": "BUS", "stops": ["안암역", "고려대앞"]}, end=True) == "고려대앞"
     assert planner._unique_lines("1호선·1호선·1호선") == "1호선"
+
+
+def test_역_이름을_말하면_그_역_근처에서_장소를_찾음(client, live_ask, world, monkeypatch):
+    """'동대문역에 꽃집 없어?'를 지금 정류장 근처로 답하던 문제 (11/16)"""
+    world["places"] = {"꽃집": [{**CU, "name": "동대문꽃집"}]}
+    centers = []
+    monkeypatch.setattr(planner.places, "search_by_place_type",
+                        lambda t, center, radius_m=300, size=1, **kw: centers.append(center) or world["places"].get(t, []))
+    monkeypatch.setattr(planner.kakao, "search_places",
+                        lambda near, keyword=None, **kw: [{"name": keyword, "lng": 127.0091, "lat": 37.5657}])
+    setup_user(client)
+    plan(client)
+    body = live_ask("동대문역에 꽃집 어디야?")
+    assert centers[-1] == (127.0091, 37.5657)
+    assert body["answer"].startswith("동대문역 근처에서 가까운 곳은") and "동대문역에서 왕복" in body["answer"]

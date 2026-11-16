@@ -9,6 +9,7 @@ AI 키가 없거나 AI 호출이 실패하면 키워드 규칙(rules.py)으로 �
 답변 문장의 숫자는 모두 코드가 계산한 값이에요.
 """
 import logging
+import re
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -772,25 +773,48 @@ def _live_included(plan: live.LivePlan, user_id: str) -> list[tuple[StopCandidat
             for tid, p in plan.places.items() if p and tid in included_ids]
 
 
+STATION_RE = re.compile(r"([가-힣A-Za-z0-9]{1,15}역)")
+
+
+def _named_station(text: str, near: tuple) -> tuple[tuple, str] | None:
+    """질문에 나온 역 이름의 좌표 (카카오 장소 검색, 가장 잘 맞는 한 곳). 못 찾으면 None"""
+    m = STATION_RE.search(text)
+    if not m:
+        return None
+    name = m.group(1)
+    try:
+        found = planner.kakao.search_places(near, keyword=name, radius_m=20000, size=1, sort="accuracy")
+    except planner.kakao.KakaoError:
+        return None
+    if not found:
+        return None
+    return (found[0]["lng"], found[0]["lat"]), name
+
+
 def _live_place_info(item: dict, state: dict) -> tuple[dict, str]:
     """탑승 정류장 근처의 장소 (가까운 순 최대 3곳). 종류가 없으면 이미 넣은 할 일의 장소를 알려요."""
     ctx = _live_context(state)
     if ctx is None:
         return _no_plan("place_info")
     plan = ctx[0]
+    # "동대문역에 꽃집 없어?"처럼 역 이름을 말하면 그 역 근처에서 찾아요 (11/16). 아니면 탈 정류장 근처
+    center, where = tuple(plan.leg["start"]), "정류장"
+    named = _named_station(state.get("text") or "", center)
+    if named:
+        center, where = named
     if item["place_types"]:
-        found = planner._near_place({"place_types": item["place_types"]}, tuple(plan.leg["start"]), {})
+        found = planner._near_place({"place_types": item["place_types"]}, center, {})
         chosen, _ = _choose_place(found, state)  # "다른 약국 어디야?"면 앞에서 말한 곳을 빼요
         places = (chosen or {}).get("candidates", [])
     else:
         places = [p for _, p in _live_included(plan, state["user_id"])]
     if not places:
         kind = item["place_types"][0] if item["place_types"] else "들를 곳"
-        return {"intent": "place_info", "place": None, "places": []}, f"정류장 근처에서 {_josa(kind, '을를')} 찾지 못했어요."
+        return {"intent": "place_info", "place": None, "places": []}, f"{where} 근처에서 {_josa(kind, '을를')} 찾지 못했어요."
     out_places = [{"name": p["name"], "address": p["address"],
                    "round_trip_min": travel_minutes_from_seconds(p["round_trip_walk_seconds"])} for p in places]
     first = out_places[0]
-    answer = f"가까운 곳은 {_copula(first['name'])}. ({first['address']}, 정류장에서 왕복 {first['round_trip_min']}분)"
+    answer = f"{'' if where == '정류장' else f'{where} 근처에서 '}가까운 곳은 {_copula(first['name'])}. ({first['address']}, {where}에서 왕복 {first['round_trip_min']}분)"
     if len(out_places) > 1:
         answer += " 다른 곳: " + ", ".join(p["name"] for p in out_places[1:]) + "."
     return {"intent": "place_info", "place": {"name": first["name"], "address": first["address"]},

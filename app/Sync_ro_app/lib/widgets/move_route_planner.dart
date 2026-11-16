@@ -363,11 +363,17 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     if (!_tripStarted || plan == null || route == null) return;
     final index = _tripIndex(plan);
     final phase = plan.steps[index].phase;
-    if (phase == TripPhase.atPlace || phase == TripPhase.waiting || phase == TripPhase.arrived) {
+    final now = _tripClock;
+    // 아직 출발 시각 전이면(이동 시작을 일찍 눌렀으면) 길을 벗어난 게 아니에요 (11/16: 집에서 2.7km 이탈로 뜸)
+    final beforeDepart = index == 0 && plan.beforeDepart(now);
+    if (beforeDepart || phase == TripPhase.atPlace || phase == TripPhase.waiting || phase == TripPhase.arrived) {
       _offCount = 0;
+      if (_offAlerted) {
+        _offAlerted = false;
+        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+      }
       return;
     }
-    final now = _tripClock;
     // 지금 단계와 바로 앞뒤 단계: 버튼을 늦게 눌렀거나 조금 앞서 걸어도 이탈로 보지 않게
     var dist = double.infinity;
     for (var i = math.max(0, index - 1); i <= math.min(plan.steps.length - 1, index + 1); i++) {
