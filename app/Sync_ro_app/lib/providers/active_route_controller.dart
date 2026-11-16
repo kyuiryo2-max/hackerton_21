@@ -7,12 +7,15 @@ import '../services/server_plan_service.dart';
 class ActiveRouteSelection {
   const ActiveRouteSelection({required this.routes, required this.selectedId,
     required this.origin, required this.destination, required this.arrival,
-    this.plan, this.demoContext});
+    this.plan, this.demoContext, this.hasTarget = true});
   final List<RouteCandidate> routes;
   final String selectedId;
   final String origin;
   final String destination;
   final DateTime arrival;
+  /// false면 도착 희망 시간 없이 지금 출발로 찾은 경로예요. 이때 [arrival]은 화면에 쓰지 않아요 (11/16)
+  final bool hasTarget;
+  DateTime? get target => hasTarget ? arrival : null;
   final ServerPlan? plan;
   final Map<String, dynamic>? demoContext;
   RouteCandidate get selected => routes.firstWhere((r) => r.id == selectedId,
@@ -57,7 +60,7 @@ class ActiveRouteController extends ChangeNotifier {
     if (current == null || !current.routes.any((r) => r.id == id)) return;
     _active = ActiveRouteSelection(routes: current.routes, selectedId: id,
       origin: current.origin, destination: current.destination, arrival: current.arrival,
-      plan: current.plan, demoContext: current.demoContext);
+      plan: current.plan, demoContext: current.demoContext, hasTarget: current.hasTarget);
     notifyListeners();
   }
   void clearSearch() {

@@ -83,7 +83,8 @@ class RouteApiService {
     // POST /api/plan, NOT the legacy sample-only /api/routes/search.
     final service = ServerPlanService();
     try {
-      // 직접 검색(홈 검색창·별도 이동 계획)은 일정이 아니라 고른 목적지로, 지금 출발 기준이에요.
+      // 직접 검색(홈 검색창·이동 탭 출발·도착 상자)은 일정이 아니라 고른 목적지로 찾아요.
+      // 도착 희망 시간을 넣었으면 그 시각에서 거꾸로, 안 넣었으면 지금 출발 기준이에요 (11/16).
       // 목적지를 빼먹으면 서버가 가장 가까운 일정으로 계산해서 엉뚱한 길이 나와요 (11/13 발견).
       Future<ServerPlan> fetch({DateTime? departAt}) => service.fetch(
             originLat: request.originPlace?.latitude,
@@ -92,11 +93,12 @@ class RouteApiService {
             destinationLat: request.destinationPlace?.latitude,
             destinationLng: request.destinationPlace?.longitude,
             departAt: departAt,
+            arriveBy: departAt == null ? request.arriveBy : null,
           );
       var plan = await fetch();
       String? notice;
       // 밤이라 지금 다니는 차가 없으면 다음 첫차(05:30) 기준으로 다시 찾아요 (11/15)
-      if (plan.noServiceNow && ServerPlan.isNight() && !ApiConfig.demoMode) {
+      if (plan.noServiceNow && ServerPlan.isNight() && !ApiConfig.demoMode && request.arriveBy == null) {
         final first = ServerPlan.nextFirstTrain();
         final retry = await fetch(departAt: first);
         if (retry.routes.isNotEmpty) {

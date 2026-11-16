@@ -90,7 +90,8 @@ class ServerPlanService {
   /// [destinationLat]·[destinationLng]를 주면 일정 없이 "지금 출발" 기준으로 계산해요 (홈 검색창, 직접 검색).
   /// [departAt]을 함께 주면 그 시각 출발 기준이에요 (밤에 다음 첫차, 11/15).
   Future<ServerPlan> fetch({int? scheduleId, List<int>? todoIds, double? originLat, double? originLng,
-      String? destinationName, double? destinationLat, double? destinationLng, DateTime? departAt}) async {
+      String? destinationName, double? destinationLat, double? destinationLng, DateTime? departAt,
+      DateTime? arriveBy}) async {
     final body = <String, dynamic>{
       'user_id': ApiConfig.userId,
       'demo': ApiConfig.demoMode,
@@ -102,6 +103,9 @@ class ServerPlanService {
         'destination': {'name': destinationName ?? '', 'lat': destinationLat, 'lng': destinationLng},
       if (!ApiConfig.demoMode && departAt != null && destinationLat != null)
         'depart_at': departAt.toUtc().toIso8601String(),
+      // 목적지를 직접 골라도 도착 희망 시간이 있으면 그 시각에서 거꾸로 계산해요 (11/16)
+      if (!ApiConfig.demoMode && arriveBy != null && departAt == null && destinationLat != null)
+        'arrive_by': arriveBy.toUtc().toIso8601String(),
     };
     final response = await _client.post(ApiConfig.endpoint('/api/plan'),
       headers: {'Content-Type': 'application/json; charset=utf-8'},

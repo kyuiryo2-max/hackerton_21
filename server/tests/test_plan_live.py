@@ -769,3 +769,28 @@ def test_첫차_시각으로_출발하면_실시간_없이_그_시각_기준(cli
     first = res.json()["routes"][0]
     assert first["basis"] == "scheduled" and first["has_realtime"] is False
     assert first["depart_at"].startswith("2026-11-16T05:30")
+
+
+def test_목적지를_고르고_도착_희망_시간을_넣으면_거꾸로_계산(client, world):
+    """이동 탭에서 출발·도착을 직접 골라도 도착 희망 시간 기준으로 계산해요 (11/16 피드백 5)"""
+    target = (datetime.now(planner.KST) + timedelta(hours=3)).replace(microsecond=0)
+    res = plan(client, todo_ids=[], arrive_by=target.isoformat(),
+               destination={"name": "서울역", "lat": 37.5547, "lng": 126.9707})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["basis"] == "arrive_by"
+    assert datetime.fromisoformat(body["schedule"]["arrive_by"]) == target
+    assert target - datetime.fromisoformat(body["arrive_at"]) == timedelta(minutes=5)
+
+
+def test_도착_희망_시간이_지났으면_안내(client, world):
+    past = (datetime.now(planner.KST) - timedelta(minutes=10)).isoformat(timespec="seconds")
+    res = plan(client, todo_ids=[], arrive_by=past,
+               destination={"name": "서울역", "lat": 37.5547, "lng": 126.9707})
+    assert res.status_code == 422
+    assert "지났어요" in res.json()["error"]["message"]
+
+
+def test_도착_희망_시간_없이_목적지만_고르면_지금_출발(client, world):
+    res = plan(client, todo_ids=[], destination={"name": "서울역", "lat": 37.5547, "lng": 126.9707})
+    assert res.json()["basis"] == "now" and res.json()["schedule"]["arrive_by"] is None

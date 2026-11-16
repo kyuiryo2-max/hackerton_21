@@ -588,12 +588,16 @@ def _pick_schedule(user_id: str, schedule_id: int | None, now: datetime) -> dict
 
 def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
               todo_ids: list[int] | None = None, now: datetime | None = None,
-              destination: dict | None = None, depart_at: datetime | None = None) -> dict:
+              destination: dict | None = None, depart_at: datetime | None = None,
+              arrive_by: datetime | None = None) -> dict:
     """실시간 계획. origin은 (경도, 위도)이고 저장하지 않아요.
 
     destination({name, lng, lat})이 있으면 일정 없이 지금 출발 기준으로 계산해요 (홈 검색창).
     이때 할 일은 todo_ids로 고른 것만 넣어요 (없으면 할 일 없이 길만 찾아요).
     없으면 일정(schedule_id, 없으면 가장 가까운 일정)의 도착 희망 시각에서 거꾸로 계산해요.
+
+    arrive_by가 있으면(destination과 함께) 일정처럼 그 도착 희망 시각에서 거꾸로 계산해요 (11/16 피드백 5:
+    이동 탭에서 출발·도착을 직접 고를 때도 도착 희망 시간을 넣어요). 일정 기준과 똑같이 출발 30분 전부터는 실시간 차로 계산해요.
 
     depart_at가 있으면(destination과 함께) 그 시각에 출발하는 기준이에요 (basis "scheduled", 11/15).
     밤이라 지금 다니는 차가 없을 때 앱이 다음 첫차 시각을 보내요. 지금 오는 차가 아니라서 실시간 도착은 안 봐요.
@@ -607,11 +611,16 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
     now = now or datetime.now(KST).replace(microsecond=0)
     if destination is not None:
         dest = (destination["lng"], destination["lat"])
-        arrive_by = None
-        deadline = NOW_TRIP_DEADLINE_SECONDS
+        target = None
+        if arrive_by is not None and not scheduled:
+            target = (arrive_by if arrive_by.tzinfo else arrive_by.replace(tzinfo=KST)).astimezone(KST)
+            if target <= now:
+                raise PlanError(422, "invalid_request", "도착 희망 시각이 이미 지났어요. 앞으로의 시각을 골라 주세요.")
+        arrive_by = target
+        deadline = int((arrive_by - now).total_seconds()) if arrive_by else NOW_TRIP_DEADLINE_SECONDS
         todo_ids = todo_ids or []
         schedule_out = {"destination": {"name": destination.get("name") or "목적지", "lng": dest[0], "lat": dest[1]},
-                        "arrive_by": None, "prep_minutes": 0}
+                        "arrive_by": arrive_by.isoformat() if arrive_by else None, "prep_minutes": 0}
     else:
         schedule = _pick_schedule(user_id, schedule_id, now)
         dest = (schedule["destination_lng"], schedule["destination_lat"])
