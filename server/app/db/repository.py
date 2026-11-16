@@ -111,6 +111,7 @@ def add_todo(
     status: str = "대기",
     source: str = "입력",
     stay_minutes: int | None = None,
+    place_name: str | None = None,
 ) -> dict:
     """질문으로 들어온 할 일(source="질문")은 중요도를 필수로 등록해요 (결정 로그 11/8).
 
@@ -120,10 +121,10 @@ def add_todo(
         importance = REQUIRED
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO todos (user_id, text, place_types, importance, status, source, stay_minutes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO todos (user_id, text, place_types, importance, status, source, stay_minutes, place_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (user_id, text, json.dumps(place_types or [], ensure_ascii=False), importance, status, source,
-             stay_minutes),
+             stay_minutes, place_name),
         )
         new_id = cur.lastrowid
     return get_todo(new_id, user_id)  # type: ignore[return-value]

@@ -1,5 +1,5 @@
 {
-  "_설명": "할 일 저장·조회·수정·삭제. status 대기/포함/제외/완료, source 입력/질문 (#12 회의 3번). source가 질문이면 importance는 항상 필수",
+  "_설명": "할 일 저장·조회·수정·삭제. status 대기/포함/제외/완료, source 입력/질문 (#12 회의 3번). source가 질문이면 importance는 항상 필수. place_name은 사용자가 추천 목록에서 고른 실제 가게 이름",
   "examples": [
     {
       "request": {
@@ -11,6 +11,7 @@
           "place_types": [
             "편의점"
           ],
+          "place_name": "이마트24 안암점",
           "importance": "필수"
         }
       },
@@ -23,6 +24,7 @@
           "place_types": [
             "편의점"
           ],
+          "place_name": "이마트24 안암점",
           "importance": "필수",
           "status": "대기",
           "source": "입력",
@@ -68,7 +70,8 @@
           "user_id": "u1"
         },
         "body": {
-          "status": "포함"
+          "status": "포함",
+          "place_name": "GS25 안암역점"
         }
       },
       "response": {
@@ -80,6 +83,7 @@
           "place_types": [
             "편의점"
           ],
+          "place_name": "GS25 안암역점",
           "importance": "필수",
           "status": "포함",
           "source": "입력",
@@ -106,6 +110,7 @@
             "place_types": [
               "편의점"
             ],
+            "place_name": "GS25 안암역점",
             "importance": "필수",
             "status": "포함",
             "source": "입력",
@@ -133,6 +138,7 @@
             "place_types": [
               "편의점"
             ],
+            "place_name": "GS25 안암역점",
             "importance": "필수",
             "status": "포함",
             "source": "입력",

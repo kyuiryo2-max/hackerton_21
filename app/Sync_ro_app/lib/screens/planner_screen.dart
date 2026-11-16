@@ -8,6 +8,7 @@ import '../models/schedule.dart';
 import '../models/todo_item.dart';
 import '../providers/schedule_controller.dart';
 import '../providers/todo_controller.dart';
+import '../services/home_widget_bridge.dart';
 import '../services/planner_store.dart';
 import 'detail_screen.dart';
 import 'schedule_form_screen.dart';
@@ -22,9 +23,16 @@ import '../widgets/specialty_chips.dart';
 ///
 /// 일정 탭에는 장우 님이 만든 주간 달력(주 이동 + 요일 띠)과 시간표(매주 반복)를 그대로 두었어요.
 class PlannerScreen extends StatefulWidget {
-  const PlannerScreen({super.key, this.onOpenScheduleRoutes});
+  const PlannerScreen({
+    super.key,
+    this.onOpenScheduleRoutes,
+    this.requestedTab,
+  });
 
   final ValueChanged<Schedule>? onOpenScheduleRoutes;
+
+  /// 메모에서 일정/할일을 등록한 뒤 열 서브 탭 (0 = 일정, 1 = 할 일).
+  final ValueNotifier<int?>? requestedTab;
 
   @override
   State<PlannerScreen> createState() => _PlannerScreenState();
@@ -33,7 +41,7 @@ class PlannerScreen extends StatefulWidget {
 /// 서버 data/demo/place_types.csv 와 같은 목록이에요.
 const kPlaceTypes = [
   '편의점', '다이소', '약국', '카페', '빵집', '케이크집', '꽃집', '올리브영',
-  '마트', '프린트', '우체국', '은행·ATM', '안경점', '음식점', '병원',
+  '마트', '프린트', '우체국', '은행·ATM', '안경점', '음식점', '병원', '문구점',
 ];
 
 const _weekdayNames = ['월', '화', '수', '목', '금', '토', '일'];
@@ -82,11 +90,25 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   @override
   void initState() {
     super.initState();
+    final requested = widget.requestedTab?.value;
+    if (requested != null) _tab = requested.clamp(0, 1).toInt();
+    widget.requestedTab?.addListener(_onRequestedTab);
     store.addListener(_changed);
     RuntimeMode.instance.addListener(_modeChanged);
     store.ensureLoaded();
     _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
+    });
+  }
+
+  void _onRequestedTab() {
+    final tab = widget.requestedTab?.value;
+    if (!mounted || tab == null) return;
+    setState(() => _tab = tab.clamp(0, 1).toInt());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.requestedTab?.value == tab) {
+        widget.requestedTab?.value = null;
+      }
     });
   }
 
@@ -208,6 +230,7 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
   @override
   void dispose() {
+    widget.requestedTab?.removeListener(_onRequestedTab);
     store.removeListener(_changed);
     RuntimeMode.instance.removeListener(_modeChanged);
     _ticker?.cancel();
@@ -217,6 +240,17 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
   void _snack(String text) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// 안드로이드 홈 화면에 메모 위젯을 추가해요.
+  Future<void> _pinWidget() async {
+    final requested = await HomeWidgetBridge.requestPinWidget();
+    if (!mounted) return;
+    _snack(
+      requested
+          ? '확인 창에서 "추가"를 누르면 홈 화면에 메모 위젯이 생겨요.'
+          : '홈 화면을 길게 눌러 위젯 목록에서 "메모"를 골라 주세요.',
+    );
   }
 
   // ---------- 일정 ----------
@@ -472,7 +506,24 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
-            const Text('일정 · 할 일', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            Row(children: [
+              const Expanded(
+                child: Text('일정 · 할 일', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              ),
+              Tooltip(
+                message: '홈 화면에 메모 위젯 추가',
+                child: OutlinedButton.icon(
+                  key: const Key('planner-pin-widget'),
+                  onPressed: _pinWidget,
+                  icon: const Icon(Icons.widgets_outlined, size: 18),
+                  label: const Text('위젯 추가'),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                ),
+              ),
+            ]),
             const SizedBox(height: 14),
             _TabSwitch(
               index: _tab,

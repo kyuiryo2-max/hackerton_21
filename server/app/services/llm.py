@@ -30,9 +30,12 @@ INTENTS = (
 DEFAULT_CONFIRM_QUESTION = "조금만 더 자세히 말해 줄래요?"
 
 
-def load_prompt(name: str, version: str | None = None) -> str:
+def load_prompt(name: str, version: str | None = None, **values: object) -> str:
     text = (PROMPT_DIR / (version or PROMPT_VERSION) / f"{name}.md").read_text(encoding="utf-8")
-    return text.replace("{{PLACE_TYPES}}", ", ".join(place_types()))
+    replacements = {"PLACE_TYPES": ", ".join(place_types()), **values}
+    for key, value in replacements.items():
+        text = text.replace("{{" + key + "}}", str(value))
+    return text
 
 
 @lru_cache
@@ -155,6 +158,74 @@ def parse_todo(text: str) -> dict:
         # 장소가 필요 없는 할 일("엄마한테 전화하기")은 빈 목록이 정답이라 되묻지 않아요
         "needs_confirm": bool(out.get("needs_confirm")) or len(kept) != len(places),
     }
+
+
+def _short_text(value: object, limit: int) -> str:
+    """AI가 준 문장에서 줄바꿈·중복 공백을 없애고 길이를 제한해요."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:limit].strip()
+
+
+def recommend_places(text: str, center: tuple[float, float], limit: int = 3) -> list[dict]:
+    """현재 위치에서 살 수 있는 매장 후보를 AI에게 묻어요.
+
+    AI는 브랜드·검색어·이유만 고르고, 실제 지점 이름과 좌표는 부르는 쪽에서
+    카카오 장소 검색으로 확인해요. AI가 지어낸 주소나 좌표를 신뢰하지 않기
+    위해서예요.
+    """
+    user = json.dumps(
+        {
+            "text": text,
+            "latitude": center[1],
+            "longitude": center[0],
+            "limit": limit,
+        },
+        ensure_ascii=False,
+    )
+    try:
+        prompt = load_prompt("place_recommend", limit=limit)
+    except FileNotFoundError:
+        # 예전 프롬프트 폴더를 쓰는 서버에서도 새 기능이 동작하게 해요.
+        prompt = load_prompt("place_recommend", version="v3", limit=limit)
+    out = _chat_json(prompt, user)
+    items = out.get("items")
+    if items is None:
+        items = out.get("places", [])
+    if not isinstance(items, list):
+        raise ValueError("AI 출력의 매장 목록이 배열이 아니에요")
+
+    allowed = set(place_types())
+    found: list[dict] = []
+    seen: set[str] = set()
+    for item in items:
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict):
+            continue
+        name = _short_text(item.get("name"), 60)
+        query = _short_text(item.get("search_query") or item.get("searchQuery") or name, 60)
+        if not name or not query:
+            continue
+        key = query.casefold()
+        if key in seen:
+            continue
+        category = _short_text(item.get("category"), 30) or "기타"
+        if category not in allowed:
+            category = "기타"
+        reason = _short_text(item.get("reason"), 120) or "현재 위치 주변에서 찾은 매장이에요."
+        seen.add(key)
+        found.append(
+            {
+                "name": name,
+                "search_query": query,
+                "category": category,
+                "reason": reason,
+            }
+        )
+        if len(found) >= limit:
+            break
+    return found
 
 
 def classify_question(text: str, context: dict | None = None, history: list[dict] | None = None) -> dict:

@@ -1,13 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../config/app_theme.dart';
 import '../models/schedule.dart';
 import '../models/place.dart';
+import '../models/place_recommendation.dart';
 import 'place_search_screen.dart';
 import '../services/location_access.dart';
 import '../widgets/route_endpoints.dart';
 import '../providers/schedule_controller.dart';
+import '../services/ai_place_recommendation_service.dart';
 import '../services/planner_store.dart';
+import '../services/place_recommendation_service.dart';
 
 class ScheduleFormScreen extends StatefulWidget {
   final Schedule? existing;
@@ -21,7 +26,13 @@ class ScheduleFormScreen extends StatefulWidget {
   /// 새 일정을 "매주 반복"으로 시작할 때 (시간표 빈 칸을 눌렀을 때)
   final bool startRepeating;
 
-  const ScheduleFormScreen({super.key, this.existing, this.initial, this.routine, this.startRepeating = false});
+  const ScheduleFormScreen({
+    super.key,
+    this.existing,
+    this.initial,
+    this.routine,
+    this.startRepeating = false,
+  });
 
   @override
   State<ScheduleFormScreen> createState() => _ScheduleFormScreenState();
@@ -39,6 +50,12 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
   bool _saving = false;
   Place? _selectedDestination;
+  List<PlaceRecommendation> _recommendations = const [];
+  List<PlaceRecommendation> _aiRecommendations = const [];
+  Timer? _aiDebounce;
+  bool _aiLoading = false;
+  String? _aiError;
+  int _aiRequestId = 0;
   late String _originMode;
   Place? _selectedOrigin;
   late final TextEditingController _originController;
@@ -55,17 +72,25 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
     final now = DateTime.now();
     final routine = widget.routine;
-    final seed = widget.existing ?? widget.initial ?? routine?.occurrence(routine.nextStart(now));
+    final seed =
+        widget.existing ??
+        widget.initial ??
+        routine?.occurrence(routine.nextStart(now));
     _repeat = routine != null || widget.startRepeating;
     _repeatDays = {...?routine?.weekdays};
 
-    _titleController = TextEditingController(
-      text: seed?.title ?? '',
+    _titleController = TextEditingController(text: seed?.title ?? '');
+    _recommendations = const PlaceRecommendationService().recommend(
+      _titleController.text,
     );
+    if (_recommendations.isEmpty &&
+        PlaceRecommendationService.looksLikePurchase(_titleController.text)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadAiRecommendations();
+      });
+    }
 
-    _locationController = TextEditingController(
-      text: seed?.location ?? '',
-    );
+    _locationController = TextEditingController(text: seed?.location ?? '');
 
     if (seed != null &&
         seed.destinationLatitude != null &&
@@ -95,11 +120,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       text: (seed?.preparationMinutes ?? 30).toString(),
     );
 
-    _startTime =
-        seed?.startTime ?? now.add(const Duration(hours: 1));
+    _startTime = seed?.startTime ?? now.add(const Duration(hours: 1));
 
-    _endTime =
-        seed?.endTime ?? _startTime.add(const Duration(hours: 1));
+    _endTime = seed?.endTime ?? _startTime.add(const Duration(hours: 1));
     // 종료 시간은 화면에서 뺐어요 (길찾기에 안 쓰여요). 시간표에 보일 길이만 유지해요.
     final kept = _endTime.difference(_startTime);
     _duration = kept.inMinutes > 0 ? kept : const Duration(hours: 1);
@@ -112,21 +135,40 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
   /// 반복이면 고른 요일 중 가장 가까운 회차로 맞춰요
   DateTime _firstOccurrence() => Routine(
-        id: 0, title: '', weekdays: _repeatDays.toList(),
-        startMinutes: _startMinutes, endMinutes: _startMinutes + 60,
-      ).nextStart(DateTime.now());
+    id: 0,
+    title: '',
+    weekdays: _repeatDays.toList(),
+    startMinutes: _startMinutes,
+    endMinutes: _startMinutes + 60,
+  ).nextStart(DateTime.now());
 
   String get _repeatLabel {
-    final days = [for (var d = 1; d <= 7; d++) if (_repeatDays.contains(d)) _dayNames[d - 1]].join('·');
-    final hm = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}';
+    final days = [
+      for (var d = 1; d <= 7; d++)
+        if (_repeatDays.contains(d)) _dayNames[d - 1],
+    ].join('·');
+    final hm =
+        '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}';
     return '매주 $days $hm';
   }
 
   Future<void> _pickTimeOnly() async {
-    final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_startTime));
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_startTime),
+    );
     if (time == null) return;
-    setState(() => _setArrival(
-        DateTime(_startTime.year, _startTime.month, _startTime.day, time.hour, time.minute)));
+    setState(
+      () => _setArrival(
+        DateTime(
+          _startTime.year,
+          _startTime.month,
+          _startTime.day,
+          time.hour,
+          time.minute,
+        ),
+      ),
+    );
   }
 
   late Duration _duration;
@@ -149,7 +191,8 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final day = DateTime(value.year, value.month, value.day);
-    final hm = '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+    final hm =
+        '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
     final diff = day.difference(today).inDays;
     if (diff == 0) return '오늘 $hm';
     if (diff == 1) return '내일 $hm';
@@ -177,13 +220,116 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
 
-  Future<void> _selectDestination() async {
+  void _refreshRecommendations() {
+    final next = const PlaceRecommendationService().recommend(
+      _titleController.text,
+    );
+    _aiDebounce?.cancel();
+    _aiRequestId++;
+    setState(() {
+      _recommendations = next;
+      _aiRecommendations = const [];
+      _aiLoading = false;
+      _aiError = null;
+    });
+    if (next.isEmpty &&
+        PlaceRecommendationService.looksLikePurchase(_titleController.text)) {
+      _aiDebounce = Timer(const Duration(milliseconds: 650), () {
+        if (mounted) _loadAiRecommendations();
+      });
+    }
+  }
+
+  Future<void> _loadAiRecommendations() async {
+    if (_aiLoading) return;
+    final text = _titleController.text.trim();
+    if (text.isEmpty || _recommendations.isNotEmpty) return;
+
+    final requestId = ++_aiRequestId;
+    setState(() {
+      _aiLoading = true;
+      _aiError = null;
+      _aiRecommendations = const [];
+    });
+    try {
+      final position = await LocationAccess.current();
+      if (!mounted ||
+          requestId != _aiRequestId ||
+          _titleController.text.trim() != text) {
+        return;
+      }
+      final places = await const AiPlaceRecommendationService().recommend(
+        text: text,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      if (!mounted ||
+          requestId != _aiRequestId ||
+          _titleController.text.trim() != text) {
+        return;
+      }
+      setState(() {
+        _aiLoading = false;
+        _aiRecommendations = places;
+        _aiError = places.isEmpty ? '현재 위치 주변에서 판매처를 찾지 못했어요.' : null;
+      });
+    } on LocationAccessException catch (e) {
+      if (!mounted || requestId != _aiRequestId) return;
+      setState(() {
+        _aiLoading = false;
+        _aiError = '${e.message}. 위치를 켜면 AI가 주변 매장을 찾을 수 있어요.';
+      });
+    } on AiPlaceRecommendationException catch (e) {
+      if (!mounted || requestId != _aiRequestId) return;
+      setState(() {
+        _aiLoading = false;
+        _aiError = e.message;
+      });
+    } catch (_) {
+      if (!mounted || requestId != _aiRequestId) return;
+      setState(() {
+        _aiLoading = false;
+        _aiError = 'AI 추천을 불러오지 못했어요.';
+      });
+    }
+  }
+
+  List<PlaceRecommendation> get _visibleRecommendations => [
+    ..._recommendations,
+    ..._aiRecommendations,
+  ];
+
+  bool get _canOfferAi =>
+      _recommendations.isEmpty && _titleController.text.trim().isNotEmpty;
+
+  void _selectRecommendedDestination(PlaceRecommendation recommendation) {
+    final latitude = recommendation.latitude;
+    final longitude = recommendation.longitude;
+    if (latitude == null || longitude == null) {
+      _selectDestination(query: recommendation.query);
+      return;
+    }
+    setState(() {
+      _selectedDestination = Place(
+        id: '${latitude}_$longitude',
+        name: recommendation.name,
+        address: recommendation.address ?? '',
+        latitude: latitude,
+        longitude: longitude,
+      );
+      _locationController.text = recommendation.name;
+    });
+  }
+
+  Future<void> _selectDestination({String? query}) async {
     final place = await Navigator.push<Place>(
       context,
-      MaterialPageRoute(builder: (_) => PlaceSearchScreen(
-        title: '일정 목적지 선택',
-        initialQuery: _locationController.text.trim(),
-      )),
+      MaterialPageRoute(
+        builder: (_) => PlaceSearchScreen(
+          title: '일정 목적지 선택',
+          initialQuery: (query ?? _locationController.text).trim(),
+        ),
+      ),
     );
     if (!mounted || place == null) return;
     setState(() {
@@ -276,9 +422,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
     if (_repeat) {
       if (_repeatDays.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('반복할 요일을 하나 이상 골라 주세요.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('반복할 요일을 하나 이상 골라 주세요.')));
         return;
       }
       // 고른 요일 중 가장 가까운 회차 (항상 앞으로의 시각이에요)
@@ -299,9 +445,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       return;
     }
     if (_originMode == 'place' && _selectedOrigin == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('출발지를 검색한 뒤 장소를 선택해 주세요.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('출발지를 검색한 뒤 장소를 선택해 주세요.')));
       return;
     }
     setState(() => _saving = true);
@@ -324,8 +470,12 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         originPlaceId: _originMode == 'place' ? _selectedOrigin?.id : null,
         originName: _originMode == 'place' ? _selectedOrigin?.name : null,
         originAddress: _originMode == 'place' ? _selectedOrigin?.address : null,
-        originLatitude: _originMode == 'place' ? _selectedOrigin?.latitude : null,
-        originLongitude: _originMode == 'place' ? _selectedOrigin?.longitude : null,
+        originLatitude: _originMode == 'place'
+            ? _selectedOrigin?.latitude
+            : null,
+        originLongitude: _originMode == 'place'
+            ? _selectedOrigin?.longitude
+            : null,
         startTime: _startTime,
         endTime: _startTime.add(_duration),
         preparationMinutes: prep,
@@ -335,9 +485,14 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         id: base?.id ?? store.newRoutineId(),
         title: draft.title,
         location: draft.location,
-        weekdays: [for (var d = 1; d <= 7; d++) if (_repeatDays.contains(d)) d],
+        weekdays: [
+          for (var d = 1; d <= 7; d++)
+            if (_repeatDays.contains(d)) d,
+        ],
         startMinutes: _startMinutes,
-        endMinutes: (_startMinutes + _duration.inMinutes).clamp(_startMinutes + 1, 24 * 60).toInt(),
+        endMinutes: (_startMinutes + _duration.inMinutes)
+            .clamp(_startMinutes + 1, 24 * 60)
+            .toInt(),
         colorIndex: base?.colorIndex ?? store.routines.length,
         trip: Routine.tripOf(draft),
       );
@@ -348,33 +503,41 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       } catch (error) {
         if (!mounted) return;
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('반복 일정 저장 실패: $error')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('반복 일정 저장 실패: $error')));
       }
       return;
     }
 
     try {
-    Schedule saved;
-    if (widget.existing == null) {
-      saved = await controller.addSchedule(
-        title: _titleController.text.trim(),
-        location: _selectedDestination!.name,
-        destinationPlaceId: _selectedDestination!.id,
-        destinationAddress: _selectedDestination!.address,
-        destinationLatitude: _selectedDestination!.latitude,
-        destinationLongitude: _selectedDestination!.longitude,
-        originMode: _originMode,
-        originPlaceId: _originMode == 'place' ? _selectedOrigin?.id : null,
-        originName: _originMode == 'place' ? _selectedOrigin?.name : null,
-        originAddress: _originMode == 'place' ? _selectedOrigin?.address : null,
-        originLatitude: _originMode == 'place' ? _selectedOrigin?.latitude : null,
-        originLongitude: _originMode == 'place' ? _selectedOrigin?.longitude : null,
-        startTime: _startTime,
-        endTime: _endTime,
-        preparationMinutes: prep,
-      );
-    } else {
-      saved = widget.existing!.copyWith(
+      Schedule saved;
+      if (widget.existing == null) {
+        saved = await controller.addSchedule(
+          title: _titleController.text.trim(),
+          location: _selectedDestination!.name,
+          destinationPlaceId: _selectedDestination!.id,
+          destinationAddress: _selectedDestination!.address,
+          destinationLatitude: _selectedDestination!.latitude,
+          destinationLongitude: _selectedDestination!.longitude,
+          originMode: _originMode,
+          originPlaceId: _originMode == 'place' ? _selectedOrigin?.id : null,
+          originName: _originMode == 'place' ? _selectedOrigin?.name : null,
+          originAddress: _originMode == 'place'
+              ? _selectedOrigin?.address
+              : null,
+          originLatitude: _originMode == 'place'
+              ? _selectedOrigin?.latitude
+              : null,
+          originLongitude: _originMode == 'place'
+              ? _selectedOrigin?.longitude
+              : null,
+          startTime: _startTime,
+          endTime: _endTime,
+          preparationMinutes: prep,
+        );
+      } else {
+        saved = widget.existing!.copyWith(
           title: _titleController.text.trim(),
           location: _selectedDestination!.name,
           destinationPlaceId: _selectedDestination!.id,
@@ -392,32 +555,34 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
           endTime: _endTime,
           preparationMinutes: prep,
         );
-      await controller.updateSchedule(saved);
-    }
+        await controller.updateSchedule(saved);
+      }
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (controller.error != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(controller.error!)));
-    }
+      if (controller.error != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(controller.error!)));
+      }
 
-    setState(() => _saving = false);
-    if (controller.error == null) {
-      Navigator.pop(context, saved);
-    }
+      setState(() => _saving = false);
+      if (controller.error == null) {
+        Navigator.pop(context, saved);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('일정 서버 저장 실패: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('일정 서버 저장 실패: $error')));
     }
   }
 
   @override
   void dispose() {
+    _aiDebounce?.cancel();
+    _aiRequestId++;
     _titleController.dispose();
     _locationController.dispose();
     _originController.dispose();
@@ -426,17 +591,26 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   }
 
   Widget _question(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_editingRoutine ? '반복 일정 수정' : (widget.existing == null ? '일정 추가' : '일정 수정'))),
+      appBar: AppBar(
+        title: Text(
+          _editingRoutine
+              ? '반복 일정 수정'
+              : (widget.existing == null ? '일정 추가' : '일정 수정'),
+        ),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -452,6 +626,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                     hintText: '예: 출근, 전공 수업, 친구 약속',
                     border: OutlineInputBorder(),
                   ),
+                  onChanged: (_) => _refreshRecommendations(),
                   validator: (value) => value == null || value.trim().isEmpty
                       ? '일정 이름을 입력해 주세요.'
                       : null,
@@ -487,48 +662,158 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                         )
                       : const SizedBox.shrink(),
                 ),
+                if (_recommendations.isNotEmpty ||
+                    _aiRecommendations.isNotEmpty ||
+                    _aiLoading ||
+                    _aiError != null ||
+                    _canOfferAi) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (_aiRecommendations.isNotEmpty) ...[
+                        const Icon(Icons.auto_awesome, size: 16),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        _aiRecommendations.isNotEmpty ? 'AI 추천 장소' : '추천 장소',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  if (_aiLoading)
+                    const Row(
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(child: Text('현재 위치에서 AI가 주변 매장을 찾는 중...')),
+                      ],
+                    ),
+                  if (_visibleRecommendations.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          for (final recommendation in _visibleRecommendations)
+                            ActionChip(
+                              avatar: Icon(
+                                recommendation.fromAi
+                                    ? Icons.auto_awesome
+                                    : Icons.place_outlined,
+                                size: 16,
+                              ),
+                              label: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 220),
+                                child: Text(
+                                  recommendation.name,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              tooltip: recommendation.reason,
+                              onPressed: () =>
+                                  _selectRecommendedDestination(recommendation),
+                            ),
+                        ],
+                      ),
+                    ),
+                  if (_aiError != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _aiError!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  if (_canOfferAi &&
+                      !_aiLoading &&
+                      _aiRecommendations.isEmpty &&
+                      _aiError == null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _loadAiRecommendations,
+                        icon: const Icon(Icons.auto_awesome, size: 18),
+                        label: const Text('AI로 주변 매장 찾기'),
+                      ),
+                    ),
+                  if (_aiError != null &&
+                      !_aiLoading &&
+                      _aiRecommendations.isEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _loadAiRecommendations,
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('AI로 다시 찾기'),
+                      ),
+                    ),
+                ],
                 const SizedBox(height: 24),
 
                 // ④ 반복 (새 일정·반복 일정에서만)
                 if (_canRepeat) ...[
                   _question('매주 반복해요?'),
-                  Row(children: [
-                    Expanded(
-                      child: _OriginChoice(
-                        selected: !_repeat,
-                        icon: Icons.event,
-                        title: '이번 한 번',
-                        subtitle: '약속, 면접 등',
-                        onTap: _editingRoutine ? () {} : () => setState(() => _repeat = false),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _OriginChoice(
+                          selected: !_repeat,
+                          icon: Icons.event,
+                          title: '이번 한 번',
+                          subtitle: '약속, 면접 등',
+                          onTap: _editingRoutine
+                              ? () {}
+                              : () => setState(() => _repeat = false),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _OriginChoice(
-                        selected: _repeat,
-                        icon: Icons.repeat,
-                        title: '매주 반복',
-                        subtitle: '수업, 출근 등',
-                        onTap: () => setState(() => _repeat = true),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _OriginChoice(
+                          selected: _repeat,
+                          icon: Icons.repeat,
+                          title: '매주 반복',
+                          subtitle: '수업, 출근 등',
+                          onTap: () => setState(() => _repeat = true),
+                        ),
                       ),
-                    ),
-                  ]),
+                    ],
+                  ),
                   if (_repeat) ...[
                     const SizedBox(height: 12),
-                    Wrap(spacing: 6, children: [
-                      for (var d = 1; d <= 7; d++)
-                        FilterChip(
-                          label: Text(_dayNames[d - 1]),
-                          selected: _repeatDays.contains(d),
-                          onSelected: (on) => setState(() => on ? _repeatDays.add(d) : _repeatDays.remove(d)),
-                        ),
-                    ]),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        for (var d = 1; d <= 7; d++)
+                          FilterChip(
+                            label: Text(_dayNames[d - 1]),
+                            selected: _repeatDays.contains(d),
+                            onSelected: (on) => setState(
+                              () => on
+                                  ? _repeatDays.add(d)
+                                  : _repeatDays.remove(d),
+                            ),
+                          ),
+                      ],
+                    ),
                     const Padding(
                       padding: EdgeInsets.only(top: 6, left: 4),
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: Text('시간표에 들어가요. 시간표에서 누르면 다음 회차 경로를 볼 수 있어요.',
-                          style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                        child: Text(
+                          '시간표에 들어가요. 시간표에서 누르면 다음 회차 경로를 볼 수 있어요.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textMuted,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -549,17 +834,35 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                       if (result != null) setState(() => _setArrival(result));
                     },
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      child: Row(children: [
-                        const Icon(Icons.flag_outlined, color: AppTheme.primary),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(_repeat ? _repeatLabel : _arrivalLabel(_startTime),
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800,
-                                color: AppTheme.primary)),
-                        ),
-                        const Icon(Icons.edit_calendar, color: AppTheme.primary),
-                      ]),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.flag_outlined,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _repeat
+                                  ? _repeatLabel
+                                  : _arrivalLabel(_startTime),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.edit_calendar,
+                            color: AppTheme.primary,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -567,8 +870,10 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                   padding: EdgeInsets.only(top: 6, left: 4),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text('이 시각에서 거꾸로 계산해서 언제 나가야 하는지 알려 드려요.',
-                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                    child: Text(
+                      '이 시각에서 거꾸로 계산해서 언제 나가야 하는지 알려 드려요.',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -576,46 +881,61 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                 // ⑥ 준비 시간
                 _question('나가기 전 준비 시간'),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     border: Border.all(color: AppTheme.border),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(children: [
-                    IconButton(
-                      onPressed: () => _changePrep(-5),
-                      icon: const Icon(Icons.remove),
-                      tooltip: '5분 줄이기',
-                    ),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _preparationController,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                        decoration: const InputDecoration(border: InputBorder.none, suffixText: '분'),
-                        validator: (value) {
-                          final minutes = int.tryParse(value?.trim() ?? '');
-                          if (minutes == null || minutes < 0 || minutes > 1440) {
-                            return '0~1440 사이의 숫자를 입력해 주세요.';
-                          }
-                          return null;
-                        },
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => _changePrep(-5),
+                        icon: const Icon(Icons.remove),
+                        tooltip: '5분 줄이기',
                       ),
-                    ),
-                    IconButton(
-                      onPressed: () => _changePrep(5),
-                      icon: const Icon(Icons.add),
-                      tooltip: '5분 늘리기',
-                    ),
-                  ]),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _preparationController,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            suffixText: '분',
+                          ),
+                          validator: (value) {
+                            final minutes = int.tryParse(value?.trim() ?? '');
+                            if (minutes == null ||
+                                minutes < 0 ||
+                                minutes > 1440) {
+                              return '0~1440 사이의 숫자를 입력해 주세요.';
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => _changePrep(5),
+                        icon: const Icon(Icons.add),
+                        tooltip: '5분 늘리기',
+                      ),
+                    ],
+                  ),
                 ),
                 const Padding(
                   padding: EdgeInsets.only(top: 6, left: 4),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text('출발 시각보다 이만큼 먼저 준비를 시작하라고 알려 드려요.',
-                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                    child: Text(
+                      '출발 시각보다 이만큼 먼저 준비를 시작하라고 알려 드려요.',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    ),
                   ),
                 ),
               ],
@@ -625,7 +945,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
           const SizedBox(height: 28),
 
           FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+            ),
             onPressed: _saving ? null : _save,
             child: Text(_saving ? '저장 중...' : '저장'),
           ),
@@ -663,22 +985,49 @@ class _OriginChoice extends StatelessWidget {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: selected ? AppTheme.primary : AppTheme.border, width: 2),
-          ),
-          child: Row(children: [
-            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: selected ? AppTheme.primary : AppTheme.textMuted),
-            const SizedBox(width: 10),
-            Icon(icon, size: 20, color: selected ? AppTheme.primary : AppTheme.textMuted),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.w700,
-                    color: selected ? AppTheme.primary : AppTheme.textStrong)),
-                Text(subtitle, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-              ]),
+            border: Border.all(
+              color: selected ? AppTheme.primary : AppTheme.border,
+              width: 2,
             ),
-          ]),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                color: selected ? AppTheme.primary : AppTheme.textMuted,
+              ),
+              const SizedBox(width: 10),
+              Icon(
+                icon,
+                size: 20,
+                color: selected ? AppTheme.primary : AppTheme.textMuted,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: selected
+                            ? AppTheme.primary
+                            : AppTheme.textStrong,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

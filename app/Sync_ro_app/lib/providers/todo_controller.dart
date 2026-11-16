@@ -64,16 +64,33 @@ class TodoController extends ChangeNotifier {
         ? 1
         : _todos.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
 
-    final types = placeTypes ?? (placeType != null && placeType.isNotEmpty ? [placeType] : const <String>[]);
+    final types =
+        placeTypes ??
+        (placeType != null && placeType.isNotEmpty
+            ? [placeType]
+            : const <String>[]);
     final draft = TodoItem(
-      id: nextId, title: title, estimatedMinutes: minutes ?? 5,
-      requiresTravel: requiresTravel || types.isNotEmpty, placeName: placeName,
-      placeTypes: types, important: important,
+      id: nextId,
+      title: title,
+      estimatedMinutes: minutes ?? 5,
+      requiresTravel:
+          requiresTravel ||
+          types.isNotEmpty ||
+          (placeName?.trim().isNotEmpty ?? false),
+      placeName: placeName,
+      placeTypes: types,
+      important: important,
     );
     final saved = RuntimeMode.instance.isDemo
         ? draft
-        : await _remote.createTodo(title: title, minutes: minutes, placeType: placeType,
-            placeTypes: placeTypes, important: important);
+        : await _remote.createTodo(
+            title: title,
+            minutes: minutes,
+            placeName: placeName,
+            placeType: placeType,
+            placeTypes: placeTypes,
+            important: important,
+          );
     _todos.add(saved);
 
     await _persist();
@@ -87,8 +104,17 @@ class TodoController extends ChangeNotifier {
     if (index == -1) return;
 
     final saved = RuntimeMode.instance.isDemo
-        ? updated.copyWith(requiresTravel: (placeType?.isNotEmpty ?? false) || updated.requiresTravel)
-        : await _remote.updateTodo(updated, previous: _todos[index], placeType: placeType);
+        ? updated.copyWith(
+            requiresTravel:
+                (placeType?.isNotEmpty ?? false) ||
+                updated.hasStopover ||
+                updated.requiresTravel,
+          )
+        : await _remote.updateTodo(
+            updated,
+            previous: _todos[index],
+            placeType: placeType,
+          );
     _todos[index] = saved;
     await _persist();
     activeRouteController.requestPlanRefresh();
@@ -104,6 +130,7 @@ class TodoController extends ChangeNotifier {
     await _persist();
     activeRouteController.requestPlanRefresh();
   }
+
   @override
   void dispose() {
     _remote.dispose();

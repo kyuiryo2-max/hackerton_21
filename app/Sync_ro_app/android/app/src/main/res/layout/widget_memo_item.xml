@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/widget_row_bg"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="8dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="6dp"
+    android:paddingBottom="6dp">
+
+    <!-- 같은 자리에 두고 하나만 보이게 해서 분류 색을 바꿔요 -->
+    <TextView
+        android:id="@+id/item_tag_todo"
+        android:layout_width="42dp"
+        android:layout_height="20dp"
+        android:background="@drawable/widget_tag_todo_bg"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:text="@string/widget_tag_todo"
+        android:textColor="@color/widget_todo_text"
+        android:textSize="10sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/item_tag_schedule"
+        android:layout_width="42dp"
+        android:layout_height="20dp"
+        android:background="@drawable/widget_tag_schedule_bg"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:text="@string/widget_tag_schedule"
+        android:textColor="@color/widget_schedule_text"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/item_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textColor="@color/widget_text_strong"
+        android:textSize="13sp" />
+
+    <ImageView
+        android:id="@+id/item_check"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_marginStart="4dp"
+        android:contentDescription="@string/widget_memo_done"
+        android:padding="2dp"
+        android:src="@drawable/ic_widget_uncheck" />
+
+    <ImageView
+        android:id="@+id/item_delete"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_marginStart="2dp"
+        android:contentDescription="@string/widget_memo_delete"
+        android:src="@drawable/ic_widget_close" />
+</LinearLayout>

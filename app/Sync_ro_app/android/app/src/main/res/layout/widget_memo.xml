@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:id="@+id/widget_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/widget_memo_title"
+            android:textColor="@color/widget_text_strong"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_count"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_memo_count_empty"
+            android:textColor="@color/widget_text_muted"
+            android:textSize="11sp" />
+
+        <ImageButton
+            android:id="@+id/widget_add"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/widget_add_bg"
+            android:contentDescription="@string/widget_memo_add"
+            android:padding="7dp"
+            android:src="@drawable/ic_widget_add" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1">
+
+        <ListView
+            android:id="@+id/widget_memo_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:cacheColorHint="@android:color/transparent"
+            android:divider="@android:color/transparent"
+            android:dividerHeight="4dp"
+            android:scrollbars="none" />
+
+        <TextView
+            android:id="@+id/widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:padding="8dp"
+            android:text="@string/widget_memo_empty"
+            android:textColor="@color/widget_text_muted"
+            android:textSize="12sp" />
+    </FrameLayout>
+
+    <!-- 홈 위젯에는 EditText를 직접 넣을 수 없어서, 입력창처럼 보이는 줄을 누르면
+         앱의 빠른 메모 화면이 열립니다. -->
+    <LinearLayout
+        android:id="@+id/widget_capture"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/widget_capture_bg"
+        android:baselineAligned="false"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="10dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_capture_hint"
+            android:textColor="@color/widget_text_muted"
+            android:textSize="11sp" />
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:contentDescription="@string/widget_capture_action"
+            android:src="@drawable/ic_widget_ai" />
+    </LinearLayout>
+</LinearLayout>

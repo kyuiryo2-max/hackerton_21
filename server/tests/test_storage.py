@@ -79,6 +79,35 @@ def test_할_일_저장하고_필수_먼저_조회(client):
     assert todos[0]["done"] is False
 
 
+def test_고른_가게_이름은_새로고침_뒤에도_남음(client):
+    """앱에서 추천 매장을 고르면 서버에 저장돼 다시 조회해도 유지돼요."""
+    me = {"user_id": "u1"}
+    created = client.post("/api/todos", json={
+        "user_id": "u1",
+        "text": "약 사기",
+        "place_types": ["약국"],
+        "place_name": "CU 안암센트럴점",
+    }).json()
+    assert created["place_name"] == "CU 안암센트럴점"
+
+    listed = client.get("/api/todos", params=me).json()
+    assert listed[0]["place_name"] == "CU 안암센트럴점"
+
+    updated = client.patch(
+        f"/api/todos/{created['id']}",
+        params=me,
+        json={"place_name": "GS25 안암점"},
+    ).json()
+    assert updated["place_name"] == "GS25 안암점"
+
+    cleared = client.patch(
+        f"/api/todos/{created['id']}",
+        params=me,
+        json={"place_name": ""},
+    ).json()
+    assert cleared["place_name"] == ""
+
+
 def test_들르기_질문은_필수_할_일로(client):
     """stopover_check: '아 우유 사야 돼' → 중요도 높은(필수) 할 일로 등록"""
     res = client.post("/api/todos", json={
@@ -163,6 +192,7 @@ def test_예전_DB_파일도_상태_열이_생김(tmp_path, monkeypatch):
         todos = {t["text"]: t for t in c.get("/api/todos", params={"user_id": "u1"}).json()}
         assert todos["끝난 일"]["status"] == "완료"
         assert (todos["남은 일"]["status"], todos["남은 일"]["source"]) == ("대기", "입력")
+        assert todos["남은 일"]["place_name"] is None
         assert c.post("/api/todos", json={"user_id": "u1", "text": "새 일"}).status_code == 201
 
 

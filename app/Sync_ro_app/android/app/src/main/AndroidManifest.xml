@@ -37,6 +37,31 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- 홈 화면 메모 위젯 (할일 / 일정) -->
+        <receiver
+            android:name=".widget.MemoWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_memo_title">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/memo_widget_info"/>
+        </receiver>
+        <service
+            android:name=".widget.MemoWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS"/>
+        <!-- 위젯에서 여는 작은 메모 입력 창 -->
+        <activity
+            android:name=".widget.MemoQuickAddActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/MemoQuickAddTheme"
+            android:windowSoftInputMode="adjustResize"/>
+
         <!-- 예약 알림 (flutter_local_notifications) -->
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">

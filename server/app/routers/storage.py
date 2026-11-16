@@ -132,6 +132,8 @@ class TodoIn(BaseModel):
     source: Source = Field(default="입력", description="질문이면 중요도는 필수로 저장돼요")
     stay_minutes: int | None = Field(default=None, ge=1, le=120, examples=[10],
                                      description="그곳에 머무를 시간(분). 없으면 4분으로 계산해요")
+    place_name: str | None = Field(default=None, max_length=120, examples=["CU 안암센트럴점"],
+                                   description="사용자가 고른 실제 가게 이름 (선택)")
 
     _places = field_validator("place_types")(lambda cls, v: _check_place_types(v))
 
@@ -143,6 +145,8 @@ class TodoUpdate(BaseModel):
     importance: Importance | None = None
     status: Status | None = None
     done: bool | None = Field(default=None, description="예전 방식. true 면 status 완료")
+    place_name: str | None = Field(default=None, max_length=120,
+                                   description="사용자가 고른 실제 가게 이름 (선택)")
 
     _places = field_validator("place_types")(lambda cls, v: _check_place_types(v))
 
@@ -156,6 +160,7 @@ class Todo(BaseModel):
     status: Status
     source: Source
     stay_minutes: int | None = None
+    place_name: str | None = None
     done: bool
 
 
