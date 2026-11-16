@@ -141,7 +141,14 @@ class StayVerdictCard extends StatelessWidget {
     this.onSetNeed,
     this.onPick,
     this.rideSegments,
+    this.viaRide = false,
+    this.arriveOverride,
   });
+
+  /// 차에서 내려 들르는 경우(갈아타기 전·내린 뒤, 11/16). [rideSegments]에 가게 구간이 이미 들어 있어요
+  final bool viaRide;
+  /// 들렀다 갈 때의 목적지 도착 시각
+  final DateTime? arriveOverride;
 
   /// 탑승한 뒤의 구간들 (환승·도보 포함). 있으면 타임라인에 위 경로 카드와 같은 구간을 보여 줘요 (11/13)
   final List<RouteSegment>? rideSegments;
@@ -166,7 +173,11 @@ class StayVerdictCard extends StatelessWidget {
     final String line;
     final actions = <Widget>[];
 
-    if (e.ample) {
+    if (viaRide) {
+      line = e.status == StayStatus.bad
+          ? '${e.candidate.name}에 ${e.need}분 들르면 일정에 늦어요. 이번엔 빼고 도착한 뒤에 들르는 걸 추천해요.'
+          : '차에서 내려 ${e.candidate.name}에 ${e.need}분 들렀다 가도 ${hm(arriveOverride ?? o.arriveAt)}에 도착해요';
+    } else if (e.ample) {
       line = '경유지를 들르기에 충분해요! 여유 있게 ${e.dwell}분 잡고 ${hm(e.depart)}에 나가면 돼요';
     } else if (e.status != StayStatus.bad) {
       final latest = e.latestDepart;
@@ -201,7 +212,7 @@ class StayVerdictCard extends StatelessWidget {
         (b.status.index < e.status.index || (!e.ample && b.maxDwell > e.maxDwell + 3));
     final alt = showAlt ? b : null;
 
-    final arrival = o.arriveAt;
+    final arrival = arriveOverride ?? o.arriveAt;
     final arriveBy = o.arriveBy;
     final String tail;
     if (e.missesVehicle) {
@@ -259,7 +270,7 @@ class StayVerdictCard extends StatelessWidget {
             Expanded(
               child: _StatBox(
                 label: '${o.destination} 도착',
-                value: e.missesVehicle ? '--:--' : hm(o.arriveAt ?? o.boardAt),
+                value: e.missesVehicle ? '--:--' : hm(arrival ?? o.boardAt),
                 sub: e.missesVehicle ? '${withObj(transit)} 놓쳐요' : tail,
                 tone: e.missesVehicle ? AppTheme.danger : AppTheme.textStrong,
                 background: AppTheme.background,
@@ -289,17 +300,42 @@ class StayVerdictCard extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        StayTimeStrip(eval: e, overview: o, big: true),
-        const SizedBox(height: 4),
+        if (!viaRide) ...[
+          StayTimeStrip(eval: e, overview: o, big: true),
+          const SizedBox(height: 4),
+        ],
         Row(children: [
           Text('${hm(e.depart)} 출발', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
           const Spacer(),
-          Text('${hm(o.arriveAt ?? o.boardAt)} 도착', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+          Text('${hm(arrival ?? o.boardAt)} 도착', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
         ]),
-        const SizedBox(height: 6),
-        _Legend(eval: e),
+        if (!viaRide) ...[
+          const SizedBox(height: 6),
+          _Legend(eval: e),
+        ],
         const SizedBox(height: 14),
 
+        // 차에서 내려 들르는 경우: 출발 → (탑승 … 하차 → 가게 → 다시 탑승) → 도착 순서 그대로 (11/16)
+        if (viaRide) ...[
+          _StepRow(
+            time: hm(e.depart),
+            title: '${originName ?? '현재 위치'} 출발',
+            sub: rideSegments != null && rideSegments!.isNotEmpty && rideSegments!.first.type == RouteSegmentType.walking
+                ? '${o.boardStopName ?? '정류장'}까지 도보 ${rideSegments!.first.durationMinutes}분'
+                : '',
+            line: AppTheme.border,
+          ),
+          ..._journeyRows(
+            segs: rideSegments,
+            boardAt: o.boardAt,
+            transit: transit,
+            missesVehicle: false,
+            soon: o.nextVehiclesAt(now),
+            waitMinutes: o.waitMinutes,
+            boardStop: o.boardStopName,
+            destination: o.destination,
+          ),
+        ] else ...[
         // 단계별 시각
         _StepRow(time: hm(e.depart), title: '${originName ?? '현재 위치'} 출발',
             sub: '도보 $approx${e.candidate.walkTo}분', line: AppTheme.primary),
@@ -348,8 +384,9 @@ class StayVerdictCard extends StatelessWidget {
           boardStop: o.boardStopName,
           destination: o.destination,
         ),
+        ],
         _StepRow(
-          time: e.missesVehicle ? '' : hm(o.arriveAt),
+          time: e.missesVehicle ? '' : hm(arrival),
           title: '${o.destination} 도착',
           sub: tail,
           late: e.missesVehicle,
@@ -409,6 +446,19 @@ List<Widget> _journeyRows({
   var pendingWait = 0;
   var first = true;
   for (final s in segs.skip(firstRide)) {
+    if (s.type == RouteSegmentType.waiting && s.lineName == stayMarker) {
+      // 갈아타기 전·내린 뒤 들르는 가게 (11/16)
+      rows.add(_StepRow(
+        time: hm(t),
+        title: '${s.startName ?? '들를 곳'} 도착',
+        sub: '머무르기 ${s.durationMinutes}분',
+        dot: AppTheme.ok,
+        line: AppTheme.ok,
+      ));
+      t = t.add(Duration(minutes: s.durationMinutes));
+      pendingWait = 0;
+      continue;
+    }
     if (s.type == RouteSegmentType.waiting) {
       if (!first) pendingWait += s.durationMinutes; // 환승 대기
       continue;
