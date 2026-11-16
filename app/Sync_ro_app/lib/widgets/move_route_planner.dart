@@ -1360,7 +1360,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
         : <int>[];
     final b = (p?['board_in_min'] as num?)?.toInt();
     final board = b == null || b - passed < 0 ? null : b - passed;
-    return (name: '${p?['ride_name'] ?? ''}', soon: soon, board: board);
+    return (name: RouteSegment.uniqueLines('${p?['ride_name'] ?? ''}'), soon: soon, board: board);
   }
 
   /// "실시간 · 2115번 2분 뒤 · 11분 뒤(탑승)"
