@@ -10,7 +10,7 @@ import 'services/home_widget_bridge.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HomeWidgetBridge.init();
-  // 홈 화면 위젯을 눌러 앱이 열렸다면 메모 탭으로 바로 이동해요.
+  // 홈 화면 위젯을 눌러 앱이 열렸다면 메모 화면으로 바로 이동해요.
   final launchTab = await HomeWidgetBridge.consumeLaunchTab();
   // 하단 입력줄을 눌러 열었다면 빠른 메모 화면도 바로 띄워요.
   final quickCapture = await HomeWidgetBridge.consumeQuickCapture();

@@ -22,7 +22,7 @@ class MainScreen extends StatefulWidget {
     this.openQuickCapture = false,
   });
 
-  /// 위젯에서 앱을 열었을 때 처음 보여 줄 탭 (3 = 메모).
+  /// 위젯에서 앱을 열었을 때 처음 보여 줄 화면 (3 = 메모 화면).
   final int initialIndex;
   final bool openQuickCapture;
 
@@ -33,6 +33,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   late int _selectedIndex;
   bool _quickCaptureOpen = false;
+  bool _memoOpen = false;
 
   late final PageController _pageController;
 
@@ -50,7 +51,8 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedIndex = widget.initialIndex.clamp(0, 3).toInt();
+    final startsInMemo = widget.initialIndex >= 3;
+    _selectedIndex = widget.initialIndex.clamp(0, 2).toInt();
     _pageController = PageController(initialPage: _selectedIndex);
     HomeWidgetBridge.init();
     HomeWidgetBridge.requestedTab.addListener(_onWidgetTabRequested);
@@ -64,6 +66,8 @@ class _MainScreenState extends State<MainScreen> {
     }
     if (widget.openQuickCapture) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openQuickCapture());
+    } else if (startsInMemo) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openMemo());
     } else if (HomeWidgetBridge.quickCaptureRequested.value > 0) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _onQuickCaptureRequested(),
@@ -79,7 +83,7 @@ class _MainScreenState extends State<MainScreen> {
         onChangeMode: _changeMode,
         onSearchDestination: _searchDestination,
       ),
-      // 탭: 0 홈(경유 판단·추천) / 1 길찾기(경로 비교) / 2 할 일·일정(시간표) / 3 메모
+      // 탭: 0 홈(경유 판단·추천) / 1 길찾기(경로 비교) / 2 할 일·일정(시간표)
       NavigationScreen(
         selectedWaypoint: _waypoint,
         requestedSchedule: _requestedSchedule,
@@ -91,7 +95,6 @@ class _MainScreenState extends State<MainScreen> {
         onOpenScheduleRoutes: _openScheduleRoutes,
         requestedTab: _requestedPlannerTab,
       ),
-      MemoScreen(key: _memoKey, onPromoted: _onMemoPromoted),
     ];
   }
 
@@ -99,7 +102,11 @@ class _MainScreenState extends State<MainScreen> {
   void _onWidgetTabRequested() {
     final tab = HomeWidgetBridge.requestedTab.value;
     if (tab == null || !mounted) return;
-    _onDestinationSelected(tab);
+    if (tab >= 3) {
+      _openMemo();
+    } else {
+      _onDestinationSelected(tab);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       HomeWidgetBridge.requestedTab.value = null;
     });
@@ -126,17 +133,38 @@ class _MainScreenState extends State<MainScreen> {
     _quickCaptureOpen = false;
     if (!mounted || result == null) return;
 
-    _onDestinationSelected(3);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '${result.reason} 메모에 저장했어요. 메모 탭에서 ${result.type.label} 탭으로 보낼 수 있어요.',
+          '${result.reason} 메모에 저장했어요. 메모 화면에서 ${result.type.label} 탭으로 보낼 수 있어요.',
         ),
       ),
     );
+    await _openMemo();
+  }
+
+  /// 메모는 하단 탭이 아니라 홈 화면 위젯에서만 여는 별도 화면이에요.
+  Future<void> _openMemo() async {
+    if (!mounted) return;
+    if (_memoOpen) {
+      _memoKey.currentState?.reload();
+      return;
+    }
+    _memoOpen = true;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) =>
+            MemoScreen(key: _memoKey, onPromoted: _onMemoPromoted),
+      ),
+    );
+    _memoOpen = false;
   }
 
   void _onMemoPromoted(MemoType type) {
+    if (_memoOpen) {
+      _memoOpen = false;
+      Navigator.of(context).maybePop();
+    }
     _openPlannerTab(type == MemoType.schedule ? 0 : 1);
   }
 
@@ -222,6 +250,11 @@ class _MainScreenState extends State<MainScreen> {
 
   // 하단 네비게이션 버튼 클릭 시
   void _onDestinationSelected(int index) {
+    // 3번은 더 이상 하단 탭이 아니에요. 위젯·AI 안내에서는 메모 화면으로 열어요.
+    if (index >= 3) {
+      _openMemo();
+      return;
+    }
     final target = index.clamp(0, _screens.length - 1).toInt();
     setState(() {
       _selectedIndex = target;
@@ -233,10 +266,6 @@ class _MainScreenState extends State<MainScreen> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
-    }
-    if (target == 3) {
-      // 위젯에서 적은 메모가 있으면 탭을 열 때 다시 읽어요.
-      _memoKey.currentState?.reload();
     }
   }
 
@@ -298,11 +327,6 @@ class _MainScreenState extends State<MainScreen> {
               icon: Icon(Icons.calendar_month_outlined),
               selectedIcon: Icon(Icons.calendar_month),
               label: '할 일·일정',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.sticky_note_2_outlined),
-              selectedIcon: Icon(Icons.sticky_note_2),
-              label: '메모',
             ),
           ],
         ),

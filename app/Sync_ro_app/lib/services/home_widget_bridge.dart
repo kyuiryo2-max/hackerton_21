@@ -10,7 +10,7 @@ class HomeWidgetBridge {
 
   static const MethodChannel _channel = MethodChannel('sync_ro/home_widget');
 
-  /// 위젯에서 앱을 열 때 이동할 탭 번호 (3 = 메모).
+  /// 위젯에서 앱을 열 때 이동할 화면 번호 (3 = 메모 화면).
   static final ValueNotifier<int?> requestedTab = ValueNotifier<int?>(null);
 
   /// 위젯 하단 입력줄에서 '빠른 메모'를 요청했을 때 증가해요.

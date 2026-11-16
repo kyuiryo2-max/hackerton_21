@@ -286,7 +286,6 @@ class _TripPanelState extends State<TripPanel> {
   @override
   Widget build(BuildContext context) {
     final s = _status();
-    final progress = widget.plan.progressAt(widget.stepNow ?? widget.now, widget.index);
     // 위 문장과 같은 기준으로: 단계를 일찍 넘겼으면 출발·도착 시각도 그만큼 당겨서 보여 줘요 (11/14)
     final early = (widget.stepNow ?? widget.now).difference(widget.now);
     String label(DateTime t) => '${_day(t.subtract(early), widget.now)}${KstTime.hm(t.subtract(early))}';
@@ -327,23 +326,14 @@ class _TripPanelState extends State<TripPanel> {
           const SizedBox(height: 2),
           Text(s.sub, style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted)),
           const SizedBox(height: 10),
-          // 진행 막대: 경로 구간 띠 위에 지금 위치를 세로선으로
-          LayoutBuilder(builder: (context, c) {
-            final x = (c.maxWidth * progress).clamp(0.0, c.maxWidth - 2);
-            return SizedBox(
-              height: 14,
-              child: Stack(clipBehavior: Clip.none, children: [
-                Positioned(left: 0, right: 0, top: 3, child: RouteTimeStrip(route: widget.stripRoute)),
-                Positioned(
-                  left: x,
-                  top: 0,
-                  bottom: 0,
-                  child: Container(width: 3, decoration: BoxDecoration(
-                      color: AppTheme.primary, borderRadius: BorderRadius.circular(2))),
-                ),
-              ]),
-            );
-          }),
+          // 진행 막대: 경로 구간 띠만 보여 줘요 (현재 위치 세로선은 11/16 제거)
+          SizedBox(
+            height: 14,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: RouteTimeStrip(route: widget.stripRoute),
+            ),
+          ),
           const SizedBox(height: 4),
           Row(children: [
             Text('${label(widget.plan.depart)} 출발', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),

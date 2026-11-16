@@ -8,6 +8,7 @@ import '../models/schedule.dart';
 import '../models/todo_item.dart';
 import '../providers/schedule_controller.dart';
 import '../providers/todo_controller.dart';
+import '../services/home_widget_bridge.dart';
 import '../services/planner_store.dart';
 import 'detail_screen.dart';
 import 'schedule_form_screen.dart';
@@ -239,6 +240,17 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
   void _snack(String text) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// 안드로이드 홈 화면에 메모 위젯을 추가해요.
+  Future<void> _pinWidget() async {
+    final requested = await HomeWidgetBridge.requestPinWidget();
+    if (!mounted) return;
+    _snack(
+      requested
+          ? '확인 창에서 "추가"를 누르면 홈 화면에 메모 위젯이 생겨요.'
+          : '홈 화면을 길게 눌러 위젯 목록에서 "메모"를 골라 주세요.',
+    );
   }
 
   // ---------- 일정 ----------
@@ -494,7 +506,24 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
-            const Text('일정 · 할 일', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            Row(children: [
+              const Expanded(
+                child: Text('일정 · 할 일', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              ),
+              Tooltip(
+                message: '홈 화면에 메모 위젯 추가',
+                child: OutlinedButton.icon(
+                  key: const Key('planner-pin-widget'),
+                  onPressed: _pinWidget,
+                  icon: const Icon(Icons.widgets_outlined, size: 18),
+                  label: const Text('위젯 추가'),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                ),
+              ),
+            ]),
             const SizedBox(height: 14),
             _TabSwitch(
               index: _tab,
