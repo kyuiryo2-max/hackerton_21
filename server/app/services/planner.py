@@ -47,6 +47,9 @@ def default_stay_minutes(place_types: list[str] | None) -> int | None:
     return None
 # 할 일 하나에 보여 줄 경유 후보 수 (#62). 장소 종류마다 이만큼 찾고, 합쳐서 가까운 순으로 이만큼만 도보 시간을 재요
 MAX_CANDIDATES = 3
+MAX_PARALLEL_SEARCHES = 4       # 할 일의 장소 종류가 여러 개일 때 동시에 찾는 수
+MAX_PARALLEL_CANDIDATES = 8     # 경로 하나에서 할 일 후보를 동시에 찾는 수
+MAX_PARALLEL_SEGMENTS = 4       # 환승·하차 구간 후보를 동시에 찾는 수
 TRANSIT_TYPES = ("BUS", "SUBWAY")
 LOOKAHEAD_SECONDS = 60 * 60       # 실시간은 앞 차 2~3대만 알려 줘서 배차 간격으로 1시간 뒤까지 이어 붙여요
 # 출발 기준 (11/13 팀 결정)
@@ -407,6 +410,20 @@ def _search_type(place_type: str, stop: kakao.Coord, cache: dict, text: str = ""
     return cache[key]
 
 
+def _search_places_for_types(todo: dict, stop: kakao.Coord, cache: dict) -> list[dict]:
+    """할 일의 장소 종류를 모두 찾아요. 종류가 여러 개면 서로 상관없어서 동시에 물어봐요.
+
+    같은 장소가 두 종류에 나오면 호출부에서 이름·주소로 한 번만 남겨요.
+    """
+    place_types = list(dict.fromkeys(todo.get("place_types") or []))
+    text = todo.get("text") or ""
+    if len(place_types) <= 1:
+        return [p for place_type in place_types for p in _search_type(place_type, stop, cache, text)]
+    with ThreadPoolExecutor(max_workers=min(len(place_types), MAX_PARALLEL_SEARCHES)) as pool:
+        groups = list(pool.map(lambda place_type: _search_type(place_type, stop, cache, text), place_types))
+    return [p for group in groups for p in group]
+
+
 def _round_trip(stop: kakao.Coord, p: dict, cache: dict) -> int | None:
     """정류장 → 장소 → 정류장 도보(초). 출발지를 모를 때(시연 등) 써요."""
     key = ("walk", stop, p["name"], p["address"])
@@ -464,9 +481,8 @@ def _near_place(todo: dict, stop: kakao.Coord, cache: dict,
     도보가 짧은 곳(= 가장 오래 머물 수 있는 곳)이 첫 번째이고, 계산은 첫 번째 후보로 해요.
     """
     found: dict[tuple, dict] = {}
-    for place_type in todo["place_types"]:
-        for p in _search_type(place_type, stop, cache, todo.get("text") or ""):
-            found.setdefault((p["name"], p["address"]), p)  # 두 종류에 같은 가게가 나오면 한 번만
+    for p in _search_places_for_types(todo, stop, cache):
+        found.setdefault((p["name"], p["address"]), p)  # 두 종류에 같은 가게가 나오면 한 번만
     unknown = 10**9  # 거리를 모르면 맨 뒤로
     nearest = sorted(found.values(), key=lambda p: unknown if p.get("distance_m") is None else p["distance_m"])
     nearest = nearest[:MAX_CANDIDATES]
@@ -510,9 +526,8 @@ SEGMENT_BEFORE, SEGMENT_TRANSFER, SEGMENT_AFTER = "before", "transfer", "after"
 def _nearest_place(todo: dict, center: kakao.Coord, cache: dict) -> dict | None:
     """center 근처에서 할 일의 장소 종류로 찾은 가장 가까운 곳 하나 (카카오 호출을 아끼려고 한 곳만 재요)."""
     found: dict[tuple, dict] = {}
-    for place_type in todo["place_types"]:
-        for p in _search_type(place_type, center, cache, todo.get("text") or ""):
-            found.setdefault((p["name"], p["address"]), p)
+    for p in _search_places_for_types(todo, center, cache):
+        found.setdefault((p["name"], p["address"]), p)
     unknown = 10**9
     ordered = sorted(found.values(), key=lambda p: unknown if p.get("distance_m") is None else p["distance_m"])
     return ordered[0] if ordered else None
@@ -596,7 +611,7 @@ def _later_segments(todo: dict, route: dict, destination: kakao.Coord, last_walk
     if not jobs:
         return []
     # 구간마다 장소 검색 + 도보를 부르는데 서로 상관없어서 동시에 물어봐요 (11/16: 할 일을 넣으면 길찾기가 느려짐)
-    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(jobs), MAX_PARALLEL_SEGMENTS)) as pool:
         rows = list(pool.map(lambda job: row(*job), jobs))
     return [r for r in rows if r]
 
@@ -688,21 +703,29 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
         spare = max((route["kakao_total_seconds"] or 0) - route["moving_seconds"], 0)
         first_walk, last_walk = (first_walk if first_walk is not None else spare), (last_walk or 0)
     stop = tuple(first["start"])
+    plain = first_walk + route["moving_seconds"] + last_walk
+    far = deadline is not None and deadline - plain > REALTIME_WINDOW_SECONDS
     # 할 일마다 타기 전 장소·갈아탈 때·내린 뒤 후보를 동시에 찾아요 (11/16)
     places: dict = {}
     later: dict = {}
-    if todos:
-        with ThreadPoolExecutor(max_workers=min(2 * len(todos), 8)) as pool:
-            near_jobs = {t["id"]: pool.submit(_near_place, t, stop, place_cache, origin, first_walk) for t in todos}
-            later_jobs = {t["id"]: pool.submit(_later_segments, t, route, destination, last_walk, place_cache)
-                          for t in todos}
-            places = {k: f.result() for k, f in near_jobs.items()}
-            later = {k: f.result() for k, f in later_jobs.items()}
-    plain = first_walk + route["moving_seconds"] + last_walk
-    far = deadline is not None and deadline - plain > REALTIME_WINDOW_SECONDS
+    vehicle_seconds: list[int] = []
+    # 실시간 도착은 장소 검색·도보 후보와 상관없어서 먼저 띄워 두고, 후보 계산이 끝날 때 받아요.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        vehicle_job = None if far or not realtime else pool.submit(_vehicle_seconds, first)
+        if todos:
+            with ThreadPoolExecutor(max_workers=min(2 * len(todos), MAX_PARALLEL_CANDIDATES)) as candidate_pool:
+                near_jobs = {t["id"]: candidate_pool.submit(_near_place, t, stop, place_cache, origin, first_walk)
+                             for t in todos}
+                later_jobs = {t["id"]: candidate_pool.submit(_later_segments, t, route, destination, last_walk,
+                                                              place_cache)
+                              for t in todos}
+                places = {k: f.result() for k, f in near_jobs.items()}
+                later = {k: f.result() for k, f in later_jobs.items()}
+        if vehicle_job is not None:
+            vehicle_seconds = vehicle_job.result()
     return RouteOption(
         timing=RouteTiming(route["moving_seconds"], first_walk, last_walk,
-                           [] if far or not realtime else _vehicle_seconds(first),
+                           vehicle_seconds,
                            is_subway=first["type"] == "SUBWAY"),
         card={"type": route["type"], "name": "·".join(first["vehicles"][:3]) or first["guidance"],
               "guidance": first["guidance"], "transfers": route["transfers"], "fare": route["fare_min"],
