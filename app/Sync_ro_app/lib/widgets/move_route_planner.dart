@@ -1290,6 +1290,37 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     final e = evals.first;
     if (e.status == StayStatus.bad) return r;
     final c = e.candidate;
+    // 갈아타기 전·내린 뒤 들르기 (11/16): 그 차에서 내린 다음 도보를 "가게까지 · 머무름 · 다음 곳까지"로 바꿔요
+    final seg = _segOf[e];
+    if (seg != null) {
+      final segs = r.segments;
+      final rides = [for (var i = 0; i < segs.length; i++) if (_isRide(segs[i])) i];
+      if (rides.isEmpty) return r;
+      final k = seg.seg.kind == 'transfer' ? (seg.seg.leg - 1).clamp(0, rides.length - 1).toInt() : rides.length - 1;
+      final at = rides[k];
+      final next = at + 1;
+      final walkAfter = next < segs.length && segs[next].type == RouteSegmentType.walking ? segs[next] : null;
+      final toName = walkAfter?.endName ??
+          (k + 1 < rides.length ? segs[rides[k + 1]].startName : null) ??
+          widget.destinationName;
+      return RouteCandidate(
+        id: r.id,
+        title: r.title,
+        transferCount: r.transferCount,
+        isRecommended: r.isRecommended,
+        totalDurationMinutes: _shownTimes(r, applied, chosen: chosen).minutes,
+        segments: [
+          ...segs.take(at + 1),
+          RouteSegment(type: RouteSegmentType.walking, description: '${c.name}까지 도보',
+              durationMinutes: c.walkTo, startName: segs[at].endName, endName: c.name),
+          RouteSegment(type: RouteSegmentType.waiting, description: '${c.name}에서 머무름',
+              durationMinutes: e.dwell, lineName: stayMarker, startName: c.name, endName: c.name),
+          RouteSegment(type: RouteSegmentType.walking, description: '$toName까지 도보',
+              durationMinutes: c.walkBack, startName: c.name, endName: toName),
+          ...segs.skip(walkAfter != null ? next + 1 : next),
+        ],
+      );
+    }
     // 처음이 도보면 그 도보를 바꾸고, 정류장에서 시작하는 경로(시연)는 앞에 붙여요
     final first = r.segments.first;
     final startsWithWalk = first.type == RouteSegmentType.walking;
@@ -1877,7 +1908,12 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
           originName: widget.originName,
           onSetNeed: (n) => setState(() => _needOverride[applied.id] = n),
           onPick: (c) => setState(() => _candidateId = c.id),
-          rideSegments: route.segments,
+          // 갈아타기 전·내린 뒤 들르기면 타임라인도 그 순서로 (11/16: 가게가 맨 앞에 나오던 문제)
+          rideSegments: _segOf[chosenEval] != null
+              ? _stripRoute(route, applied, chosen: chosenEval).segments
+              : route.segments,
+          viaRide: _segOf[chosenEval] != null,
+          arriveOverride: _segOf[chosenEval]?.arrive,
         ),
       ] else ...[
         if (applied != null)
