@@ -39,6 +39,13 @@ class TripPanel extends StatefulWidget {
     required this.onEnd,
     this.onSkip,
     this.stepNow,
+    this.presentationAvailable = false,
+    this.presentationStarted = false,
+    this.presentationPlaying = false,
+    this.presentationSpeed = 1,
+    this.onPresentationToggle,
+    this.onPresentationSpeed,
+    this.onPresentationReset,
   });
 
   final TripPlan plan;
@@ -53,6 +60,14 @@ class TripPanel extends StatefulWidget {
   final Future<TripAskReply> Function(String text) onAsk;
   /// 시연 모드: 시간 빨리 보내기 (분)
   final ValueChanged<int>? onSkip;
+  /// 시연 모드에서만 보이는 발표용 가상 위치 재생 컨트롤
+  final bool presentationAvailable;
+  final bool presentationStarted;
+  final bool presentationPlaying;
+  final int presentationSpeed;
+  final VoidCallback? onPresentationToggle;
+  final VoidCallback? onPresentationSpeed;
+  final VoidCallback? onPresentationReset;
   /// 이동 종료 (#51 피드백 4: 팝업 안에서도 끝낼 수 있게)
   final VoidCallback onEnd;
   /// 지금 단계를 계획보다 일찍 넘겼을 때의 진행 시계 (11/14). 예: 17:21 탈 버스를 16:05에 "탔어요" →
@@ -290,6 +305,64 @@ class _TripPanelState extends State<TripPanel> {
     }
   }
 
+  /// 발표자가 무대에서 GPS처럼 경로를 따라 움직이는 화면을 보여 줄 때 써요.
+  /// 실제 위치 권한·GPS와는 무관하고, 시연 경로의 시각만 앞으로 보내요.
+  Widget _presentationControls() {
+    final started = widget.presentationStarted;
+    final playing = widget.presentationPlaying;
+    final label = !started
+        ? '발표 모드 · 경로를 따라 자동 이동'
+        : playing
+            ? '발표 모드 · GPS 시뮬레이션 중'
+            : '발표 모드 · 일시정지';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: AppTheme.primarySoft,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(children: [
+        const Icon(Icons.movie_filter_rounded, size: 18, color: AppTheme.primary),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppTheme.primary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: widget.onPresentationSpeed,
+          style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+          ),
+          child: Text('${widget.presentationSpeed}배속'),
+        ),
+        IconButton(
+          tooltip: playing ? '발표 모드 일시정지' : '발표 모드 재생',
+          visualDensity: VisualDensity.compact,
+          onPressed: widget.onPresentationToggle,
+          icon: Icon(
+            playing ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+            color: AppTheme.primary,
+          ),
+        ),
+        IconButton(
+          tooltip: '경로 처음으로',
+          visualDensity: VisualDensity.compact,
+          onPressed: widget.onPresentationReset,
+          icon: const Icon(Icons.replay_rounded, color: AppTheme.primary),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = _status();
@@ -347,6 +420,10 @@ class _TripPanelState extends State<TripPanel> {
             const Spacer(),
             Text('${label(widget.plan.arriveAt)} 도착', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
           ]),
+          if (widget.presentationAvailable) ...[
+            const SizedBox(height: 8),
+            _presentationControls(),
+          ],
           if (s.action != null) ...[
             const SizedBox(height: 8),
             SizedBox(

@@ -50,4 +50,11 @@ const List<Place> mockPlaces = [
     latitude: 37.5716,
     longitude: 126.9768,
   ),
+  Place(
+    id: '8',
+    name: '고려대학교',
+    address: '서울특별시 성북구 안암로 145',
+    latitude: 37.5887,
+    longitude: 127.0320,
+  ),
 ];

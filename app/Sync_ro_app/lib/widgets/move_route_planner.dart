@@ -179,6 +179,12 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   DateTime? _tripRealStart;
   int _tripSkipMinutes = 0;
   int _tripManualIndex = 0;
+  // ---------- 발표 모드 (11/18): 시연 경로를 GPS처럼 자동 재생 ----------
+  bool _presentationStarted = false;
+  bool _presentationPlaying = false;
+  int _presentationSpeed = 4;
+  Duration _presentationElapsed = Duration.zero;
+  static const List<int> _presentationSpeeds = [1, 4, 8, 16];
   /// 버튼으로 다음 단계로 넘긴 시각. 계획보다 일찍 넘겼으면 그 단계는 이때부터 진행한 걸로 봐요 (11/14)
   DateTime? _manualAt;
   Timer? _tripTick;
@@ -210,7 +216,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   DateTime get _tripClock {
     final skip = Duration(minutes: _tripSkipMinutes);
     if (widget.isDemo) {
-      final ran = DateTime.now().difference(_tripRealStart ?? DateTime.now());
+      // 발표 모드에서는 실제 시계 대신 경로를 따라 흐르는 시뮬레이션 시계를 써요.
+      final ran = _presentationStarted
+          ? _presentationElapsed
+          : DateTime.now().difference(_tripRealStart ?? DateTime.now());
       return widget.now.add(ran).add(skip);
     }
     return DateTime.now().add(skip);
@@ -224,10 +233,18 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     _tripSkipMinutes = 0;
     _tripManualIndex = 0;
     _manualAt = null;
+    _presentationStarted = false;
+    _presentationPlaying = false;
+    _presentationSpeed = 4;
+    _presentationElapsed = Duration.zero;
     _tripTick?.cancel();
-    // "N분 남음"과 지도 화살표가 움직이도록 5초마다 다시 그려요
-    _tripTick = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted) setState(() {});
+    // 발표 모드는 지도 화살표가 부드럽게 움직이도록 1초마다, 실제 모드는 5초마다 그려요.
+    _tripTick = Timer.periodic(widget.isDemo ? const Duration(seconds: 1) : const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      if (widget.isDemo && _presentationPlaying) {
+        _presentationElapsed += Duration(seconds: _presentationSpeed);
+      }
+      setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = _mapKey.currentContext;
@@ -452,6 +469,55 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     _tripTick = null;
     _arriveEnd?.cancel();
     _arriveEnd = null;
+    _presentationStarted = false;
+    _presentationPlaying = false;
+    _presentationElapsed = Duration.zero;
+  }
+
+  /// 발표 모드: 지금까지 흐른 시연 시각을 유지한 채 자동 이동을 시작/일시정지해요.
+  Duration get _presentationStartOffset {
+    final route = _planRouteFor(_selected);
+    final boardAt = DateTime.tryParse('${route?['board_at'] ?? ''}');
+    final start = boardAt ?? _times(_selected).depart;
+    final offset = start.difference(widget.now);
+    return offset.isNegative ? Duration.zero : offset;
+  }
+
+  void _togglePresentation() {
+    if (!widget.isDemo || !_tripStarted) return;
+    setState(() {
+      if (!_presentationStarted) {
+        _presentationStarted = true;
+        final realElapsed =
+            DateTime.now().difference(_tripRealStart ?? DateTime.now());
+        final departureOffset = _presentationStartOffset;
+        _presentationElapsed =
+            realElapsed > departureOffset ? realElapsed : departureOffset;
+      }
+      _presentationPlaying = !_presentationPlaying;
+    });
+  }
+
+  void _cyclePresentationSpeed() {
+    setState(() {
+      final index = _presentationSpeeds.indexOf(_presentationSpeed);
+      _presentationSpeed = _presentationSpeeds[(index + 1) % _presentationSpeeds.length];
+    });
+  }
+
+  /// 경로 처음으로 되돌려요. 재생은 멈춘 상태로 두고, 발표자가 다시 재생을 눌러 시작해요.
+  void _resetPresentation() {
+    if (!widget.isDemo || !_tripStarted) return;
+    setState(() {
+      _presentationStarted = true;
+      _presentationPlaying = false;
+      _presentationElapsed = _presentationStartOffset;
+      _tripSkipMinutes = 0;
+      _tripManualIndex = 0;
+      _manualAt = null;
+      _gps = null;
+      _gpsHeading = null;
+    });
   }
 
   /// 이동 종료: 아래 버튼, 팝업 버튼, 도착 후 자동 종료가 모두 여기로 와요
@@ -857,6 +923,13 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
               }),
           onEnd: _endTrip,
           onSkip: widget.isDemo ? (m) => setState(() => _tripSkipMinutes += m) : null,
+          presentationAvailable: widget.isDemo,
+          presentationStarted: _presentationStarted,
+          presentationPlaying: _presentationPlaying,
+          presentationSpeed: _presentationSpeed,
+          onPresentationToggle: widget.isDemo ? _togglePresentation : null,
+          onPresentationSpeed: widget.isDemo ? _cyclePresentationSpeed : null,
+          onPresentationReset: widget.isDemo ? _resetPresentation : null,
           onAsk: (text) async {
             // 질문하는 순간의 단계와 시각을 함께 보내요. 서버는 이 값으로 남은 시간·다음 차·늦어짐을 답해요
             final now = _tripClock;

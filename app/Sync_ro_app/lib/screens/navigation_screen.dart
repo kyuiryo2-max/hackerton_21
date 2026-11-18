@@ -598,7 +598,7 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
     );
   }
 
-  /// 일정이 없을 때 보여 주는 시연 경로 (안암역 → 청량리역, 내장 카카오 샘플 + 시연 계획)
+  /// 일정이 없을 때 보여 주는 시연 경로 (서울역 → 고려대학교, 내장 시연 계획)
   late final List<RouteCandidate> _demoRoutes = _routeApi.demoRoutes();
   String? _demoSelected;
 
@@ -615,10 +615,10 @@ class _NavigationScreenState extends State<NavigationScreen> with AutomaticKeepA
       selectedId: _demoSelected ?? (_demoRoutes.isEmpty ? null : _demoRoutes.first.id),
       onSelect: (id) => setState(() => _demoSelected = id),
       plan: ServerPlan(OfflineDemoData.plan),
-      title: '청량리역 가기',
+      title: '고려대학교 가기',
       badge: '시연',
-      originName: '${loc['name'] ?? '안암역3번출구 정류장'}',
-      destinationName: '${dest['name'] ?? '청량리역'}',
+      originName: '${loc['name'] ?? '서울역'}',
+      destinationName: '${dest['name'] ?? '고려대학교'}',
       arriveBy: DateTime.tryParse('${sched['arrive_by'] ?? ''}'),
       now: DateTime.tryParse('${ctx['now'] ?? ''}') ?? DateTime.now(),
       isDemo: true,

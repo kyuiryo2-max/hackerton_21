@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'presentation_demo_data.dart';
+
 /// Frozen API examples bundled into Dart so no asset/pubspec changes are required.
 /// Source: api-examples.zip (demo_context, arrivals, ask, plan).
 /// plan.origin, plan.todos[].stay_min: data/demo/scenario.json 값 (홈 경유 판단 화면용으로 추가).
@@ -12,12 +14,13 @@ class OfflineDemoData {
   static Map<String, dynamic> _copy(dynamic source) =>
       Map<String, dynamic>.from(jsonDecode(jsonEncode(source)) as Map);
 
-  static Map<String, dynamic> get context => _copy((_examples['demo_context'] as List).first);
+  /// 발표 시연은 서울역 → 고려대학교 고정 계획을 사용해요.
+  static Map<String, dynamic> get context => PresentationDemoData.context;
   static Map<String, dynamic> arrivals({int elapsedSeconds = 0}) {
     final samples = _examples['arrivals'] as List;
     return _copy(samples[elapsedSeconds >= 600 ? 1 : 0]);
   }
-  static Map<String, dynamic> get plan => _copy((_examples['plan'] as List).first);
+  static Map<String, dynamic> get plan => PresentationDemoData.plan;
   static List<Map<String, dynamic>> get answers => (_examples['ask'] as List)
       .map((e) => _copy(e)).toList();
 }

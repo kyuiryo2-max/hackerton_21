@@ -6,8 +6,15 @@ class OfflineAskService {
     final text = question.trim().replaceAll(' ', '').toLowerCase();
     final samples = OfflineDemoData.answers;
     if (text.isEmpty) return '질문을 입력해 주세요.';
-    if (text.contains('버스') || text.contains('2115') || text.contains('도착')) {
-      return _answer(samples[0]);
+    if (text.contains('버스') ||
+        text.contains('2115') ||
+        text.contains('지하철') ||
+        text.contains('호선') ||
+        text.contains('다음차') ||
+        text.contains('도착')) {
+      return '1호선이 5분 뒤에 와요. 동묘앞에서 6호선으로 갈아타면 '
+          '9시 12분에 고려대학교에 도착해요.\n\n'
+          '※ 저장된 API 예시를 사용하는 오프라인 시연 답변입니다. 실제 분석 결과가 아닙니다.';
     }
     if (text.contains('이어폰') || text.contains('편의점') || text.contains('cu')) {
       return _answer(samples[1]);

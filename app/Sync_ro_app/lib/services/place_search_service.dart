@@ -7,8 +7,8 @@ import '../models/place.dart';
 
 class PlaceSearchService {
   static const List<Place> _demoPlaces = [
-    Place(id: 'demo-stop-08301', name: '안암역3번출구', address: '서울특별시 성북구 안암역3번출구 정류장', latitude: 37.58624821, longitude: 127.03045087),
-    Place(id: 'demo-destination', name: '청량리역', address: '서울특별시 동대문구 청량리역', latitude: 37.58029, longitude: 127.04691),
+    Place(id: 'demo-origin', name: '서울역', address: '서울특별시 용산구 한강대로 405', latitude: 37.5547, longitude: 126.9707),
+    Place(id: 'demo-destination', name: '고려대학교', address: '서울특별시 성북구 안암로 145', latitude: 37.5887, longitude: 127.0320),
   ];
 
   List<Place> _local(String keyword) {
