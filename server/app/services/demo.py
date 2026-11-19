@@ -22,6 +22,19 @@ def scenario() -> dict:
     return json.loads(SCENARIO_PATH.read_text(encoding="utf-8"))
 
 
+def places_by_type() -> dict[str, dict]:
+    """시연 지역에서 장소 종류별로 들를 수 있는 곳 (11/19).
+
+    대본 할 일의 장소(places)가 먼저이고, 할 일 없이 둔 장소(extra_places: 약국, 마트 등)를 더해요.
+    관객이 시연 중에 "약 사야 해"처럼 대본에 없는 할 일을 넣어도 들를 곳을 찾게 하려고요.
+    """
+    data = scenario()
+    out: dict[str, dict] = {}
+    for p in [*data["places"], *data.get("extra_places", [])]:
+        out.setdefault(p["place_type"], p)
+    return out
+
+
 def current_time(elapsed_seconds: int = 0) -> datetime:
     return datetime.fromisoformat(scenario()["now"]) + timedelta(seconds=elapsed_seconds)
 
@@ -62,8 +75,43 @@ def arrivals(stop_id: str, elapsed_seconds: int = 0) -> list[dict]:
     return result
 
 
-def route_timing(elapsed_seconds: int = 0) -> RouteTiming:
+def alt_routes() -> list[dict]:
+    """대안 경로 (6호선 → 1호선, 1222번, 11/19). 경로 모양은 카카오 실제 응답, 도착 정보는 시연 고정값이에요."""
+    return scenario().get("alt_routes", [])
+
+
+def route_names() -> list[str]:
+    """시연 경로 이름 (대본 경로가 1순위)"""
+    return [scenario()["route"]["name"], *(r["name"] for r in alt_routes())]
+
+
+def alt_route(name: str) -> dict | None:
+    return next((r for r in alt_routes() if r["name"] == name), None)
+
+
+def alt_arrival(route: dict, elapsed_seconds: int = 0) -> dict:
+    """대안 경로의 탈 곳에 오는 차. elapsed_seconds만큼 지나면 지나간 차는 빠져요."""
+    a = route["arrivals"]
+    seconds = [s - elapsed_seconds for s in (a["first_seconds"], a["second_seconds"])
+               if s is not None and s - elapsed_seconds >= 0]
+    return {**a, "route": route["name"], "stop_name": route["board_stop"],
+            "first_seconds": seconds[0] if seconds else None,
+            "second_seconds": seconds[1] if len(seconds) > 1 else None}
+
+
+def route_timing(elapsed_seconds: int = 0, name: str | None = None) -> RouteTiming:
+    """경로 시간. name이 없거나 대본 경로면 2115번, 대안 경로 이름이면 그 경로예요."""
     data = scenario()
+    alt = alt_route(name) if name and name != data["route"]["name"] else None
+    if alt is not None:
+        a = alt_arrival(alt, elapsed_seconds)
+        return RouteTiming(
+            moving_seconds=alt["moving_seconds"],
+            first_walk_seconds=alt["first_walk_seconds"],
+            last_walk_seconds=alt["last_walk_seconds"],
+            vehicle_seconds=[s for s in (a["first_seconds"], a["second_seconds"]) if s is not None],
+            is_subway=alt["type"] == "SUBWAY",
+        )
     route = data["route"]
     arrival = next(a for a in arrivals(data["stop"]["ars_id"], elapsed_seconds) if a["route"] == route["name"])
     vehicles = [s for s in (arrival["first_seconds"], arrival["second_seconds"]) if s is not None]

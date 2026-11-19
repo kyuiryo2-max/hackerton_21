@@ -143,18 +143,28 @@ def _hhmm(dt) -> str:
     return f"{dt.hour}시" if dt.minute == 0 else f"{dt.hour}시 {dt.minute}분"
 
 
-def _demo_route_arrival(elapsed: int) -> dict:
+def _demo_route_arrival(elapsed: int, text: str = "") -> dict:
+    """질문에 대안 경로 이름(6호선, 1222번)이 있으면 그 경로, 아니면 대본 경로(2115번)의 다음 차 (11/19)"""
     data = demo.scenario()
+    for route in demo.alt_routes():
+        if route["name"] and route["name"] in text:
+            return demo.alt_arrival(route, elapsed)
     return next(a for a in demo.arrivals(data["stop"]["ars_id"], elapsed) if a["route"] == data["route"]["name"])
 
 
+def _route_word(name: str) -> str:
+    """버스 번호는 "2115번", 지하철은 "6호선" 그대로"""
+    return f"{name}번" if name[-1:].isdigit() else name
+
+
 def _next_vehicle(item: dict, state: dict) -> tuple[dict, str]:
-    a = _demo_route_arrival(state["elapsed"])
+    a = _demo_route_arrival(state["elapsed"], state.get("text", ""))
     first, second = (None if s is None else wait_minutes_from_seconds(s) for s in (a["first_seconds"], a["second_seconds"]))
     result = {"intent": "next_vehicle", "route": a["route"], "minutes": first, "next_minutes": second}
+    word = _route_word(a["route"])
     if first is None:
-        return result, f"{a['route']}번은 오늘 더 오지 않아요."
-    answer = f"{a['route']}번이 {first}분 뒤에 와요."
+        return result, f"{_josa(word, '은는')} 오늘 더 오지 않아요."
+    answer = f"{_josa(word, '이가')} {first}분 뒤에 와요."
     if second is not None:
         answer += f" 그다음 차는 {second}분 뒤예요."
     return result, answer
@@ -382,7 +392,7 @@ def _stopover_check(item: dict, state: dict) -> tuple[dict, str]:
     by_transfer = _transfer_stop(item, state)
     if by_transfer is not None:
         return by_transfer
-    places = {p["place_type"]: p for p in demo.scenario()["places"]}
+    places = demo.places_by_type()
     place = next((places[t] for t in item["place_types"] if t in places), None)
     if place is None:
         kind = item["place_types"][0]
@@ -453,19 +463,20 @@ def _running_late(item: dict, state: dict) -> tuple[dict, str]:
 
 
 def _time_left(item: dict, state: dict) -> tuple[dict, str]:
-    a = _demo_route_arrival(state["elapsed"])
+    a = _demo_route_arrival(state["elapsed"], state.get("text", ""))
+    word = _route_word(a["route"])
     if a["first_seconds"] is None:
-        return {"intent": "time_left", "minutes": None, "leave_by": None}, f"{a['route']}번은 오늘 더 오지 않아요."
+        return {"intent": "time_left", "minutes": None, "leave_by": None}, f"{_josa(word, '은는')} 오늘 더 오지 않아요."
     # 차가 오는 시각이 아니라 여유를 두고 정류장에 있어야 하는 시각을 알려요
     seconds_left = max(a["first_seconds"] - DEFAULT_BUFFER_SECONDS, 0)
     minutes = wait_minutes_from_seconds(a["first_seconds"])
     leave_by = demo.current_time(state["elapsed"] + seconds_left)
     return ({"intent": "time_left", "minutes": wait_minutes_from_seconds(seconds_left), "leave_by": leave_by.isoformat()},
-            f"{a['route']}번이 {minutes}분 뒤에 와요. {_hhmm(leave_by)}까지 정류장에 있으면 돼요.")
+            f"{_josa(word, '이가')} {minutes}분 뒤에 와요. {_hhmm(leave_by)}까지 {'역' if word.endswith('호선') else '정류장'}에 있으면 돼요.")
 
 
 def _place_info(item: dict, state: dict) -> tuple[dict, str]:
-    places = {p["place_type"]: p for p in demo.scenario()["places"]}
+    places = demo.places_by_type()
     place = next((places[t] for t in item["place_types"] if t in places), None)
     if place is None:
         return {"intent": "place_info", "place": None}, f"시연 지역에서는 {_josa(item['place_types'][0], '을를')} 찾지 못했어요."
@@ -474,8 +485,12 @@ def _place_info(item: dict, state: dict) -> tuple[dict, str]:
 
 
 def _change_route(item: dict, state: dict) -> tuple[dict, str]:
-    route = demo.scenario()["route"]["name"]
-    return {"intent": "change_route", "route": route}, f"시연 구간에는 {route}번 경로 하나만 있어요."
+    routes = demo.route_names()
+    words = ", ".join(_route_word(r) for r in routes)
+    if len(routes) == 1:
+        return {"intent": "change_route", "route": routes[0]}, f"시연 구간에는 {words} 경로 하나만 있어요."
+    return ({"intent": "change_route", "route": routes[0], "routes": routes},
+            f"시연 구간에는 {words} 경로가 있어요. 이동 탭에서 다른 경로 카드를 눌러 바꿀 수 있어요.")
 
 
 def _change_todo(item: dict, state: dict) -> tuple[dict, str]:

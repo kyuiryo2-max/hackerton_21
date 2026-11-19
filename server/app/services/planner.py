@@ -109,7 +109,7 @@ def stay_seconds(todo: dict, fallback: int | None = None) -> int:
 
 def _demo_place(todo: dict) -> dict | None:
     """할 일의 장소 종류 중 시연 지역에 있는 첫 장소. 머물 시간은 할 일에 정한 값이 먼저예요."""
-    by_type = {p["place_type"]: p for p in demo.scenario()["places"]}
+    by_type = demo.places_by_type()
     place = next((by_type[t] for t in todo["place_types"] if t in by_type), None)
     if place is None:
         return None
@@ -312,9 +312,30 @@ def plan_demo(user_id: str, todo_ids: list[int] | None = None) -> dict:
         places={t["id"]: _demo_place(t) for t in todos},
     )
     option.card["legs"] = _demo_legs(route, option.timing)
-    option.result = _decide(option, todos, demo.deadline_seconds())
-    _set_times(option, demo.current_time(), _arrive_by(data["schedule"]))
-    return _response(user_id, todos, [option], demo.current_time(), data["schedule"], "시연 지역에 없는 장소예요")
+    # 대안 경로 (6호선 → 1호선, 1222번, 11/19): 이동 탭 카드 3개 모두 실시간·시각을 같은 기준으로 보여 줘요.
+    # 대본 경로(2115번)가 계속 1순위예요. 할 일 상태도 1순위 경로로 정해요
+    options = [option, *(_demo_alt_option(r, todos, data) for r in demo.alt_routes())]
+    for o in options:
+        o.result = _decide(o, todos, demo.deadline_seconds())
+        _set_times(o, demo.current_time(), _arrive_by(data["schedule"]))
+    return _response(user_id, todos, options, demo.current_time(), data["schedule"], "시연 지역에 없는 장소예요")
+
+
+def _demo_alt_option(route: dict, todos: list[dict], data: dict) -> RouteOption:
+    """시연 대안 경로 하나. 들를 곳은 대본 경로와 같은 시연 지역 장소예요."""
+    loc, dest = data["location"], data["schedule"]["destination"]
+    legs = [{**leg, "start": tuple(leg["start"]) if leg.get("start") else None,
+             "end": tuple(leg["end"]) if leg.get("end") else None} for leg in route["legs"]]
+    timing = demo.route_timing(name=route["name"])
+    return RouteOption(
+        timing=timing,
+        card={"type": route["type"], "name": route["name"], "guidance": route["guidance"],
+              "transfers": route["transfers"], "fare": route["fare_min"],
+              "stops": next(leg["stops"] for leg in legs if leg["type"] in TRANSIT_TYPES),
+              "legs": _live_legs({"legs": legs}, (loc["lng"], loc["lat"]), (dest["lng"], dest["lat"]),
+                                 timing.first_walk_seconds, timing.last_walk_seconds)},
+        places={t["id"]: _demo_place(t) for t in todos},
+    )
 
 
 def _demo_legs(route: dict, timing: RouteTiming) -> list[dict]:

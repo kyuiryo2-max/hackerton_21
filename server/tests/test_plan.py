@@ -151,3 +151,24 @@ def test_시연_계획은_외부_API를_부르지_않음(client, monkeypatch):
     for module in (kakao, seoul_bus, seoul_subway, llm):
         monkeypatch.setattr(module, "_client", blocked)
     assert plan(client, user_id="demo").status_code == 200
+
+
+# ---------- 대안 경로 (11/19) ----------
+def test_시연_경로_3개_모두_실시간과_시각(client):
+    """이동 탭 카드 3개(2115번, 6호선 → 1호선, 1222번)가 모두 실시간 다음 차와 출발·도착 시각을 같은 기준으로 받아요"""
+    routes = plan(client, user_id="demo").json()["routes"]
+    assert [r["name"] for r in routes] == ["2115", "6호선", "1222"]
+    for r in routes:
+        assert r["has_realtime"] is True and r["next_vehicles_min"]
+        assert r["basis"] == "realtime" and r["depart_at"] and r["arrive_at"]
+        assert r["legs"][0]["type"] == "WALK" and r["legs"][-1]["type"] == "WALK"
+    assert routes[1]["next_vehicles_min"][:2] == [5, 12]
+    assert routes[2]["next_vehicles_min"][:2] == [7, 18]
+    assert [leg["name"] for leg in routes[1]["legs"] if leg["type"] == "SUBWAY"] == ["6호선", "1호선"]
+
+
+def test_대본_경로가_계속_1순위(client):
+    """다른 경로가 더 빨라도 이어폰(필수)을 사고 제때 닿는 2115번이 1순위예요"""
+    body = plan(client, user_id="demo").json()
+    assert body["routes"][0]["name"] == "2115"
+    assert body["board_at"] == "2026-11-21T08:44:00+09:00"

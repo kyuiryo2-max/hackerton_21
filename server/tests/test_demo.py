@@ -173,3 +173,17 @@ def test_시연_정보_API에_지도_좌표가_있음(client):
     assert [p["name"] for p in data["route"]["stop_points"]] == data["route"]["stops"]
     assert [p["todo"] for p in data["places"]] == ["이어폰 사기", "커피 사기", "다이소 들르기"]
     assert all({"lng", "lat"} <= p.keys() for p in data["places"])
+
+
+def test_대본에_없는_장소_종류도_시연_지역_장소로_찾음(monkeypatch):
+    """약국·마트처럼 대본 할 일에 없는 종류는 extra_places에서 찾고, 대본 장소가 먼저예요 (11/19)"""
+    data = {**demo.scenario(), "extra_places": [
+        {"place_type": "약국", "name": "테스트약국", "address": "서울 성북구", "lng": 127.03, "lat": 37.586,
+         "round_trip_walk_seconds": 300, "stay_seconds": 300},
+        {"place_type": "편의점", "name": "다른 편의점", "address": "서울 성북구", "lng": 127.03, "lat": 37.586,
+         "round_trip_walk_seconds": 100, "stay_seconds": 240},
+    ]}
+    monkeypatch.setattr(demo, "scenario", lambda: data)
+    by_type = demo.places_by_type()
+    assert by_type["약국"]["name"] == "테스트약국"
+    assert by_type["편의점"]["name"] == "CU 안암센트럴점"

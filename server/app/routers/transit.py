@@ -33,6 +33,11 @@ def demo_context():
             {k: p.get(k) for k in ("todo_id", "todo", "place_type", "name", "address", "lng", "lat")}
             for p in data["places"]
         ],
+        # 할 일 없이 시연 지역에 둔 장소 (약국, 마트 등, 11/19)
+        "extra_places": [
+            {k: p.get(k) for k in ("place_type", "name", "address", "lng", "lat")}
+            for p in data.get("extra_places", [])
+        ],
     }
 
 
