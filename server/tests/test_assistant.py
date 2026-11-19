@@ -68,7 +68,7 @@ def test_질문_응답이_문서_예시와_같음(client, ai):
 def test_AI_키가_없으면_키워드_규칙(client, no_ai):
     body = ask(client, "다음 버스 언제야?")
     assert body["engine"] == "rule"
-    assert body["answer"] == "2115번이 12분 뒤에 와요. 그다음 차는 20분 뒤예요."
+    assert body["answer"] == "1호선·6호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요."
 
 
 def test_AI가_실패하면_키워드_규칙(client, monkeypatch):
@@ -87,7 +87,7 @@ def test_AI가_실패하면_키워드_규칙(client, monkeypatch):
 def test_대본_편의점은_들를_수_있음(client, no_ai):
     body = ask(client, "아 이어폰 사야 돼")
     assert body["result"]["feasible"] is True
-    assert body["result"]["max_stay_min"] == 6
+    assert body["result"]["max_stay_min"] == 4
     assert body["todo"]["status"] == "포함"
 
 
@@ -98,11 +98,18 @@ def test_대본_다이소는_시간이_부족(client, no_ai):
     assert body["todo"]["status"] == "대기"
 
 
-def test_대본_10분_늦으면_다시_계산(client, no_ai):
+def test_대본_10분_늦으면_다음_차로_다시_계산(client, no_ai):
     body = ask(client, "10분 늦을 것 같아")
     assert body["result"]["delay_minutes"] == 10
-    assert body["result"]["board_at"] == "2026-11-21T08:44:00+09:00"
+    assert body["result"]["board_at"] == "2026-11-21T08:50:00+09:00"
+    assert body["result"]["arrive_at"] == "2026-11-21T09:21:00+09:00"
+    assert body["result"]["on_time"] is False
+
+
+def test_대본_3분_늦으면_아직_늦지_않음(client, no_ai):
+    body = ask(client, "3분 늦을 것 같아")
     assert body["result"]["on_time"] is True
+    assert body["result"]["board_at"] == "2026-11-21T08:41:00+09:00"
 
 
 def test_늦어서_다음_차를_타면_늦는다고_알림(client, no_ai):
@@ -113,12 +120,13 @@ def test_늦어서_다음_차를_타면_늦는다고_알림(client, no_ai):
 
 def test_남은_시간은_여유를_빼고_알림(client, no_ai):
     body = ask(client, "몇 분까지 나가면 돼?")
-    assert body["result"]["leave_by"] == "2026-11-21T08:42:00+09:00"
-    assert body["result"]["minutes"] == 10
+    assert body["result"]["leave_by"] == "2026-11-21T08:39:00+09:00"
+    assert body["result"]["minutes"] == 7
 
 
 def test_장소_정보(client, no_ai):
-    assert ask(client, "근처 편의점 어디야?")["answer"] == "가까운 곳은 CU 안암센트럴점이에요. (서울 성북구 고려대로28길 16)"
+    assert ask(client, "근처 편의점 어디야?")["answer"] == (
+        "가까운 곳은 GS25 S서울역1호점이에요. (서울 용산구 청파로 378 1층)")
     assert ask(client, "근처 약국 어디야?")["answer"] == "시연 지역에서는 약국을 찾지 못했어요."
 
 
@@ -235,7 +243,7 @@ def test_plan과_ask의_커피_판단이_같음(client, no_ai):
 def test_이미_들르기로_한_장소는_다시_더하지_않음(client, no_ai):
     body = ask(client, "편의점 들러도 돼?")
     assert body["result"]["feasible"] is True
-    assert body["result"]["max_stay_min"] == 6
+    assert body["result"]["max_stay_min"] == 4
 
 
 def test_안_사도는_들르기가_아님(client, no_ai):
@@ -245,9 +253,9 @@ def test_안_사도는_들르기가_아님(client, no_ai):
 def test_버스를_놓치면_다음_차_기준(client, no_ai):
     body = ask(client, "버스 하나 놓쳤어")
     assert body["result"]["missed"] is True
-    assert body["result"]["board_at"] == "2026-11-21T08:52:00+09:00"
-    assert body["answer"].startswith("지금 차를 놓쳤다면 8시 52분 차를 타고")
-    assert "0분" not in body["answer"]
+    assert body["result"]["board_at"] == "2026-11-21T08:50:00+09:00"
+    assert body["answer"].startswith("지금 차를 놓쳤다면 8시 50분 차를 타고")
+    assert "0분 뒤" not in body["answer"]
 
 
 def test_늦는다는데_분이_없으면_되물음(client, no_ai):
@@ -293,7 +301,7 @@ def test_두_곳_들르기는_앞_장소와_함께_판단하고_둘_다_저장(c
     assert [(t["text"], t["status"]) for t in body["todos"]] == [("편의점 들르기", "포함"), ("다이소 들르기", "대기")]
     assert all(t["id"] for t in body["todos"]) and body["todo"] == body["todos"][-1]
     # 두 곳을 함께 본 최종 판단 하나로 답해요 (장소마다 따로 답하면 숫자가 엇갈려 보여요)
-    assert body["answer"] == "CU 안암센트럴점에는 들를 수 있지만, 다이소 안암점까지 들르기엔 시간이 부족해요."
+    assert body["answer"] == "GS25 S서울역1호점에는 들를 수 있지만, 다이소 서울역점까지 들르기엔 시간이 부족해요."
     saved = {t["text"] for t in client.get("/api/todos", params={"user_id": "u1"}).json()}
     assert {"편의점 들르기", "다이소 들르기"} <= saved
 

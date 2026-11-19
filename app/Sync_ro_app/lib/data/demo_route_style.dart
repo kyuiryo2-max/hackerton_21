@@ -56,9 +56,19 @@ class DemoRouteStyle {
   /// in station names (e.g. 안암(고대병원앞)) intact.
   static (String, String) endpoints(DemoRouteLeg leg) {
     if (leg.mode == 'WALKING') {
-      // The sample identifies a transfer at Dongmyo; it does not supply
-      // platform-level names, so show the known interchange endpoints only.
-      if (leg.label.contains('동묘앞')) return ('동묘앞역 · 6호선', '동묘앞역 · 1호선');
+      // "고려대(종암)역 > 고려대학교"처럼 도보 구간의 출발·도착이
+      // 직접 적힌 경우에는 그대로 사용해요.
+      final arrow = leg.label.split(' > ');
+      if (arrow.length == 2) {
+        return (arrow.first.trim(), arrow.last.trim());
+      }
+      // 환승 구간은 호선 정보가 없어서 알려진 환승역 이름으로 보완해요.
+      if (leg.label.contains('동묘앞')) {
+        return ('동묘앞역 · 1호선', '동묘앞역 · 6호선');
+      }
+      if (leg.label.contains('삼각지')) {
+        return ('삼각지역 · 4호선', '삼각지역 · 6호선');
+      }
       return ('환승 시작', '환승 완료');
     }
     final from = leg.label.indexOf('(');

@@ -274,7 +274,7 @@ def test_경로_선택_기록(client):
 # ---------- 시연 데이터 ----------
 def test_시연_데이터가_조회됨(client):
     schedule = client.get("/api/schedules", params={"user_id": "demo"}).json()[0]
-    assert schedule["destination"] == "청량리역"
+    assert schedule["destination"] == "고려대학교"
     assert KST_TIME.match(schedule["arrive_by"])
     texts = [t["text"] for t in client.get("/api/todos", params={"user_id": "demo"}).json()]
     assert texts == ["이어폰 사기", "다이소 들르기", "커피 사기"]  # 필수 먼저

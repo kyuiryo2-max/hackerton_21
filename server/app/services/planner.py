@@ -304,21 +304,48 @@ def plan_demo(user_id: str, todo_ids: list[int] | None = None) -> dict:
     """
     data = demo.scenario()
     todos = [t for t in _todos(user_id, todo_ids) if t["place_types"]]  # 들를 곳이 없는 할 일은 빼요
-    route = data["route"]
-    option = RouteOption(
-        timing=demo.route_timing(),
-        card={"type": route["type"], "name": route["name"], "guidance": route["guidance"],
-              "transfers": route["transfers"], "fare": route["fare_min"], "stops": route["stops"]},
-        places={t["id"]: _demo_place(t) for t in todos},
-    )
-    option.card["legs"] = _demo_legs(route, option.timing)
-    option.result = _decide(option, todos, demo.deadline_seconds())
-    _set_times(option, demo.current_time(), _arrive_by(data["schedule"]))
-    return _response(user_id, todos, [option], demo.current_time(), data["schedule"], "시연 지역에 없는 장소예요")
+    now, arrive_by = demo.current_time(), _arrive_by(data["schedule"])
+    # scenario.json의 route는 예전 파일과의 호환용 대표 경로예요. routes가 있으면 3개를 모두 보여 줘요.
+    routes = data.get("routes") or [data["route"]]
+    options = []
+    for route in routes:
+        timing = demo.route_timing(route=route)
+        option = RouteOption(
+            timing=timing,
+            card={"type": route["type"], "name": route["name"], "guidance": route["guidance"],
+                  "transfers": route["transfers"], "fare": route["fare_min"], "stops": route["stops"]},
+            places={t["id"]: _demo_place(t) for t in todos},
+        )
+        option.card["legs"] = _demo_legs(route, timing)
+        option.result = _decide(option, todos, demo.deadline_seconds())
+        _set_times(option, now, arrive_by)
+        options.append(option)
+    return _response(user_id, todos, options, now, data["schedule"], "시연 지역에 없는 장소예요")
 
 
 def _demo_legs(route: dict, timing: RouteTiming) -> list[dict]:
-    # 시나리오의 실제 경로 좌표(path)를 쓰고, 없으면 정류장 좌표를 이어요
+    """시나리오에 적힌 실제 구간(환승 포함)을 앱이 그리는 모양으로 바꿔요.
+
+    legs가 없는 예전 시나리오는 대표 경로 하나(도보 → 탈것 → 도보)로 만들어요.
+    """
+    raw_legs = route.get("legs") or []
+    if raw_legs:
+        out = []
+        for leg in raw_legs:
+            seconds = leg.get("seconds", 0)
+            if leg.get("type") in TRANSIT_TYPES:
+                out.append({
+                    "type": leg["type"], "name": leg.get("name", ""),
+                    "guidance": leg.get("guidance", ""), "from": leg.get("from", ""),
+                    "to": leg.get("to", ""), "stop_count": leg.get("stop_count", 0),
+                    "minutes": travel_minutes_from_seconds(seconds), "points": leg.get("points") or [],
+                })
+            elif seconds > 0:
+                out.append({**_walk_leg(seconds, leg.get("from", ""), leg.get("to", ""), leg.get("points")),
+                            "name": leg.get("name", "도보")})
+        if out:
+            return out
+    # 예전 시나리오 호환: 실제 경로 좌표(path)를 쓰고, 없으면 정류장 좌표를 이어요
     points = kakao._thin(route.get("path") or [[p["lng"], p["lat"]] for p in route.get("stop_points", []) if "lng" in p])
     stops = route.get("stops", [])
     return [

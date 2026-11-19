@@ -210,7 +210,7 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
                           : _errorMessage != null
                           ? '검색을 다시 시도해 주세요.'
                           : '검색 결과가 없습니다.\n'
-                                '예: 안암역, 안암역3번출구, 청량리역\n'
+                                '예: 서울역, 고려대학교, 고려대(종암)역\n'
                                 '서버가 장소 검색을 지원하지 않으면 등록된 시연/샘플 장소만 표시됩니다.',
                       textAlign: TextAlign.center,
                     ),

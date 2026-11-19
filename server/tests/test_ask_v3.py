@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app import config
 from app.services import assistant, llm, rules, trip
 
-NOW = "2026-11-21T08:36:12+09:00"
+NOW = "2026-11-21T08:32:00+09:00"
 
 
 def steps(*items) -> list[dict]:
@@ -16,19 +16,19 @@ def steps(*items) -> list[dict]:
 
 
 WALK_STEPS = steps(
-    {"kind": "walk", "from": "현재 위치", "to": "안암역 3번 출구",
+    {"kind": "walk", "from": "현재 위치", "to": "서울역 1번 출구",
      "start": "2026-11-21T08:32:00+09:00", "end": "2026-11-21T08:36:00+09:00", "minutes": 4},
-    {"kind": "wait", "at": "안암역 3번 출구",
-     "start": "2026-11-21T08:36:00+09:00", "end": "2026-11-21T08:44:00+09:00", "minutes": 8},
-    {"kind": "ride", "line": "2115번", "from": "안암역 3번 출구", "to": "청량리역환승센터",
-     "start": "2026-11-21T08:44:00+09:00", "end": "2026-11-21T08:56:00+09:00", "minutes": 12},
+    {"kind": "wait", "at": "서울역 1번 출구",
+     "start": "2026-11-21T08:36:00+09:00", "end": "2026-11-21T08:41:00+09:00", "minutes": 5},
+    {"kind": "ride", "line": "1호선·6호선", "from": "서울역", "to": "고려대(종암)",
+     "start": "2026-11-21T08:41:00+09:00", "end": "2026-11-21T09:09:00+09:00", "minutes": 28},
 )
 
 TRIP = {
     "phase": "to_stop", "now": NOW,
-    "stop_name": "안암역 3번 출구", "board_at": "2026-11-21T08:44:00+09:00",
-    "ride_name": "2115번", "arrive_at": "2026-11-21T08:59:17+09:00",
-    "destination": "청량리역", "next_vehicles_min": [8, 16],
+    "stop_name": "서울역 1번 출구", "board_at": "2026-11-21T08:41:00+09:00",
+    "ride_name": "1호선·6호선", "arrive_at": "2026-11-21T09:12:00+09:00",
+    "destination": "고려대학교", "next_vehicles_min": [9, 18],
     "current_step": 0, "steps": WALK_STEPS,
 }
 
@@ -70,56 +70,56 @@ def _trip(**kwargs) -> trip.TripIn:
 
 
 def test_도보_구간이_정류장까지면_걷는_길에():
-    ins = trip.insert_at({"name": "CU 안암센트럴점"}, _trip())
+    ins = trip.insert_at({"name": "GS25 S서울역1호점"}, _trip())
     assert ins["step_index"] == 0 and ins["position"] == "during"
-    assert ins["label"] == "안암역 3번 출구로 걷는 길에"
+    assert ins["label"] == "서울역 1번 출구로 걷는 길에"
 
 
 def test_이미_경유지에_있으면_체류_구간():
     body = _trip(
-        phase="at_place", place_name="CU 안암센트럴점",
+        phase="at_place", place_name="GS25 S서울역1호점",
         steps=steps(
-            {"kind": "walk", "from": "현재 위치", "to": "CU 안암센트럴점"},
-            {"kind": "stay", "at": "CU 안암센트럴점"},
-            {"kind": "walk", "from": "CU 안암센트럴점", "to": "안암역 3번 출구"},
+            {"kind": "walk", "from": "현재 위치", "to": "GS25 S서울역1호점"},
+            {"kind": "stay", "at": "GS25 S서울역1호점"},
+            {"kind": "walk", "from": "GS25 S서울역1호점", "to": "서울역 1번 출구"},
         ),
     )
     ins = trip.insert_at({"name": "대학약국"}, body)
     assert ins["step_index"] == 1 and ins["position"] == "at"
-    assert ins["label"] == "CU 안암센트럴점에 있는 동안"
+    assert ins["label"] == "GS25 S서울역1호점에 있는 동안"
 
 
 def test_정류장에서_기다리는_중이면_대기_구간():
-    ins = trip.insert_at({"name": "CU 안암센트럴점"}, _trip(phase="waiting"))
+    ins = trip.insert_at({"name": "GS25 S서울역1호점"}, _trip(phase="waiting"))
     assert ins["step_index"] == 1 and ins["position"] == "at"
-    assert ins["label"] == "안암역 3번 출구에서 기다리는 동안"
+    assert ins["label"] == "서울역 1번 출구에서 기다리는 동안"
 
 
 def test_장소_이름이_구간에_있으면_그_구간():
     body = _trip(steps=steps(
-        {"kind": "walk", "from": "현재 위치", "to": "CU 안암센트럴점"},
-        {"kind": "walk", "from": "CU 안암센트럴점", "to": "안암역 3번 출구"},
+        {"kind": "walk", "from": "현재 위치", "to": "GS25 S서울역1호점"},
+        {"kind": "walk", "from": "GS25 S서울역1호점", "to": "서울역 1번 출구"},
     ))
-    ins = trip.insert_at({"name": "CU 안암센트럴점"}, body)
+    ins = trip.insert_at({"name": "GS25 S서울역1호점"}, body)
     assert ins["step_index"] == 0 and ins["position"] == "during"
 
 
 def test_상세_경로가_없으면_삽입_위치_없음():
-    assert trip.insert_at({"name": "CU 안암센트럴점"}, _trip(steps=[])) is None
-    assert trip.insert_at({"name": "CU 안암센트럴점"}, _trip(phase="riding")) is None
+    assert trip.insert_at({"name": "GS25 S서울역1호점"}, _trip(steps=[])) is None
+    assert trip.insert_at({"name": "GS25 S서울역1호점"}, _trip(phase="riding")) is None
 
 
 # ---------- 응답에 삽입 위치 ----------
 def test_상세_경로를_보내면_답변에_삽입_위치가_들어감(client, no_ai):
     body = ask(client, "아 이어폰 사야 돼", trip_body=TRIP)
     assert body["result"]["insert_at"]["step_index"] == 0
-    assert body["answer"].startswith("안암역 3번 출구로 걷는 길에 CU 안암센트럴점에 들를 수 있어요.")
+    assert body["answer"].startswith("서울역 1번 출구로 걷는 길에 GS25 S서울역1호점에 들를 수 있어요.")
 
 
 def test_상세_경로가_없으면_기존_문장_그대로(client, no_ai):
     body = ask(client, "아 이어폰 사야 돼")
     assert "insert_at" not in body["result"]
-    assert body["answer"] == "CU 안암센트럴점에 들를 수 있어요. 최대 6분 있을 수 있어요."
+    assert body["answer"] == "GS25 S서울역1호점에 들를 수 있어요. 최대 4분 있을 수 있어요."
 
 
 # ---------- AI에 주는 context ----------
@@ -138,7 +138,7 @@ def test_AI에_현재_시각과_상세_경로와_할일을_보냄(client, ai, mo
     assert ctx["now"] == NOW
     assert ctx["today"] == "2026-11-21 (토)"
     assert ctx["phase_label"] == "정류장으로 가는 중"
-    assert [s["label"] for s in ctx["steps"]][0] == "현재 위치 → 안암역 3번 출구"
+    assert [s["label"] for s in ctx["steps"]][0] == "현재 위치 → 서울역 1번 출구"
     assert ctx["steps"][0]["start"] == "08:32"
     assert ctx["current_step"] == 0
     assert any(t["text"] == "우유 사기" for t in ctx["todos"])

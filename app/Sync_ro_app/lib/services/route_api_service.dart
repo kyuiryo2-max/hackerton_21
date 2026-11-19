@@ -1,7 +1,7 @@
 import '../config/api_config.dart';
 import '../models/route_candidate.dart';
 import '../models/route_request.dart';
-import '../data/demo_route_options.dart';
+import '../data/presentation_demo_data.dart';
 import '../data/demo_route_style.dart';
 import 'server_plan_service.dart';
 import 'server_route_adapter.dart';
@@ -26,12 +26,12 @@ class RouteApiService {
     if (ApiConfig.offlineDemo) {
       if (_isBundledDemoPair(request)) return RouteSearchData(_bundledDemoRoutes());
       throw StateError('현재 오프라인 시연 모드입니다. 임의의 출발지·목적지는 실제 경로를 조회할 수 없습니다. '
-          '시연 경로(안암역3번출구 → 청량리역)를 이용하거나, 서버 복구 후 '
+          '시연 경로(서울역 → 고려대학교)를 이용하거나, 서버 복구 후 '
           'SYNC_RO_OFFLINE_DEMO=false로 실행해 주세요.');
     }
 
     if (ApiConfig.demoMode && !_isBundledDemoPair(request)) {
-      throw StateError('서버 시연 모드는 안암역 → 청량리역 경로만 지원합니다. '
+      throw StateError('서버 시연 모드는 서울역 → 고려대학교 경로만 지원합니다. '
           '다른 지역의 실제 경로는 백엔드 일반 경로 계획 API가 준비된 뒤 이용할 수 있습니다.');
     }
     return _fetchRoutes(request);
@@ -40,8 +40,9 @@ class RouteApiService {
   bool _isBundledDemoPair(RouteRequest r) {
     final from = r.origin.replaceAll(' ', '');
     final to = r.destination.replaceAll(' ', '');
-    return (from.contains('안암역') || from.contains('안암')) &&
-        (to.contains('청량리역') || to.contains('청량리'));
+    // "서울대입구"까지 시연 경로로 잡히지 않게 서울역만 확인해요.
+    return from == '서울역' &&
+        (to.contains('고려대학교') || to.contains('고려대') || to.contains('안암'));
   }
 
   /// 이동 탭 시연 비교용 (내장 카카오 샘플 경로)
@@ -49,15 +50,15 @@ class RouteApiService {
 
   List<RouteCandidate> _bundledDemoRoutes() {
     return [
-      for (var i = 0; i < DemoRouteOptions.routes.length; i++)
+      for (var i = 0; i < PresentationRoutes.routes.length; i++)
         RouteCandidate(
           id: 'offline_demo_${i + 1}',
-          title: DemoRouteOptions.routes[i].label,
-          transferCount: DemoRouteOptions.routes[i].transfers,
+          title: PresentationRoutes.routes[i].label,
+          transferCount: PresentationRoutes.routes[i].transfers,
           isRecommended: i == 0,
-          totalDurationMinutes: (DemoRouteOptions.routes[i].durationSeconds / 60).ceil(),
+          totalDurationMinutes: (PresentationRoutes.routes[i].durationSeconds / 60).ceil(),
           segments: [
-            for (final leg in DemoRouteOptions.routes[i].legs)
+            for (final leg in PresentationRoutes.routes[i].legs)
               RouteSegment(
                 type: switch (leg.mode) {
                   'BUS' => RouteSegmentType.bus,

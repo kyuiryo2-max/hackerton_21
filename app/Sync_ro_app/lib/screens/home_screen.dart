@@ -261,7 +261,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
       return DepartureOverview.fromPlan(
         ServerPlan(OfflineDemoData.plan),
         source: DepartureSource.offlineDemo,
-        title: '청량리역 가기 · 시연 일정',
+        title: '고려대학교 가기 · 시연 일정',
       );
     }
     if (next == null) return null;

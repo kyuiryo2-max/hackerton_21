@@ -45,9 +45,20 @@ def test_응답이_문서_예시와_같음(client):
 def test_시연_대본_숫자(client):
     body = plan(client, user_id="demo").json()
     route = body["routes"][0]
-    assert (route["wait_min"], route["max_stay_min"], route["total_min"]) == (12, 6, 28)
-    assert body["board_at"] == "2026-11-21T08:44:00+09:00"
-    assert body["arrive_at"] == "2026-11-21T08:59:17+09:00"
+    assert (route["wait_min"], route["max_stay_min"], route["total_min"]) == (9, 4, 40)
+    assert body["board_at"] == "2026-11-21T08:41:00+09:00"
+    assert body["arrive_at"] == "2026-11-21T09:12:00+09:00"
+
+
+def test_시연_계획은_세_경로를_보여_줌(client):
+    body = plan(client, user_id="demo").json()
+    assert [(r["rank"], r["name"], r["board_at"], r["arrive_at"]) for r in body["routes"]] == [
+        (1, "1호선·6호선", "2026-11-21T08:41:00+09:00", "2026-11-21T09:12:00+09:00"),
+        (2, "4호선·6호선", "2026-11-21T08:42:00+09:00", "2026-11-21T09:15:00+09:00"),
+        (3, "173", "2026-11-21T08:37:00+09:00", "2026-11-21T09:17:00+09:00"),
+    ]
+    assert [leg["name"] for leg in body["routes"][0]["legs"]] == ["1호선", "환승 도보", "6호선", "도보"]
+    assert body["routes"][2]["ride_name"] == "173번"
 
 
 def test_필수_먼저_그리고_상태(client):
@@ -64,7 +75,7 @@ def test_대기는_선택지를_줌(client):
 
 def test_설명_문장의_숫자는_계산값(client):
     body = plan(client, user_id="demo").json()
-    allowed = {2115, 8, 59, body["routes"][0]["wait_min"], body["routes"][0]["max_stay_min"]}
+    allowed = {1, 6, 9, 12, body["routes"][0]["wait_min"], body["routes"][0]["max_stay_min"]}
     assert numbers_match(body["explanation"], allowed)
 
 

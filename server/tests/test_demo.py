@@ -27,7 +27,7 @@ def statuses(result) -> dict:
 # ---------- 고정 값 ----------
 def test_시각과_위치가_고정():
     assert demo.current_time() == datetime(2026, 11, 21, 8, 32, tzinfo=timezone(timedelta(hours=9)))
-    assert demo.current_location() == (127.03045087, 37.58624821)
+    assert demo.current_location() == (126.9707, 37.5547)
 
 
 def test_호출할_때마다_같은_결과():
@@ -44,11 +44,11 @@ def test_시연은_외부_API를_부르지_않음(monkeypatch):
 
 
 # ---------- 시연 대본 ----------
-def test_대본_버스까지_12분_편의점_최대_6분():
+def test_대본_지하철까지_9분_편의점_최대_4분():
     result = demo.decide([1])
     assert statuses(result) == {1: "included"}
-    assert wait_minutes_from_seconds(result.board_seconds) == 12
-    assert wait_minutes_from_seconds(result.max_stay_seconds) == 6
+    assert wait_minutes_from_seconds(result.board_seconds) == 9
+    assert wait_minutes_from_seconds(result.max_stay_seconds) == 4
 
 
 def test_대본_편의점에_들러도_9시_전_도착():
@@ -75,13 +75,13 @@ def test_대본_경유_없이도_다음_버스는_지각():
 
 
 def test_시간이_지나면_남은_시간이_줄어듦():
-    assert demo.arrivals(STOP, 60)[0]["first_seconds"] == 660
+    assert demo.arrivals(STOP, 60)[0]["first_seconds"] == 480
     assert demo.deadline_seconds(60) == demo.deadline_seconds() - 60
 
 
 def test_지나간_차는_빠지고_다음_차가_첫_차():
     arrival = demo.arrivals(STOP, 800)[0]
-    assert arrival["first_seconds"] == 400
+    assert arrival["first_seconds"] == 280
     assert arrival["second_seconds"] is None
 
 
@@ -109,13 +109,14 @@ def test_도착_API_시연_모드(client):
     res = client.get("/api/arrivals", params={"stop_id": STOP, "demo": True})
     assert res.status_code == 200
     assert res.json()["arrivals"][0] == {
-        "route": "2115", "minutes": 12, "next_minutes": 20, "direction": "중랑공영차고지",
+        "route": "1호선·6호선", "minutes": 9, "next_minutes": 18, "direction": "동묘앞 방면",
     }
+    assert [a["route"] for a in res.json()["arrivals"]] == ["1호선·6호선", "4호선·6호선", "173"]
 
 
 def test_도착_API_시간_경과(client):
     res = client.get("/api/arrivals", params={"stop_id": STOP, "demo": True, "elapsed_seconds": 600})
-    assert res.json()["arrivals"][0]["minutes"] == 2
+    assert res.json()["arrivals"][0]["minutes"] == 8
 
 
 def test_도착_API_시연은_실시간_키가_없어도_동작(client, monkeypatch):
@@ -128,7 +129,8 @@ def test_시연_정보_API(client):
     data = client.get("/api/demo/context").json()
     assert data["now"] == "2026-11-21T08:32:00+09:00"
     assert data["stop"]["ars_id"] == STOP
-    assert data["schedule"]["destination"]["name"] == "청량리역"
+    assert data["stop"]["station_id"] == "0150"
+    assert data["schedule"]["destination"]["name"] == "고려대학교"
 
 
 def _meters(a, b) -> float:

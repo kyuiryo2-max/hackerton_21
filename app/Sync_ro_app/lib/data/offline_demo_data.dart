@@ -1,23 +1,88 @@
 import 'dart:convert';
 
-/// Frozen API examples bundled into Dart so no asset/pubspec changes are required.
-/// Source: api-examples.zip (demo_context, arrivals, ask, plan).
-/// plan.origin, plan.todos[].stay_min: data/demo/scenario.json 값 (홈 경유 판단 화면용으로 추가).
-/// plan.todos[].place 좌표, routes[0].ride_name·next_vehicles_min·board_in_min: 11/13 추가 (지도 경유 선, 이동 중 화면).
-/// Demo-only data, NOT live transit information.
+import 'presentation_demo_data.dart';
+
+/// 오프라인 시연용 고정 예시. 실제 교통 정보가 아닙니다.
+/// 시연 계획·컨텍스트는 [PresentationDemoData]의 서울역 → 고려대학교 값을 그대로 써요.
 class OfflineDemoData {
   static final Map<String, dynamic> _examples =
-      Map<String, dynamic>.from(jsonDecode(r'''{"demo_context":[{"now":"2026-11-21T08:32:00+09:00","location":{"name":"안암역3번출구 정류장","lng":127.03045087,"lat":37.58624821},"schedule":{"destination":{"name":"청량리역","lng":127.04691,"lat":37.58029},"arrive_by":"2026-11-21T09:00:00+09:00","prep_minutes":30},"stop":{"ars_id":"08301","station_id":"107000205","name":"안암역3번출구"},"route":{"type":"BUS","name":"2115","guidance":"지선 2115 (안암역3번출구 > 청량리역환승센터)","moving_seconds":797,"last_walk_seconds":120,"transfers":0,"fare_min":1500,"fare_max":1500,"stops":["안암역3번출구","제기시장","홍파초등학교.정화여중고","제기동주민센터.서울약령시앞","청량리수산시장","청량리역환승센터"]}}],"arrivals":[{"arrivals":[{"route":"2115","minutes":12,"next_minutes":20,"direction":"중랑공영차고지"},{"route":"273","minutes":3,"next_minutes":10,"direction":"중랑공영차고지"}]},{"arrivals":[{"route":"2115","minutes":2,"next_minutes":10,"direction":"중랑공영차고지"},{"route":"273","minutes":0,"next_minutes":null,"direction":"중랑공영차고지"}]}],"ask":[{"intents":[{"intent":"next_vehicle","place_types":[],"delay_minutes":null}],"needs_confirm":false,"question":null,"result":{"intent":"next_vehicle","route":"2115","minutes":12,"next_minutes":20},"answer":"2115번이 12분 뒤에 와요. 그다음 차는 20분 뒤예요.","todo":null},{"intents":[{"intent":"stopover_check","place_types":["편의점"],"delay_minutes":null}],"needs_confirm":false,"question":null,"result":{"intent":"stopover_check","feasible":true,"place":{"name":"CU 안암센트럴점","address":"서울 성북구 고려대로28길 16"},"max_stay_min":6,"board_at":"2026-11-21T08:44:00+09:00"},"answer":"CU 안암센트럴점에 들를 수 있어요. 최대 6분 있을 수 있어요.","todo":{"text":"이어폰 사기","place_types":["편의점"],"importance":"필수","status":"포함","source":"질문"}},{"intents":[{"intent":"stopover_check","place_types":[],"delay_minutes":null}],"needs_confirm":true,"question":"어디를 들르고 싶은지 알려 줄래요?","result":null,"answer":"어디를 들르고 싶은지 알려 줄래요?","todo":null},{"intents":[{"intent":"unsupported","place_types":[],"delay_minutes":null}],"needs_confirm":false,"question":null,"result":{"intent":"unsupported"},"answer":"이동과 할 일에 관한 질문만 도와드릴 수 있어요.","todo":null}],"plan":[{"now":"2026-11-21T08:32:00+09:00","origin":{"name":"안암역3번출구 정류장","lng":127.03045087,"lat":37.58624821},"schedule":{"destination":{"name":"청량리역","lng":127.04691,"lat":37.58029},"arrive_by":"2026-11-21T09:00:00+09:00","prep_minutes":30},"board_at":"2026-11-21T08:44:00+09:00","arrive_at":"2026-11-21T08:59:17+09:00","routes":[{"rank":1,"type":"BUS","name":"2115","guidance":"지선 2115 (안암역3번출구 > 청량리역환승센터)","total_min":28,"wait_min":12,"moving_min":14,"last_walk_min":2,"transfers":0,"fare":1500,"stops":["안암역3번출구","제기시장","홍파초등학교.정화여중고","제기동주민센터.서울약령시앞","청량리수산시장","청량리역환승센터"],"max_stay_min":6,"has_realtime":true,"ride_name":"2115번","next_vehicles_min":[12,20],"board_in_min":12}],"todos":[{"todo_id":1,"stay_min":4,"text":"이어폰 사기","importance":"필수","status":"포함","place":{"place_type":"편의점","name":"CU 안암센트럴점","address":"서울 성북구 고려대로28길 16","lng":127.03062345,"lat":37.58555384},"detour_min":4,"reason":""},{"todo_id":3,"stay_min":5,"text":"다이소 들르기","importance":"필수","status":"대기","place":{"place_type":"다이소","name":"다이소 안암점","address":"서울 성북구 고려대로24길 51","lng":127.02968875,"lat":37.58392147},"detour_min":12,"reason":"시간이 부족해요","options":["이번엔 빼기","늦더라도 들르기"]},{"todo_id":2,"stay_min":5,"text":"커피 사기","importance":"선택","status":"제외","place":{"place_type":"카페","name":"스타벅스 안암역점","address":"서울 성북구 고려대로 102-2","lng":127.0307686,"lat":37.58610881},"detour_min":2,"reason":"시간이 부족해요"}],"explanation":"2115번을 타면 이어폰을 사고도 9시 전에 도착해요."}]}'''));
+      Map<String, dynamic>.from(jsonDecode(r'''{
+        "arrivals": [
+          {
+            "arrivals": [
+              {"route": "1호선·6호선", "minutes": 9, "next_minutes": 18, "direction": "동묘앞 방면"},
+              {"route": "4호선·6호선", "minutes": 10, "next_minutes": 19, "direction": "삼각지 방면"},
+              {"route": "173", "minutes": 5, "next_minutes": 13, "direction": "고려대학교앞 방면"}
+            ]
+          },
+          {
+            "arrivals": [
+              {"route": "1호선·6호선", "minutes": 8, "next_minutes": null, "direction": "동묘앞 방면"},
+              {"route": "4호선·6호선", "minutes": 0, "next_minutes": 9, "direction": "삼각지 방면"},
+              {"route": "173", "minutes": 3, "next_minutes": null, "direction": "고려대학교앞 방면"}
+            ]
+          }
+        ],
+        "ask": [
+          {
+            "intents": [{"intent": "next_vehicle", "place_types": [], "delay_minutes": null}],
+            "needs_confirm": false,
+            "question": null,
+            "result": {"intent": "next_vehicle", "route": "1호선·6호선", "minutes": 9, "next_minutes": 18},
+            "answer": "1호선·6호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요.",
+            "todo": null
+          },
+          {
+            "intents": [{"intent": "stopover_check", "place_types": ["편의점"], "delay_minutes": null}],
+            "needs_confirm": false,
+            "question": null,
+            "result": {
+              "intent": "stopover_check",
+              "feasible": true,
+              "place": {"name": "GS25 S서울역1호점", "address": "서울 용산구 청파로 378 1층"},
+              "max_stay_min": 4,
+              "board_at": "2026-11-21T08:41:00+09:00"
+            },
+            "answer": "GS25 S서울역1호점에 들를 수 있어요. 최대 4분 있을 수 있어요.",
+            "todo": {
+              "text": "이어폰 사기",
+              "place_types": ["편의점"],
+              "importance": "필수",
+              "status": "포함",
+              "source": "질문"
+            }
+          },
+          {
+            "intents": [{"intent": "stopover_check", "place_types": [], "delay_minutes": null}],
+            "needs_confirm": true,
+            "question": "어디를 들르고 싶은지 알려 줄래요?",
+            "result": null,
+            "answer": "어디를 들르고 싶은지 알려 줄래요?",
+            "todo": null
+          },
+          {
+            "intents": [{"intent": "unsupported", "place_types": [], "delay_minutes": null}],
+            "needs_confirm": false,
+            "question": null,
+            "result": {"intent": "unsupported"},
+            "answer": "이동과 할 일에 관한 질문만 도와드릴 수 있어요.",
+            "todo": null
+          }
+        ]
+      }'''));
 
   static Map<String, dynamic> _copy(dynamic source) =>
       Map<String, dynamic>.from(jsonDecode(jsonEncode(source)) as Map);
 
-  static Map<String, dynamic> get context => _copy((_examples['demo_context'] as List).first);
+  static Map<String, dynamic> get context => PresentationDemoData.context;
+
   static Map<String, dynamic> arrivals({int elapsedSeconds = 0}) {
     final samples = _examples['arrivals'] as List;
     return _copy(samples[elapsedSeconds >= 600 ? 1 : 0]);
   }
-  static Map<String, dynamic> get plan => _copy((_examples['plan'] as List).first);
+
+  static Map<String, dynamic> get plan => PresentationDemoData.plan;
+
   static List<Map<String, dynamic>> get answers => (_examples['ask'] as List)
       .map((e) => _copy(e)).toList();
 }

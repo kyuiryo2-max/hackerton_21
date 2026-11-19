@@ -3,8 +3,8 @@
 data/demo/scenario.json 만 바꾸면 노선과 대본을 바꿀 수 있어요. 외부 API는 호출하지 않아요.
 
     demo.current_time()                    # 2026-11-21 08:32
-    demo.arrivals("08301")                 # 2115번 720초 뒤
-    demo.decide([1])                       # 이어폰 사기(편의점): 최대 체류 374초
+    demo.arrivals("02006")                 # 1호선·6호선 540초 뒤
+    demo.decide([1])                       # 이어폰 사기(편의점): 최대 체류 240초
     demo.decide([1, 3])                    # 다이소까지: 시간이 부족해요
 """
 import json
@@ -62,16 +62,30 @@ def arrivals(stop_id: str, elapsed_seconds: int = 0) -> list[dict]:
     return result
 
 
-def route_timing(elapsed_seconds: int = 0) -> RouteTiming:
+def route_arrival(route: dict | None = None, elapsed_seconds: int = 0) -> dict | None:
+    """시나리오 경로 이름과 같은 도착 정보. 없으면 None (500 대신 실시간 없음으로 계산)."""
     data = scenario()
-    route = data["route"]
-    arrival = next(a for a in arrivals(data["stop"]["ars_id"], elapsed_seconds) if a["route"] == route["name"])
-    vehicles = [s for s in (arrival["first_seconds"], arrival["second_seconds"]) if s is not None]
+    route = route or data["route"]
+    return next((a for a in arrivals(data["stop"]["ars_id"], elapsed_seconds)
+                 if a["route"] == route["name"]), None)
+
+
+def route_timing(elapsed_seconds: int = 0, route: dict | None = None) -> RouteTiming:
+    """경로 하나의 계산용 시간. route를 주지 않으면 대표 경로(1호선·6호선)를 써요.
+
+    예전 호출(demo.route_timing(지난_초))과 새 호출(demo.route_timing(route=경로))을 모두 받아요.
+    """
+    route = route or scenario()["route"]
+    arrival = route_arrival(route, elapsed_seconds)
+    vehicles = [] if arrival is None else [
+        s for s in (arrival["first_seconds"], arrival["second_seconds"]) if s is not None
+    ]
     return RouteTiming(
         moving_seconds=route["moving_seconds"],
         first_walk_seconds=0,  # 시연은 정류장에 서 있는 장면이에요
         last_walk_seconds=route["last_walk_seconds"],
         vehicle_seconds=vehicles,
+        is_subway=route["type"] == "SUBWAY",
     )
 
 
