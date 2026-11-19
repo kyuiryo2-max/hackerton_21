@@ -12,7 +12,7 @@ void main() {
     expect(routes.map((r) => r.title), [
       '1호선 → 6호선',
       '4호선 → 6호선',
-      '273번 버스',
+      '173번 버스',
     ]);
     expect(routes.first.isRecommended, isTrue);
     expect(routes.first.segments.first.startName, '서울역');
@@ -36,8 +36,8 @@ void main() {
     expect(overview.title, '고려대학교 가기');
     expect(overview.destination, '고려대학교');
     expect(overview.boardStopName, '서울역');
-    expect(overview.routeName, '1호선 → 6호선');
-    expect(overview.departure, DateTime.parse('2026-11-21T08:36:00+09:00'));
+    expect(overview.routeName, '1호선·6호선');
+    expect(overview.departure, DateTime.parse('2026-11-21T08:32:00+09:00'));
     expect(overview.arriveAt, DateTime.parse('2026-11-21T09:12:00+09:00'));
   });
 }

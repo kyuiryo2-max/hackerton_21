@@ -87,7 +87,7 @@ def test_AI_질문_출력이_깨지면_키워드_규칙(client, ai):
     ai.append({"intents": "이상한 값"})
     body = client.post("/api/ask", json={"user_id": "u1", "text": "다음 버스 언제야?", "demo": True}).json()
     assert body["engine"] == "rule"
-    assert body["answer"].startswith("2115번이")
+    assert body["answer"].startswith("1호선·6호선이")
 
 
 def test_AI가_일부러_되물으면_그대로(client, ai):

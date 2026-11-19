@@ -11,7 +11,7 @@ import 'demo_route_options.dart';
 /// 실제 운행 정보가 아닙니다.
 class PresentationRoutes {
   static final routes = <DemoRouteOption>[
-    DemoRouteOption('1호선 → 6호선', 2160, 1550, 1, [
+    DemoRouteOption('1호선 → 6호선', 2400, 1550, 1, [
       DemoRouteLeg('SUBWAY', '1호선 (서울역 > 동묘앞)', 780, [
         LatLng(37.5547, 126.9707),
         LatLng(37.5600, 126.9735),
@@ -48,7 +48,7 @@ class PresentationRoutes {
         LatLng(37.5887, 127.0320),
       ]),
     ]),
-    DemoRouteOption('4호선 → 6호선', 2280, 1550, 1, [
+    DemoRouteOption('4호선 → 6호선', 2580, 1550, 1, [
       DemoRouteLeg('SUBWAY', '4호선 (서울역 > 삼각지)', 180, [
         LatLng(37.5547, 126.9707),
         LatLng(37.5450, 126.9718),
@@ -83,8 +83,8 @@ class PresentationRoutes {
         LatLng(37.5887, 127.0320),
       ]),
     ]),
-    DemoRouteOption('273번 버스', 2700, 1500, 0, [
-      DemoRouteLeg('BUS', '간선 273 (서울역 > 고려대학교앞)', 2220, [
+    DemoRouteOption('173번 버스', 2700, 1500, 0, [
+      DemoRouteLeg('BUS', '간선 173 (서울역버스환승센터 > 고려대학교앞)', 2220, [
         LatLng(37.5547, 126.9707),
         LatLng(37.5590, 126.9770),
         LatLng(37.5635, 126.9820),
@@ -132,8 +132,8 @@ class PresentationDemoData {
       'prep_minutes': 30,
     },
     'stop': {
-      'ars_id': '02121',
-      'station_id': '100000001',
+      'ars_id': '02006',
+      'station_id': '0150',
       'name': '서울역',
     },
     'route': {
@@ -146,6 +146,23 @@ class PresentationDemoData {
       'fare_min': 1550,
       'fare_max': 1550,
       'stops': ['서울역', '동묘앞', '고려대(종암)'],
+      'times': {
+        'depart_offset_seconds': 0,
+        'board_offset_seconds': 540,
+        'arrive_offset_seconds': 2400,
+      },
+      'path': [
+        [126.9707, 37.5547], [126.9735, 37.56], [126.977, 37.5657], [126.98, 37.568], [126.983, 37.57],
+        [126.987, 37.5702], [126.991, 37.5704], [126.996, 37.5707], [127.001, 37.5709], [127.005, 37.5711],
+        [127.0095, 37.5714], [127.013, 37.5724], [127.0165, 37.5735], [127.016, 37.5765], [127.0155, 37.5795],
+        [127.014, 37.582], [127.013, 37.585], [127.021, 37.5857], [127.0292, 37.5863], [127.0325, 37.5878],
+        [127.0363, 37.5906], [127.0341, 37.5896], [127.032, 37.5887],
+      ],
+      'stop_points': [
+        {'name': '서울역', 'lng': 126.9707, 'lat': 37.5547, 'source': 'seoul_subway'},
+        {'name': '동묘앞', 'lng': 127.0165, 'lat': 37.5735, 'source': 'seoul_subway'},
+        {'name': '고려대(종암)', 'lng': 127.0363, 'lat': 37.5906, 'source': 'seoul_subway'},
+      ],
     },
   };
 
@@ -156,6 +173,7 @@ class PresentationDemoData {
       'lng': 126.9707,
       'lat': 37.5547,
     },
+    'basis': 'realtime',
     'schedule': {
       'destination': {
         'name': '고려대학교',
@@ -165,55 +183,55 @@ class PresentationDemoData {
       'arrive_by': arriveByIso,
       'prep_minutes': 30,
     },
-    'depart_at': '2026-11-21T08:36:00+09:00',
+    'depart_at': '2026-11-21T08:32:00+09:00',
     'board_at': '2026-11-21T08:41:00+09:00',
     'arrive_at': '2026-11-21T09:12:00+09:00',
     'routes': [
       _route(
         rank: 1,
         type: 'SUBWAY',
-        name: '1호선 → 6호선',
+        name: '1호선·6호선',
         guidance: '1호선 (서울역 > 동묘앞) → 6호선 (동묘앞 > 고려대(종암))',
-        totalMin: 36,
-        waitMin: 5,
+        totalMin: 40,
+        waitMin: 9,
         movingMin: 28,
         lastWalkMin: 3,
         transfers: 1,
         fare: 1550,
         stops: ['서울역', '동묘앞', '고려대(종암)'],
-        maxStayMin: 6,
+        maxStayMin: 4,
         rideName: '1호선·6호선',
-        nextVehiclesMin: [5, 12],
+        nextVehiclesMin: [9, 18],
         boardInMin: 9,
-        departAt: '2026-11-21T08:36:00+09:00',
+        departAt: '2026-11-21T08:32:00+09:00',
         boardAt: '2026-11-21T08:41:00+09:00',
         arriveAt: '2026-11-21T09:12:00+09:00',
       ),
       _route(
         rank: 2,
         type: 'SUBWAY',
-        name: '4호선 → 6호선',
+        name: '4호선·6호선',
         guidance: '4호선 (서울역 > 삼각지) → 6호선 (삼각지 > 고려대(종암))',
-        totalMin: 38,
-        waitMin: 5,
+        totalMin: 43,
+        waitMin: 10,
         movingMin: 30,
         lastWalkMin: 3,
         transfers: 1,
         fare: 1550,
         stops: ['서울역', '삼각지', '고려대(종암)'],
-        maxStayMin: 4,
+        maxStayMin: 5,
         rideName: '4호선·6호선',
-        nextVehiclesMin: [6, 14],
+        nextVehiclesMin: [10, 19],
         boardInMin: 10,
-        departAt: '2026-11-21T08:37:00+09:00',
+        departAt: '2026-11-21T08:33:00+09:00',
         boardAt: '2026-11-21T08:42:00+09:00',
         arriveAt: '2026-11-21T09:15:00+09:00',
       ),
       _route(
         rank: 3,
         type: 'BUS',
-        name: '273번 버스',
-        guidance: '간선 273 (서울역 > 고려대학교앞)',
+        name: '173',
+        guidance: '간선 173 (서울역버스환승센터 > 고려대학교앞)',
         totalMin: 45,
         waitMin: 5,
         movingMin: 37,
@@ -221,11 +239,11 @@ class PresentationDemoData {
         transfers: 0,
         fare: 1500,
         stops: ['서울역버스환승센터', '종로2가', '동묘앞', '고려대학교앞'],
-        maxStayMin: 2,
-        rideName: '273번',
+        maxStayMin: 3,
+        rideName: '173번',
         nextVehiclesMin: [5, 13],
         boardInMin: 5,
-        departAt: '2026-11-21T08:32:00+09:00',
+        departAt: '2026-11-21T08:35:00+09:00',
         boardAt: '2026-11-21T08:37:00+09:00',
         arriveAt: '2026-11-21T09:17:00+09:00',
       ),
@@ -239,13 +257,23 @@ class PresentationDemoData {
         'status': '포함',
         'place': {
           'place_type': '편의점',
-          'name': 'CU 안암센트럴점',
-          'address': '서울 성북구 고려대로28길 16',
-          'lng': 127.03062345,
-          'lat': 37.58555384,
+          'name': 'GS25 S서울역1호점',
+          'address': '서울 용산구 청파로 378 1층',
+          'lng': 126.96963409,
+          'lat': 37.55356136,
         },
-        'detour_min': 4,
+        'detour_min': 2,
         'reason': '',
+        'candidates': [
+          {
+            'place_type': '편의점',
+            'name': 'GS25 S서울역1호점',
+            'address': '서울 용산구 청파로 378 1층',
+            'lng': 126.96963409,
+            'lat': 37.55356136,
+            'detour_min': 2,
+          },
+        ],
       },
       {
         'todo_id': 3,
@@ -255,14 +283,24 @@ class PresentationDemoData {
         'status': '대기',
         'place': {
           'place_type': '다이소',
-          'name': '다이소 안암점',
-          'address': '서울 성북구 고려대로24길 51',
-          'lng': 127.02968875,
-          'lat': 37.58392147,
+          'name': '다이소 서울역점',
+          'address': '서울 용산구 청파로 378 1층',
+          'lng': 126.9720059,
+          'lat': 37.55420345,
         },
-        'detour_min': 12,
+        'detour_min': 6,
         'reason': '시간이 부족해요',
         'options': ['이번엔 빼기', '늦더라도 들르기'],
+        'candidates': [
+          {
+            'place_type': '다이소',
+            'name': '다이소 서울역점',
+            'address': '서울 용산구 청파로 378 1층',
+            'lng': 126.9720059,
+            'lat': 37.55420345,
+            'detour_min': 6,
+          },
+        ],
       },
       {
         'todo_id': 2,
@@ -272,16 +310,26 @@ class PresentationDemoData {
         'status': '제외',
         'place': {
           'place_type': '카페',
-          'name': '스타벅스 안암역점',
-          'address': '서울 성북구 고려대로 102-2',
-          'lng': 127.0307686,
-          'lat': 37.58610881,
+          'name': '스타벅스 서울역사점',
+          'address': '서울 용산구 청파로 378 2층 101호',
+          'lng': 126.97202401,
+          'lat': 37.55421427,
         },
-        'detour_min': 2,
+        'detour_min': 4,
         'reason': '시간이 부족해요',
+        'candidates': [
+          {
+            'place_type': '카페',
+            'name': '스타벅스 서울역사점',
+            'address': '서울 용산구 청파로 378 2층 101호',
+            'lng': 126.97202401,
+            'lat': 37.55421427,
+            'detour_min': 4,
+          },
+        ],
       },
     ],
-    'explanation': '1호선에서 6호선으로 갈아타면 이어폰을 사고도 9시 20분 전에 고려대학교에 도착해요.',
+    'explanation': '1호선·6호선을 타면 이어폰 사기까지 하고 9시 12분에 도착해요.',
   };
 
   static Map<String, dynamic> _route({
@@ -309,7 +357,9 @@ class PresentationDemoData {
       'type': type,
       'name': name,
       'guidance': guidance,
+      'basis': 'realtime',
       'total_min': totalMin,
+      'first_walk_min': 0,
       'wait_min': waitMin,
       'moving_min': movingMin,
       'last_walk_min': lastWalkMin,

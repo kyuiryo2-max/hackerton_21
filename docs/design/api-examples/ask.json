@@ -25,11 +25,11 @@
           "question": null,
           "result": {
             "intent": "next_vehicle",
-            "route": "2115",
-            "minutes": 12,
-            "next_minutes": 20
+            "route": "1호선·6호선",
+            "minutes": 9,
+            "next_minutes": 18
           },
-          "answer": "2115번이 12분 뒤에 와요. 그다음 차는 20분 뒤예요.",
+          "answer": "1호선·6호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요.",
           "todo": null,
           "todos": [],
           "engine": "ai"
@@ -64,14 +64,14 @@
             "intent": "stopover_check",
             "feasible": true,
             "place": {
-              "name": "CU 안암센트럴점",
-              "address": "서울 성북구 고려대로28길 16"
+              "name": "GS25 S서울역1호점",
+              "address": "서울 용산구 청파로 378 1층"
             },
-            "max_stay_min": 6,
-            "board_at": "2026-11-21T08:44:00+09:00",
+            "max_stay_min": 4,
+            "board_at": "2026-11-21T08:41:00+09:00",
             "can_add_todo": true
           },
-          "answer": "CU 안암센트럴점에 들를 수 있어요. 최대 6분 있을 수 있어요.",
+          "answer": "GS25 S서울역1호점에 들를 수 있어요. 최대 4분 있을 수 있어요.",
           "todo": {
             "text": "이어폰 사기",
             "place_types": [

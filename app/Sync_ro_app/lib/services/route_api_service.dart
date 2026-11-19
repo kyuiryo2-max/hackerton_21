@@ -40,7 +40,8 @@ class RouteApiService {
   bool _isBundledDemoPair(RouteRequest r) {
     final from = r.origin.replaceAll(' ', '');
     final to = r.destination.replaceAll(' ', '');
-    return (from.contains('서울역') || from.contains('서울')) &&
+    // "서울대입구"까지 시연 경로로 잡히지 않게 서울역만 확인해요.
+    return from == '서울역' &&
         (to.contains('고려대학교') || to.contains('고려대') || to.contains('안암'));
   }
 

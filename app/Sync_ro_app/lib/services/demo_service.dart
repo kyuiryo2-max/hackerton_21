@@ -10,7 +10,7 @@ class DemoService {
   Future<Map<String, dynamic>> getContext() async => ApiConfig.offlineDemo
       ? OfflineDemoData.context : _get('/api/demo/context');
 
-  Future<List<BusArrival>> getArrivals({String stopId = '08301', int? elapsedSeconds}) async {
+  Future<List<BusArrival>> getArrivals({String stopId = '02006', int? elapsedSeconds}) async {
     if (ApiConfig.offlineDemo) {
       final body = OfflineDemoData.arrivals(elapsedSeconds: elapsedSeconds ?? 0);
       return (body['arrivals'] as List).whereType<Map>().map((item) =>

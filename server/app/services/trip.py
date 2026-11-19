@@ -111,6 +111,10 @@ def insert_at(place: dict, trip: TripIn) -> dict | None:
             return _step_entry(stay, "at", f"{where}에 있는 동안", "지금 경유지에 머무는 중이에요")
 
     for step in steps:
+        # 탑승 구간의 출발역 이름은 장소 이름에 들어 있을 수 있어요
+        # ("GS25 S서울역1호점" ↔ "서울역"). 역 이름만 보고 가게를 탑승 구간에 넣지 않아요.
+        if step.kind == "ride":
+            continue
         if name and any(_same(name, v) for v in (step.from_name, step.to, step.at)):
             return _step_entry(step, "during", f"{step_label(step)} 구간에", "찾은 장소가 그 구간에 있어요")
 
