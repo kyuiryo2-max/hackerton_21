@@ -937,9 +937,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
             final now = _tripClock;
             final step = trip.steps[_tripIndex(trip)];
             // 시연 모드 "커피 사도 돼?"는 실제 모드에서 받은 답을 그대로 보여 줘요 (11/21, 발표 중 답이 바뀌지 않게)
+            final demoVehicle = widget.isDemo ? _demoVehicleAnswer(text, now) : null;
             final res = widget.isDemo && text.contains('커피')
                 ? _demoCoffeeAnswer()
-                : await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
+                : demoVehicle ?? await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
             await _afterTodoChange(res);
             return _tripReply(res);
           },
@@ -950,6 +951,35 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
 
   // ---------- 이동 중 AI 답변 버튼 (11/14) ----------
   // AI 탭을 없애서, AI 탭에 있던 버튼(#48 할 일·일정 초안, #50 경유지 추가)을 이동 중 팝업으로 옮겼어요.
+
+  /// 시연 모드 "버스 얼마 남았어?"·"다음 지하철 언제 와?" (11/21).
+  /// 서버의 예전 시연 데이터 대신 시연 계획(1번 경로)의 탑승 시각으로 답해요. 시각은 이동 중 팝업의 시계 기준이에요.
+  static ServerAskResponse? _demoVehicleAnswer(String text, DateTime now) {
+    final t = text.replaceAll(' ', '');
+    const keys = ['버스', '지하철', '호선', '다음차', '언제와', '남았', '몇분', '도착'];
+    if (!keys.any(t.contains)) return null;
+    final first = DateTime.parse(DemoPlanFixture.firstBoardIso);
+    final transfer = DateTime.parse(DemoPlanFixture.transferBoardIso);
+    final arrive = DateTime.parse(DemoPlanFixture.arriveIso);
+    int left(DateTime at) => math.max(0, (at.difference(now).inSeconds / 60).ceil());
+    final busNote = t.contains('버스') ? '이 경로는 버스 대신 지하철로 가요. ' : '';
+    final String answer;
+    if (now.isBefore(first)) {
+      answer = '${busNote}1호선은 서울역에서 ${KstTime.hm(first)}에 타요. ${left(first)}분 남았어요. '
+          '동묘앞에서 ${KstTime.hm(transfer)}에 6호선으로 갈아타면 ${KstTime.hm(arrive)}에 도착해요.';
+    } else if (now.isBefore(transfer)) {
+      answer = '${busNote}동묘앞에서 6호선을 ${KstTime.hm(transfer)}에 타요. ${left(transfer)}분 남았어요. '
+          '${KstTime.hm(arrive)}에 도착해요.';
+    } else {
+      answer = '$busNote${KstTime.hm(arrive)}에 도착해요. ${left(arrive)}분 남았어요.';
+    }
+    return ServerAskResponse(
+      answer: answer,
+      result: {'intent': 'next_vehicle'},
+      intents: const [{'intent': 'next_vehicle'}],
+      engine: 'demo',
+    );
+  }
 
   static ServerAskResponse _demoCoffeeAnswer() {
     final d = DemoPlanFixture.coffeeAsk;
