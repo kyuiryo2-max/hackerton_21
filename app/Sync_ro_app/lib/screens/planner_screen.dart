@@ -1551,8 +1551,16 @@ class _TimetableView extends StatelessWidget {
                                 ? Border.all(color: b.colors.$2, width: 1.2)
                                 : Border(left: BorderSide(color: b.colors.$2, width: 2.5)),
                       ),
+                      // 칸이 짧고 제목이 길면 글자가 칸보다 커져요. ClipRect만으로는 넘침 오류가 나서,
+                      // OverflowBox로 칸 밖까지 그리게 한 뒤 잘라서 보여 줘요 (11/21).
                       child: ClipRect(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        child: OverflowBox(
+                          alignment: Alignment.topLeft,
+                          maxHeight: double.infinity,
+                          child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                           Text(b.routine?.isTodo == true ? '✓ ${b.title}' : b.title,
                               maxLines: 3,
                               overflow: TextOverflow.ellipsis,
@@ -1569,7 +1577,8 @@ class _TimetableView extends StatelessWidget {
                                     fontSize: 9,
                                     height: 1.1,
                                     color: b.schedule != null ? Colors.white70 : b.colors.$2.withValues(alpha: 0.8))),
-                        ]),
+                          ]),
+                        ),
                       ),
                     ),
                   ),
