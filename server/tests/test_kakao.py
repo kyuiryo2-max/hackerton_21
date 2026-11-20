@@ -88,10 +88,13 @@ def test_카테고리로_장소_검색(api):
     responses["/v2/local/search/category.json"] = reply({"documents": [{
         "place_name": "대학약국", "road_address_name": "서울 성북구 고려대로 89",
         "x": "127.0291", "y": "37.5864", "distance": "18",
+        "category_group_code": "PM9", "category_name": "의료,건강 > 약국",
     }]})
     places = kakao.search_places(START, category="PM9")
     assert places[0]["name"] == "대학약국"
     assert places[0]["distance_m"] == 18
+    assert places[0]["category"] == "PM9"
+    assert places[0]["category_name"] == "의료,건강 > 약국"
     assert calls[0].url.params["sort"] == "distance"
 
 

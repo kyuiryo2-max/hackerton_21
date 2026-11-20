@@ -1484,6 +1484,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   String? _waitText(RouteCandidate r) {
     final w = (_planRouteFor(r)?['wait_min'] as num?)?.toInt();
     if (w == null || w <= 0) return null;
+    if (_planRouteFor(r)?['wait_estimated'] == true) {
+      return '정류장 대기 약 $w분(예상) · 실시간 정보가 없어 경로 시간으로 계산했어요';
+    }
     return '정류장 대기 약 $w분 · 실시간 도착 정보는 출발 30분 전부터';
   }
 
@@ -1545,7 +1548,20 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
   Future<void> _openTaskPicker() async {
     final tasks = _tasks;
     final feasible = <(StayTask, StayEval, bool)>[];
+    final unplanned = <(StayTask, String)>[];
     var hidden = 0;
+    bool hasStayEstimate() {
+      var sawRoute = false;
+      for (final r in widget.routes) {
+        final o = _overviewFor(r);
+        if (o == null) continue;
+        sawRoute = true;
+        if (o.canPlanStay) return true;
+      }
+      return !sawRoute;
+    }
+
+    final canEstimate = hasStayEstimate();
     for (final t in tasks) {
       StayEval? best;
       var early = false;
@@ -1559,6 +1575,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       }
       if (best != null && best.status != StayStatus.bad) {
         feasible.add((t, best, early));
+      } else if (t.candidates.isEmpty) {
+        unplanned.add((t, t.reason.isNotEmpty ? t.reason : '들를 곳을 찾지 못했어요.'));
+      } else if (!canEstimate) {
+        unplanned.add((t, '실시간 차 정보가 없어 머물 시간을 계산하지 못했어요.\n출발 시각을 지정하면 계산할 수 있어요.'));
       } else {
         hidden++;
       }
@@ -1595,7 +1615,8 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('이번 이동에 들를 곳 선택', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
-              const Text('지금 경로 후보로 들를 수 있는 할 일만 보여 드려요.', style: TextStyle(color: AppTheme.textMuted)),
+              const Text('들를 수 있는 할 일과, 지금은 시간을 계산할 수 없는 할 일을 함께 보여 드려요.',
+                  style: TextStyle(color: AppTheme.textMuted)),
               const SizedBox(height: 12),
               if (widget.arriveBy != null)
                 Container(
@@ -1606,7 +1627,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                       style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600, fontSize: 13)),
                 ),
               const SizedBox(height: 8),
-              if (feasible.isEmpty)
+              if (feasible.isEmpty && unplanned.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 28),
                   child: Center(
@@ -1669,6 +1690,30 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
                       ),
                     ),
                   ),
+              if (unplanned.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                const Text('지금은 시간을 계산할 수 없는 할 일', style: TextStyle(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                for (final (t, reason) in unplanned)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.all(11),
+                    decoration: BoxDecoration(
+                      color: AppTheme.background,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.border),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(t.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 2),
+                      Text(reason, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.4)),
+                      if (t.candidates.isNotEmpty)
+                        Text('가까운 후보: ${t.candidates.take(2).map((c) => c.name).join(', ')}',
+                            style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                    ]),
+                  ),
+              ],
               if (hidden > 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),

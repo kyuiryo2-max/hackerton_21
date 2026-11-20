@@ -921,6 +921,7 @@ class _ModePill extends StatelessWidget {
     task = match;
     candidateId = activeRouteController.appliedCandidateId;
   }
+  if (task.candidates.isEmpty) return null;
   final ranked = o.rank(task, delayMinutes: 0, need: task.needMinutes);
   if (ranked.isEmpty) return null;
   final eval = ranked.firstWhere((e) => e.candidate.id == candidateId, orElse: () => ranked.first);

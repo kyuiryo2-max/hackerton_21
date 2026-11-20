@@ -218,6 +218,8 @@ def search_places(
             "distance_m": int(d["distance"]) if d.get("distance") else None,
             "place_url": d.get("place_url", ""),
             "category": d.get("category_group_code", ""),  # SW8 지하철역 등 (검색 순서 정리용, 11/14)
+            # "음식점 > 분식"처럼 사람이 읽는 업종. 키워드 검색에 음식점·카페가 섞이는 걸 걸러요 (11/20)
+            "category_name": d.get("category_name", ""),
         }
         for d in _get(path, params).get("documents", [])
     ]

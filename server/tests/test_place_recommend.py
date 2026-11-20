@@ -194,3 +194,18 @@ def test_카카오_결과가_없으면_빈_목록(monkeypatch):
     monkeypatch.setattr(llm, "recommend_places", lambda text, center, limit=3: CANDIDATES[:1])
     monkeypatch.setattr(kakao, "search_places", lambda *args, **kwargs: [])
     assert place_recommendation.recommend("고양이 사료", (127.0, 37.5)) == []
+
+
+def test_AI_후보_검색에_음식점이_섞이면_판매점을_고름(monkeypatch):
+    """'롯데마트' 검색 첫 결과가 '죠스 떡볶이 롯데마트점'이어도 마트로 추천하지 않아요 (11/20)."""
+    monkeypatch.setattr(llm, "recommend_places", lambda text, center, limit=3: [
+        {"name": "롯데마트", "search_query": "롯데마트", "category": "마트", "reason": "장보기"},
+    ])
+    monkeypatch.setattr(kakao, "search_places", lambda *args, **kwargs: [
+        {"name": "죠스 떡볶이 롯데마트점", "category": "FD6", "category_name": "음식점 > 분식",
+         "lng": 127.0, "lat": 37.5, "distance_m": 50, "place_url": ""},
+        {"name": "롯데마트 서울역점", "category": "MT1", "category_name": "가정,생활 > 대형마트",
+         "lng": 127.1, "lat": 37.6, "distance_m": 300, "place_url": ""},
+    ])
+    found = place_recommendation.recommend("롯데마트", (127.0, 37.5))
+    assert [p["name"] for p in found] == ["롯데마트 서울역점"]

@@ -26,6 +26,8 @@ class RouteTiming:
     vehicle_seconds: list[int]     # 지금부터 차가 오기까지, 모르면 빈 목록
     is_subway: bool = False
     interval_seconds: int | None = None  # 배차 간격, 모르면 None (서울시 버스 interval_minutes × 60)
+    # 실시간 도착 대신 카카오 경로의 예상 시간으로 채운 대기인지 (11/20)
+    wait_estimated: bool = False
 
 
 @dataclass
@@ -144,7 +146,7 @@ def decide_stops(
         total_seconds=final_total,
         direct_total_seconds=direct_total,
         max_stay_seconds=None if board is None else max_stay_seconds(board, walk, buffer),
-        has_realtime=bool(route.vehicle_seconds),
+        has_realtime=bool(route.vehicle_seconds) and not route.wait_estimated,
     )
 
 

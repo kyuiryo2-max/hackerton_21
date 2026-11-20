@@ -170,6 +170,8 @@ def _route_card(rank: int, option: RouteOption) -> dict:
         **{k: option.card[k] for k in ("transfers", "fare", "stops")},
         "max_stay_min": None if result.max_stay_seconds is None else wait_minutes_from_seconds(result.max_stay_seconds),
         "has_realtime": result.has_realtime,
+        # 서울시 실시간 대신 카카오 경로의 예상 대기로 계산했는지 (11/20)
+        **({"wait_estimated": True} if timing.wait_estimated else {}),
         # 탈 정류장에 곧 오는 차 (실시간일 때만, 계획한 시각 "now" 기준 분) 와 그중 타는 차 (11/13)
         "ride_name": _ride_name(option.card),
         **_next_vehicles(timing, result),
@@ -288,7 +290,16 @@ def _response(user_id: str, todos: list[dict], options: list[RouteOption], now: 
         todo, place = by_id[todo_id], best.places.get(todo_id)
         decision = decided.get(todo_id)
         # 장소를 못 찾으면 계산을 못 한 것이라 저장하지 않고, 필수는 사라지지 않게 대기로 보여 줘요
-        status = STATUS[decision.status] if decision else ("대기" if todo["importance"] == "필수" else "제외")
+        if not todo.get("place_types"):
+            # 장소 종류가 없으면 검색 자체를 할 수 없어요. 조용히 빼지 않고 이유를 보여 줘요 (11/20).
+            status = "제외"
+            reason = "들를 장소 종류가 없어요. 할 일·일정 탭에서 장소를 골라 주세요."
+        elif decision:
+            status = STATUS[decision.status]
+            reason = decision.reason
+        else:
+            status = "대기" if todo["importance"] == "필수" else "제외"
+            reason = missing_reason
         row = {
             "todo_id": todo_id,
             "text": todo["text"],
@@ -300,7 +311,7 @@ def _response(user_id: str, todos: list[dict], options: list[RouteOption], now: 
             # 경유 후보 여러 곳 (#62). 첫 번째가 place와 같아요. 앱은 후보마다 머물 수 있는 시간을 비교해요
             "candidates": [{**_place_out(c), "detour_min": travel_minutes_from_seconds(c["round_trip_walk_seconds"])}
                            for c in (place.get("candidates") or [place])] if place else [],
-            "reason": decision.reason if decision else missing_reason,
+            "reason": reason,
         }
         seg = best.stops.get(todo_id)
         if seg:
@@ -339,7 +350,8 @@ def plan_demo(user_id: str, todo_ids: list[int] | None = None) -> dict:
     부스에서 관객이 자기 할 일로 시연해 볼 때 쓰는 경로예요.
     """
     data = demo.scenario()
-    todos = [t for t in _todos(user_id, todo_ids) if t["place_types"]]  # 들를 곳이 없는 할 일은 빼요
+    # 들를 곳이 없는 할 일도 응답에 남겨 앱이 이유를 보여 줄 수 있게 해요 (11/20).
+    todos = _todos(user_id, todo_ids)
     now, arrive_by = demo.current_time(), _arrive_by(data["schedule"])
     # scenario.json의 route는 예전 파일과의 호환용 대표 경로예요. routes가 있으면 3개를 모두 보여 줘요.
     routes = data.get("routes") or [data["route"]]
@@ -791,10 +803,21 @@ def _live_option(route: dict, origin: kakao.Coord, destination: kakao.Coord,
                 later = {k: f.result() for k, f in later_jobs.items()}
         if vehicle_job is not None:
             vehicle_seconds = vehicle_job.result()
+    # 서울시 실시간 도착이 비어 있으면(키 없음·한도·운행 정보 없음) 카카오 경로의
+    # 예상 총 시간에서 대기를 어림해요. 이렇게 해야 "지금 출발"에서도 할 일 후보가
+    # 통째로 사라지지 않아요 (11/20).
+    wait_estimated = False
+    if vehicle_job is not None and not vehicle_seconds:
+        total = route.get("kakao_total_seconds")
+        if isinstance(total, (int, float)):
+            wait = max(int(total) - plain, 0)
+            vehicle_seconds = [first_walk + min(wait, REALTIME_WINDOW_SECONDS)]
+            wait_estimated = True
     return RouteOption(
         timing=RouteTiming(route["moving_seconds"], first_walk, last_walk,
                            vehicle_seconds,
-                           is_subway=first["type"] == "SUBWAY"),
+                           is_subway=first["type"] == "SUBWAY",
+                           wait_estimated=wait_estimated),
         card={"type": route["type"], "name": "·".join(first["vehicles"][:3]) or first["guidance"],
               "guidance": first["guidance"], "transfers": route["transfers"], "fare": route["fare_min"],
               "stops": first["stops"],
@@ -903,7 +926,8 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         schedule_out = {"destination": {"name": schedule["destination"], "lng": dest[0], "lat": dest[1]},
                         "arrive_by": arrive_by.isoformat(), "prep_minutes": schedule["prep_minutes"]}
 
-    todos = [t for t in _todos(user_id, todo_ids) if t["place_types"]]
+    # 장소 종류가 없는 할 일도 응답에 남겨 앱이 안내할 수 있게 해요 (11/20).
+    todos = _todos(user_id, todo_ids)
     try:
         routes = kakao.transit_routes(origin, dest, ttl_seconds=kakao.ORIGIN_TTL_SECONDS)
         place_cache: dict = {}
