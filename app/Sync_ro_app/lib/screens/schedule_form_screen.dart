@@ -85,10 +85,12 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       _titleController.text,
     );
     final existing = widget.existing;
-    if (_recommendations.isEmpty &&
-        (PlaceRecommendationService.looksLikePurchase(_titleController.text) ||
-            // 시연 점심 일정은 열자마자 AI 장소 추천을 보여 줘요 (11/21)
-            (existing != null && DemoSchedule.isLunch(existing)))) {
+    // 시연 점심 일정은 AI API 없이 미리 넣은 추천을 바로 보여 줘요 (11/21)
+    final demoLunch = existing != null && DemoSchedule.isLunch(existing);
+    if (demoLunch) _aiRecommendations = DemoSchedule.lunchRecommendations;
+    if (!demoLunch &&
+        _recommendations.isEmpty &&
+        PlaceRecommendationService.looksLikePurchase(_titleController.text)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _loadAiRecommendations();
       });
@@ -96,7 +98,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
     _locationController = TextEditingController(
         // 시연 점심 일정은 장소를 비워 두고 AI 추천 칩으로 고르게 해요
-        text: existing != null && DemoSchedule.isLunch(existing) ? '' : seed?.location ?? '');
+        text: demoLunch ? '' : seed?.location ?? '');
 
     if (seed != null &&
         seed.destinationLatitude != null &&

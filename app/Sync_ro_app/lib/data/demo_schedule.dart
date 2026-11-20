@@ -1,3 +1,4 @@
+import '../models/place_recommendation.dart';
 import '../models/schedule.dart';
 import 'presentation_demo_data.dart';
 
@@ -16,8 +17,7 @@ class DemoSchedule {
   /// 할 일·일정 탭에 보여 줄 시연 일정 (시간 순)
   static List<Schedule> get all => [schedule, lunch];
 
-  /// AI 장소 추천을 보여 주는 시연 일정. 수정 화면을 열면 AI가 지금 위치 주변 일식집을 추천해요.
-  /// 가게 이름은 미리 정하지 않아요. 서버 AI + 카카오 검색으로 실제로 있는 곳만 보여 줘요.
+  /// 장소 추천을 보여 주는 시연 일정. 수정 화면을 열면 [lunchRecommendations]가 AI 추천 칩으로 떠요.
   static Schedule get lunch {
     final day = DateTime.parse(PresentationDemoData.arriveByIso).toLocal();
     final start = DateTime(day.year, day.month, day.day, 12, 30);
@@ -51,4 +51,23 @@ class DemoSchedule {
       preparationMinutes: (sched['prep_minutes'] as num?)?.toInt() ?? 30,
     );
   }
+
+  /// 시연 점심 일정의 고정 추천 (11/21). 발표 중 AI API 응답을 기다리지 않게 미리 넣어 둔 값이에요.
+  /// 좌표는 넣지 않아요. 칩을 누르면 장소 검색 화면에서 이 이름으로 실제 지점을 찾아요.
+  static const List<PlaceRecommendation> lunchRecommendations = [
+    PlaceRecommendation(
+      name: '윤휘식당',
+      category: '일식',
+      reason: '고려대 근처에서 일식을 먹을 수 있는 곳이에요.',
+      searchQuery: '윤휘식당',
+      fromAi: true,
+    ),
+    PlaceRecommendation(
+      name: '고래돈가스 고대점',
+      category: '일식',
+      reason: '고려대 근처에서 돈가스를 먹을 수 있는 곳이에요.',
+      searchQuery: '고래돈가스 고대점',
+      fromAi: true,
+    ),
+  ];
 }
