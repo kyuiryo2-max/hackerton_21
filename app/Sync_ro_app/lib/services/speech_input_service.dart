@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 /// 음성 입력.
@@ -31,7 +32,9 @@ class SpeechInputService {
     await _speech.listen(
       onResult: (result) => onText(result.recognizedWords),
       listenOptions: stt.SpeechListenOptions(
-        localeId: 'ko_KR',
+        // 웹은 브라우저 음성 인식에 그대로 넘어가서 BCP-47 표기(ko-KR)여야 해요.
+        // ko_KR(밑줄)은 브라우저가 몰라서 기본 언어(영어)로 들었어요 (11/21).
+        localeId: kIsWeb ? 'ko-KR' : 'ko_KR',
         listenFor: const Duration(minutes: 2),
         pauseFor: const Duration(seconds: 3),
       ),

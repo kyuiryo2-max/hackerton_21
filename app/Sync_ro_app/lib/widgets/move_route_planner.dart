@@ -1143,6 +1143,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     // 순위(id)로 먼저 찾아요. 이름으로 먼저 찾으면 "2호선" 경로가 두 개일 때 2번 카드가 1번 경로 값을 써요 (11/13)
     for (final r in plan.routes) {
       if (route.id == 'server_${r['rank']}') return r;
+      // 시연 경로 카드 id는 offline_demo_N이고 이름("1호선 → 6호선")이 계획 이름("1호선·6호선")과 달라요 (11/21).
+      // 순위로 맞추지 않으면 1·2번 경로에 계획이 안 붙어서 할 일이 전부 "시간 부족"으로 숨겨졌어요.
+      if (route.id == 'offline_demo_${r['rank']}') return r;
     }
     for (final r in plan.routes) {
       final name = '${r['name'] ?? ''}'.trim();
