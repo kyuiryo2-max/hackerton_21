@@ -19,11 +19,11 @@ class ServerPlan {
   List<Map<String, dynamic>> get routes => allRoutes.where((r) => !notRunning(r)).toList();
 
   bool notRunning(Map<String, dynamic> r, {DateTime? now}) {
-    // 카카오 경로 시간으로 대기를 어림한 경로는 운행 자체는 있는 것으로 봐요.
-    if (r['wait_estimated'] == true) return false;
     // 낮에 서울시 실시간 API가 잠깐 실패했다고 경로를 없애면, 할 일 후보까지
     // 통째로 사라져요. 운행 종료 판단은 밤에만 해요 (11/20).
     if (!ServerPlan.isNight(now)) return false;
+    // wait_estimated는 실시간 도착이 아니라 카카오 경로 시간으로 어림한 값이에요.
+    // 밤에는 이 경로를 운행 중으로 단정하지 않고, 새벽 첫차 기준으로 다시 계산하게 둬요.
     final basis = '${r['basis'] ?? data['basis'] ?? ''}';
     if (basis != 'realtime' && basis != 'now') return false;
     if ('${r['type'] ?? ''}'.toUpperCase().contains('WALK')) return false;

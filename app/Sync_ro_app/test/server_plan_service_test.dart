@@ -23,12 +23,14 @@ void main() {
     expect(plan.notRunning(route, now: midnightKst), isTrue);
   });
 
-  test('예상 대기로 계산한 경로는 밤에도 운행 중인 경로로 봐요', () {
+  test('예상 대기 경로는 낮에는 유지하고 밤에는 첫차 기준으로 다시 계산해요', () {
+    final noonKst = DateTime.utc(2026, 11, 21, 3); // 12:00 KST
     final midnightKst = DateTime.utc(2026, 11, 21, 15); // 00:00 KST
     final estimated = <String, dynamic>{
       ...route,
       'wait_estimated': true,
     };
-    expect(plan.notRunning(estimated, now: midnightKst), isFalse);
+    expect(plan.notRunning(estimated, now: noonKst), isFalse);
+    expect(plan.notRunning(estimated, now: midnightKst), isTrue);
   });
 }
