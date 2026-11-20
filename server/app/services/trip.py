@@ -196,7 +196,18 @@ def _minutes(until: datetime | None, now: datetime) -> int | None:
 
 
 def _ride(trip: TripIn) -> str:
-    return trip.ride_name or "탈 차"
+    """답변에 쓸 지금 탈 차 이름.
+
+    첫 차는 앱이 경로 이름("1호선·6호선")을 보내서 "1호선·6호선이 9분 뒤에 와요"처럼 어색했어요 (11/20).
+    지하철 노선이 섞여 있으면 처음 탈 노선("1호선")만 써요. 갈아탄 뒤에는 앱이 그 노선 이름을 따로 보내요.
+    버스 번호끼리("7720·7727")는 둘 중 아무 버스라는 뜻일 수 있어 그대로 둬요.
+    """
+    name = (trip.ride_name or "").strip()
+    parts = [p.strip() for p in name.split("·") if p.strip()]
+    if len(parts) > 1 and any(p.endswith("선") or "GTX" in p for p in parts):
+        first = parts[0]
+        name = f"{first}번" if first[-1:].isdigit() else first
+    return name or "탈 차"
 
 
 def _time_left(trip: TripIn) -> tuple[dict, str]:

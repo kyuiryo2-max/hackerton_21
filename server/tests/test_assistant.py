@@ -68,7 +68,7 @@ def test_질문_응답이_문서_예시와_같음(client, ai):
 def test_AI_키가_없으면_키워드_규칙(client, no_ai):
     body = ask(client, "다음 버스 언제야?")
     assert body["engine"] == "rule"
-    assert body["answer"] == "1호선·6호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요."
+    assert body["answer"] == "1호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요."
 
 
 def test_AI가_실패하면_키워드_규칙(client, monkeypatch):
@@ -310,3 +310,11 @@ def test_같은_장소를_두_번_말해도_한_번만_더함(client, monkeypatc
     _ai_two_stops(monkeypatch, "편의점", "편의점")
     body = ask(client, "편의점 들르고 편의점도", user_id="u1")
     assert body["result"]["feasible"] is True
+
+
+def test_시연_남은_시간은_첫_차_이름과_역으로(client, no_ai):
+    """경로 이름 "1호선·6호선"이 아니라 지금 탈 "1호선", 지하철이라 "정류장" 대신 "역" (11/20)"""
+    body = ask(client, "몇 분까지 있어도 돼?")
+    assert body["answer"].startswith("1호선이 9분 뒤에 와요.")
+    assert "역에 있으면 돼요" in body["answer"] and "정류장" not in body["answer"]
+    assert body["result"]["ride"] == "1호선"

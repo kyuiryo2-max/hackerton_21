@@ -28,18 +28,18 @@ def ask(client, text, phase, **extra):
 
 def test_가게에_있을_때_남은_시간(client):
     out = ask(client, "몇 분 남았어?", "at_place")
-    assert out["answer"] == "GS25 S서울역1호점에서 5분 더 있어도 돼요. 8시 37분에 나오면 1호선·6호선을 탈 수 있어요."
+    assert out["answer"] == "GS25 S서울역1호점에서 5분 더 있어도 돼요. 8시 37분에 나오면 1호선을 탈 수 있어요."
     assert out["result"]["minutes"] == 5 and out["result"]["phase"] == "at_place"
 
 
 def test_가게에서_나갈_시간이_지났으면_지금_나가기(client):
     out = ask(client, "몇 분 남았어?", "at_place", now="2026-11-21T08:41:00+09:00")
-    assert out["answer"] == "지금 나가야 1호선·6호선을 탈 수 있어요."
+    assert out["answer"] == "지금 나가야 1호선을 탈 수 있어요."
 
 
 def test_정류장으로_가는_중_남은_시간(client):
     out = ask(client, "몇 분 남았어?", "to_stop")
-    assert out["answer"] == "서울역에서 8시 41분에 1호선·6호선을 타요. 9분 남았어요."
+    assert out["answer"] == "서울역에서 8시 41분에 1호선을 타요. 9분 남았어요."
 
 
 def test_타는_중이면_도착까지(client):
@@ -49,12 +49,12 @@ def test_타는_중이면_도착까지(client):
 
 def test_다음_차는_앱이_보낸_실시간으로(client):
     out = ask(client, "다음 버스 언제야?", "waiting")
-    assert out["answer"] == "1호선·6호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요."
+    assert out["answer"] == "1호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요."
 
 
 def test_타고_있으면_다음_차_대신_도착(client):
     out = ask(client, "다음 버스 언제야?", "riding")
-    assert out["answer"] == "이미 1호선·6호선을 탔어요. 9시 12분 도착 예정이에요."
+    assert out["answer"] == "이미 1호선을 탔어요. 9시 12분 도착 예정이에요."
 
 
 def test_가게에서_조금_늦어도_괜찮음(client):
@@ -72,7 +72,7 @@ def test_가게에서_많이_늦으면_가게를_빼라고(client):
 def test_정류장_가는_중_늦으면_다음_차(client):
     # 9분 뒤 차를 타려다 10분 늦으면 21분 뒤 차를 타요.
     out = ask(client, "10분 늦을 것 같아", "to_stop", next_vehicles_min=[9, 18, 21])
-    assert out["answer"] == "10분 늦으면 8시 41분 1호선·6호선을 놓쳐요. 다음 차는 21분 뒤예요."
+    assert out["answer"] == "10분 늦으면 8시 41분 1호선을 놓쳐요. 다음 차는 21분 뒤예요."
 
 
 def test_늦었는데_탈_차를_모르면_새로고침(client):
@@ -101,7 +101,7 @@ def test_지하철_이름_조사():
 def test_버스를_놓치면_다음_차(client):
     # 11/13: 기다리는 중 "응 버스 놓쳤어" → 남은 시간을 그대로 말하던 문제
     out = ask(client, "응 버스 놓쳤어", "waiting")
-    assert out["answer"] == "1호선·6호선을 놓쳤으면 다음 차는 18분 뒤(8시 50분)에 와요."
+    assert out["answer"] == "1호선을 놓쳤으면 다음 차는 18분 뒤(8시 50분)에 와요."
     assert out["result"]["missed"] is True
 
 
@@ -115,3 +115,24 @@ def test_범위_밖으로_분류돼도_놓쳤으면_다음_차():
     t = trip.TripIn(**{**BASE, "phase": "waiting", "next_vehicles_min": [9, 18]})
     result, answer = trip.answer(item, t, "아 놓쳐버렸네")
     assert result["missed"] is True and "18분 뒤" in answer
+
+
+def test_갈아타는_경로_이름이면_처음_탈_노선만():
+    t = trip.TripIn(**{**BASE, "phase": "waiting"})
+    assert trip._ride(t) == "1호선"
+
+
+def test_갈아탄_뒤에는_앱이_보낸_노선_그대로(client):
+    out = ask(client, "다음 차 언제 와?", "waiting", ride_name="6호선", next_vehicles_min=[4])
+    assert out["answer"] == "6호선이 4분 뒤에 와요."
+
+
+def test_버스_번호끼리는_그대로():
+    """"7720·7727"은 둘 중 아무 버스라는 뜻일 수 있어서 자르지 않아요"""
+    t = trip.TripIn(**{**BASE, "phase": "waiting", "ride_name": "7720·7727번"})
+    assert trip._ride(t) == "7720·7727번"
+
+
+def test_버스와_지하철이_섞이면_첫_버스에_번():
+    t = trip.TripIn(**{**BASE, "phase": "waiting", "ride_name": "273·1호선"})
+    assert trip._ride(t) == "273번"

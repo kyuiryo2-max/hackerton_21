@@ -26,10 +26,11 @@
           "result": {
             "intent": "next_vehicle",
             "route": "1호선·6호선",
+            "ride": "1호선",
             "minutes": 9,
             "next_minutes": 18
           },
-          "answer": "1호선·6호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요.",
+          "answer": "1호선이 9분 뒤에 와요. 그다음 차는 18분 뒤예요.",
           "todo": null,
           "todos": [],
           "engine": "ai"
