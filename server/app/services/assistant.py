@@ -159,14 +159,28 @@ def _vehicle_label(name: str) -> str:
     return name if is_subway or name.endswith("번") else f"{name}번"
 
 
+def _demo_first_ride(route_name: str) -> tuple[str, str]:
+    """(답변에 쓸 첫 차 이름, 기다리는 곳). 경로 이름 "1호선·6호선" 대신 지금 탈 "1호선"과 "역"을 써요.
+
+    갈아타는 경로는 이름이 노선을 이어 붙인 것이라, 그대로 쓰면 "1호선·6호선이 9분 뒤에 와요"처럼 어색해요 (11/20).
+    """
+    data = demo.scenario()
+    routes = data.get("routes") or [data["route"]]
+    route = next((r for r in routes if r["name"] == route_name), data["route"])
+    leg = next((l for l in route.get("legs") or [] if l.get("type") in ("BUS", "SUBWAY")), None)
+    if leg is None:
+        return _vehicle_label(route_name), "역" if route.get("type") == "SUBWAY" else "정류장"
+    return _vehicle_label(leg["name"]), "역" if leg["type"] == "SUBWAY" else "정류장"
+
+
 def _next_vehicle(item: dict, state: dict) -> tuple[dict, str]:
     a = _demo_route_arrival(state["elapsed"])
     first, second = (None if s is None else wait_minutes_from_seconds(s) for s in (a["first_seconds"], a["second_seconds"]))
-    label = _vehicle_label(a["route"])
-    result = {"intent": "next_vehicle", "route": a["route"], "minutes": first, "next_minutes": second}
+    label, _ = _demo_first_ride(a["route"])
+    result = {"intent": "next_vehicle", "route": a["route"], "ride": label, "minutes": first, "next_minutes": second}
     if first is None:
-        return result, f"{label}은 오늘 더 오지 않아요."
-    answer = f"{label}이 {first}분 뒤에 와요."
+        return result, f"{_josa(label, '은는')} 오늘 더 오지 않아요."
+    answer = f"{_josa(label, '이가')} {first}분 뒤에 와요."
     if second is not None:
         answer += f" 그다음 차는 {second}분 뒤예요."
     return result, answer
@@ -466,15 +480,17 @@ def _running_late(item: dict, state: dict) -> tuple[dict, str]:
 
 def _time_left(item: dict, state: dict) -> tuple[dict, str]:
     a = _demo_route_arrival(state["elapsed"])
-    label = _vehicle_label(a["route"])
+    label, place = _demo_first_ride(a["route"])
     if a["first_seconds"] is None:
-        return {"intent": "time_left", "minutes": None, "leave_by": None}, f"{label}은 오늘 더 오지 않아요."
-    # 차가 오는 시각이 아니라 여유를 두고 정류장에 있어야 하는 시각을 알려요
+        return ({"intent": "time_left", "ride": label, "minutes": None, "leave_by": None},
+                f"{_josa(label, '은는')} 오늘 더 오지 않아요.")
+    # 차가 오는 시각이 아니라 여유를 두고 정류장(역)에 있어야 하는 시각을 알려요
     seconds_left = max(a["first_seconds"] - DEFAULT_BUFFER_SECONDS, 0)
     minutes = wait_minutes_from_seconds(a["first_seconds"])
     leave_by = demo.current_time(state["elapsed"] + seconds_left)
-    return ({"intent": "time_left", "minutes": wait_minutes_from_seconds(seconds_left), "leave_by": leave_by.isoformat()},
-            f"{label}이 {minutes}분 뒤에 와요. {_hhmm(leave_by)}까지 정류장에 있으면 돼요.")
+    return ({"intent": "time_left", "ride": label, "minutes": wait_minutes_from_seconds(seconds_left),
+             "leave_by": leave_by.isoformat()},
+            f"{_josa(label, '이가')} {minutes}분 뒤에 와요. {_hhmm(leave_by)}까지 {place}에 있으면 돼요.")
 
 
 def _place_info(item: dict, state: dict) -> tuple[dict, str]:
@@ -643,7 +659,7 @@ def _live_time_left(item: dict, state: dict) -> tuple[dict, str]:
     leave_by = now + timedelta(seconds=seconds_left)
     return ({"intent": "time_left", "minutes": wait_minutes_from_seconds(seconds_left), "leave_by": leave_by.isoformat()},
             f"{_josa(label, '이가')} {wait_minutes_from_seconds(vehicles[0])}분 뒤에 와요. "
-            f"{_hhmm(leave_by)}까지 정류장에 있으면 돼요.")
+            f"{_hhmm(leave_by)}까지 {'역' if plan.leg.get('type') == 'SUBWAY' else '정류장'}에 있으면 돼요.")
 
 
 def _live_stopover_check(item: dict, state: dict) -> tuple[dict, str]:
