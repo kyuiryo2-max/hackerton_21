@@ -82,6 +82,8 @@ class RouteOption:
     later: dict = field(default_factory=dict, repr=False)
     # 할 일마다 고른 구간 (todo_id → 구간 dict). 경로 카드 todo_stops로 보내요
     stops: dict = field(default_factory=dict)
+    # 탈 차 뒤에 와도 도착 희망 시각 안인 차들 (실시간·도착 희망이 있을 때만). 경로 카드 later_boards로 보내요
+    later_boards: list = field(default_factory=list)
 
 
 def _todos(user_id: str, todo_ids: list[int] | None) -> list[dict]:
@@ -177,7 +179,29 @@ def _route_card(rank: int, option: RouteOption) -> dict:
         "legs": option.card.get("legs", []),
         # 할 일마다 어느 구간(타기 전·갈아탈 때·내린 뒤)에서 들르는지 (11/16 피드백 3)
         **({"todo_stops": _todo_stops(option)} if option.stops else {}),
+        # 실시간 기준인데 도착 희망 시간이 있으면, 탈 차 뒤에 와도 늦지 않는 차들 (11/20)
+        **({"later_boards": option.later_boards} if option.later_boards else {}),
     }
+
+
+LATER_BOARDS_SHOWN = 6  # 앱이 머물 시간을 늘릴 때 고를 다음 차 후보 수
+
+
+def _later_boards(option: RouteOption, now: datetime, deadline: int) -> list[dict]:
+    """탈 차(board_seconds) 다음에 와도 도착 희망 시각 안에 닿는 차들의 탑승·도착 시각.
+
+    실시간 차가 잡히면 앱은 곧 오는 차 한 대에 맞춰 머무를 시간을 계산해서, 다음 차를 타도 안 늦는데
+    "머물 시간 7분으로 줄이기"가 떴어요 (11/20). 앱이 이 목록으로 필요한 만큼 머물 수 있는 가장 빠른 차를 골라요.
+    실시간 정보가 없는 차(배차 간격으로 1시간까지 이어 붙인 값)도 들어 있어요.
+    """
+    board = option.result.board_seconds if option.result else None
+    if board is None:
+        return []
+    after = option.timing.moving_seconds + option.timing.last_walk_seconds
+    later = sorted(v for v in set(option.timing.vehicle_seconds) if v > board and v + after <= deadline)
+    return [{"board_at": (now + timedelta(seconds=v)).isoformat(),
+             "arrive_at": (now + timedelta(seconds=v + after)).isoformat()}
+            for v in later[:LATER_BOARDS_SHOWN]]
 
 
 NEXT_VEHICLES_SHOWN = 2  # 서울시 버스 실시간은 앞 차 2대만 알려 줘요. 그 뒤는 배차 간격으로 추정한 값이라 안 보여요
@@ -915,6 +939,8 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
             option.times["basis"] = "scheduled"
         option.result = _without_stop_times(_decide(option, todos, deadline), direct)
         _choose_segments(option, todos, deadline, _leave_early_seconds(option, now))
+        if arrive_by is not None and option.times.get("basis") == "realtime":
+            option.later_boards = _later_boards(option, now, deadline)
     sort_options(options, todos)
     # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
     best = options[0]

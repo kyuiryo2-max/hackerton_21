@@ -960,3 +960,26 @@ def test_역_이름을_말하면_그_역_근처에서_장소를_찾음(client, l
     body = live_ask("동대문역에 꽃집 어디야?")
     assert centers[-1] == (127.0091, 37.5657)
     assert body["answer"].startswith("동대문역 근처에서 가까운 곳은") and "동대문역에서 왕복" in body["answer"]
+
+
+# ---------- 다음 차를 타면 더 머물 수 있는지 (11/20) ----------
+def test_실시간이면_다음_차_중_도착_희망_안인_차를_알려줌(client, world):
+    """40분 뒤 도착: 곧 오는 차(10분 뒤) 말고도 늦지 않는 차가 있으면 앱이 그 차로 머물 시간을 늘려요."""
+    setup_user(client)
+    body = plan(client).json()
+    route = body["routes"][0]
+    assert route["basis"] == "realtime"
+    later = route["later_boards"]
+    assert later, "다음 차 후보가 있어야 해요"
+    boards = [datetime.fromisoformat(x["board_at"]) for x in later]
+    arrives = [datetime.fromisoformat(x["arrive_at"]) for x in later]
+    assert boards == sorted(boards) and boards[0] > datetime.fromisoformat(route["board_at"])
+    assert max(arrives) <= datetime.fromisoformat(body["schedule"]["arrive_by"])
+
+
+def test_거꾸로_계산하거나_지금_출발이면_다음_차_목록이_없음(client, world):
+    setup_user(client, hours=3)
+    assert "later_boards" not in plan(client).json()["routes"][0]
+    body = plan(client, todo_ids=[], destination={"name": "청량리역", "lat": 37.58029, "lng": 127.04691}).json()
+    assert body["basis"] == "now" and "later_boards" not in body["routes"][0]
+

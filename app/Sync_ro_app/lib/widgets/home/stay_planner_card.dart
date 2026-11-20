@@ -179,6 +179,9 @@ class StayVerdictCard extends StatelessWidget {
           : '차에서 내려 ${e.candidate.name}에 ${e.need}분 들렀다 가도 ${hm(arriveOverride ?? o.arriveAt)}에 도착해요';
     } else if (e.ample) {
       line = '경유지를 들르기에 충분해요! 여유 있게 ${e.dwell}분 잡고 ${hm(e.depart)}에 나가면 돼요';
+    } else if (e.status != StayStatus.bad && e.laterBoardAt != null) {
+      // 곧 오는 차 대신 다음 차를 타면 도착 희망 시각 안에 필요한 만큼 머물 수 있어요 (11/20)
+      line = '${hm(e.laterBoardAt)} 차를 타면 ${e.candidate.name}에 ${e.need}분 들러도 ${hm(e.laterArriveAt)}에 도착해요';
     } else if (e.status != StayStatus.bad) {
       final latest = e.latestDepart;
       line = latest != null && latest.isAfter(e.depart)
@@ -212,7 +215,7 @@ class StayVerdictCard extends StatelessWidget {
         (b.status.index < e.status.index || (!e.ample && b.maxDwell > e.maxDwell + 3));
     final alt = showAlt ? b : null;
 
-    final arrival = arriveOverride ?? o.arriveAt;
+    final arrival = arriveOverride ?? e.laterArriveAt ?? o.arriveAt;
     final arriveBy = o.arriveBy;
     final String tail;
     if (e.missesVehicle) {
