@@ -968,7 +968,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
       answer = '${busNote}1호선은 서울역에서 ${KstTime.hm(first)}에 타요. ${left(first)}분 남았어요. '
           '동묘앞에서 ${KstTime.hm(transfer)}에 6호선으로 갈아타면 ${KstTime.hm(arrive)}에 도착해요.';
     } else if (now.isBefore(transfer)) {
-      answer = '${busNote}동묘앞에서 6호선을 ${KstTime.hm(transfer)}에 타요. ${left(transfer)}분 남았어요. '
+      answer = '$busNote동묘앞에서 6호선을 ${KstTime.hm(transfer)}에 타요. ${left(transfer)}분 남았어요. '
           '${KstTime.hm(arrive)}에 도착해요.';
     } else {
       answer = '$busNote${KstTime.hm(arrive)}에 도착해요. ${left(arrive)}분 남았어요.';
