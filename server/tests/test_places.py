@@ -75,3 +75,34 @@ def test_진료과_찾기는_긴_이름부터():
     assert places.specialty_of("소아과 예방접종") == "소아청소년과"
     assert places.specialty_of("감기라 내과") == "내과"
     assert places.specialty_of("약 사기") is None
+
+
+def test_마트_키워드_검색에서_음식점은_뺌(monkeypatch):
+    """'롯데마트'가 들어간 음식점이 대형마트보다 먼저 와도 판매처로 쓰지 않아요 (11/20)."""
+    def fake_search(center, **kwargs):
+        return [
+            {"name": "죠스 떡볶이 롯데마트점", "category": "FD6",
+             "category_name": "음식점 > 분식", "lng": 127.0, "lat": 37.5},
+            {"name": "롯데마트 서울역점", "category": "MT1",
+             "category_name": "가정,생활 > 대형마트", "lng": 127.1, "lat": 37.6},
+        ]
+
+    monkeypatch.setattr(places.kakao, "search_places", fake_search)
+    found = places.search_by_place_type("마트", (127.0, 37.5))
+    assert [p["name"] for p in found] == ["롯데마트 서울역점"]
+
+
+def test_카테고리_검색은_다른_업종_코드를_뺌(monkeypatch):
+    monkeypatch.setattr(places.kakao, "search_places", lambda center, **kw: [
+        {"name": "편의점", "category": "CS2", "category_name": "편의점"},
+    ])
+    assert places.search_by_place_type("약국", (127.0, 37.5)) == []
+
+
+def test_다이소는_이름에_브랜드가_있는_곳만_남김(monkeypatch):
+    monkeypatch.setattr(places.kakao, "search_places", lambda center, **kw: [
+        {"name": "다이소 서울역점", "category": "", "category_name": "가정,생활 > 생활용품점"},
+        {"name": "롯데마트 다이소점", "category": "FD6", "category_name": "음식점 > 분식"},
+    ])
+    found = places.search_by_place_type("다이소", (127.0, 37.5))
+    assert [p["name"] for p in found] == ["다이소 서울역점"]

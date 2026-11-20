@@ -23,6 +23,14 @@ void main() {
     expect(result.first.category, '다이소');
   });
 
+  test('이어폰을 사야 돼 → 마트가 아니라 다이소·편의점을 추천해요', () {
+    final result = service.recommend('이어폰 사야 돼');
+
+    expect(result.first.name, '다이소');
+    expect(result.map((item) => item.name), containsAll(['다이소', '편의점']));
+    expect(result.map((item) => item.name), isNot(contains('마트')));
+  });
+
   test('음료를 사야 돼 → 편의점·마트·카페를 추천해요', () {
     final result = service.recommend('음료를 사야 돼');
 

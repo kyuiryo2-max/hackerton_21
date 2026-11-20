@@ -116,9 +116,11 @@ def test_시연_지역에_없는_장소는_상태를_저장하지_않음(client)
     assert client.get("/api/todos", params={"user_id": "u1"}).json()[0]["status"] == "대기"
 
 
-def test_들를_곳이_없는_할_일은_계산에서_뺌(client):
+def test_들를_곳이_없는_할_일은_이유와_함께_보여_줌(client):
     add_todo(client, "엄마한테 전화", [])
-    assert plan(client, user_id="u1").json()["todos"] == []
+    todo = plan(client, user_id="u1").json()["todos"][0]
+    assert (todo["status"], todo["place"]) == ("제외", None)
+    assert "장소 종류" in todo["reason"]
 
 
 def test_완료한_할_일은_다시_계산하지_않음(client):

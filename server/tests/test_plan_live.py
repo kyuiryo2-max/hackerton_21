@@ -983,3 +983,25 @@ def test_거꾸로_계산하거나_지금_출발이면_다음_차_목록이_없�
     body = plan(client, todo_ids=[], destination={"name": "청량리역", "lat": 37.58029, "lng": 127.04691}).json()
     assert body["basis"] == "now" and "later_boards" not in body["routes"][0]
 
+
+def test_장소_종류가_없는_할_일도_이유와_함께_보여_줌(client, world):
+    setup_user(client, todos=(("엄마한테 전화", [], "필수"),))
+    todo = plan(client).json()["todos"][0]
+    assert (todo["status"], todo["place"]) == ("제외", None)
+    assert "장소 종류" in todo["reason"]
+
+
+def test_실시간이_없으면_카카오_예상_대기로_체류_시간을_계산(client, world):
+    """서울시 실시간이 비어도 '지금 출발' 할 일 후보를 통째로 숨기지 않아요 (11/20)."""
+    bus_routes = [r for r in world["routes"] if any(leg["type"] == "BUS" for leg in r["legs"])]
+    assert bus_routes
+    world["routes"] = [dict(bus_routes[0], kakao_total_seconds=2000)]
+    world["bus"] = [None, None]
+    setup_user(client)
+    body = plan(client).json()
+    route = body["routes"][0]
+    assert route["has_realtime"] is False
+    assert route["wait_estimated"] is True
+    assert route["max_stay_min"] is not None
+    assert body["todos"][0]["place"] is not None
+

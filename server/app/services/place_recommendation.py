@@ -7,7 +7,7 @@ AI가 매장 이름을 지어내지 않도록, 응답에는 카카오가 찾은 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 
-from app.services import kakao, llm
+from app.services import kakao, llm, places
 
 # 가까운 지점을 먼저 찾고, 없을 때만 조금 넓혀요.
 SEARCH_RADIUS_M = 5000
@@ -36,13 +36,16 @@ def _lookup(candidate: dict, center: kakao.Coord) -> list[dict]:
     query = candidate["search_query"]
     found: list[dict] = []
     for radius in (SEARCH_RADIUS_M, FALLBACK_RADIUS_M):
-        found = kakao.search_places(
+        results = kakao.search_places(
             center,
             keyword=query,
             radius_m=radius,
             size=LOOKUP_SIZE,
             sort="distance",
         )
+        # "롯데마트"로 찾은 "죠스 떡볶이 롯데마트점"처럼 음식점·카페가 섞이면
+        # 실제로 물건을 파는 다음 결과를 써요. 맞는 곳이 없으면 추천하지 않아요.
+        found = [p for p in results if places.is_valid_place(candidate["category"], p)]
         if found:
             break
     if not found:

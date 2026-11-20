@@ -18,7 +18,12 @@ class ServerPlan {
   /// 일정이 멀어서 도착 시각에서 거꾸로 계산한 계획(arrive_by)은 실시간을 안 보니까 그대로 둬요.
   List<Map<String, dynamic>> get routes => allRoutes.where((r) => !notRunning(r)).toList();
 
-  bool notRunning(Map<String, dynamic> r) {
+  bool notRunning(Map<String, dynamic> r, {DateTime? now}) {
+    // 카카오 경로 시간으로 대기를 어림한 경로는 운행 자체는 있는 것으로 봐요.
+    if (r['wait_estimated'] == true) return false;
+    // 낮에 서울시 실시간 API가 잠깐 실패했다고 경로를 없애면, 할 일 후보까지
+    // 통째로 사라져요. 운행 종료 판단은 밤에만 해요 (11/20).
+    if (!ServerPlan.isNight(now)) return false;
     final basis = '${r['basis'] ?? data['basis'] ?? ''}';
     if (basis != 'realtime' && basis != 'now') return false;
     if ('${r['type'] ?? ''}'.toUpperCase().contains('WALK')) return false;

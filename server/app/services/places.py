@@ -22,6 +22,18 @@ KAKAO_CATEGORY_CODES = {
     "HP8": "병원", "PM9": "약국",
 }
 
+# 음식점·카페는 "롯데마트점"처럼 매장 이름에 다른 가게 이름이 붙어도
+# 물건을 파는 곳이 아니에요. 키워드 검색 결과에서 이런 업종을 걸러요 (11/20).
+FOOD_GROUP_CODES = {"FD6", "CE7"}
+FOOD_CATEGORY_WORDS = ("음식점", "카페", "분식", "주점", "제과", "베이커리")
+FOOD_PLACE_TYPES = {"음식점", "카페", "빵집", "케이크집"}
+
+# 브랜드 이름으로 찾는 종류는 결과 이름에도 브랜드가 있어야 해요.
+BRAND_KEYWORDS = {
+    "다이소": ("다이소",),
+    "올리브영": ("올리브영",),
+}
+
 
 @dataclass(frozen=True)
 class PlaceSearch:
@@ -59,6 +71,32 @@ def specialty_of(text: str) -> str | None:
     return None
 
 
+
+def _is_food_or_cafe(place: dict) -> bool:
+    """카카오 결과가 음식점·카페인지. 업종 코드가 비어 있어도 업종명으로 판단해요."""
+    code = str(place.get("category") or "")
+    category_name = str(place.get("category_name") or "")
+    return code in FOOD_GROUP_CODES or any(word in category_name for word in FOOD_CATEGORY_WORDS)
+
+
+def is_valid_place(place_type: str, place: dict) -> bool:
+    """검색한 장소 종류에 맞는 결과인지 확인해요.
+
+    특히 "마트" 키워드 검색에 "죠스 떡볶이 롯데마트점"(음식점)이 섞이는 문제를 막아요.
+    카카오가 업종 코드를 주지 않는 예전 응답은 이름 규칙만 적용해 호환성을 지켜요.
+    """
+    if place_type == "기타":
+        # AI가 종류를 고르지 못해도, 물건을 사러 가는 추천에 음식점·카페는 넣지 않아요.
+        return not _is_food_or_cafe(place)
+    if place_type not in FOOD_PLACE_TYPES and _is_food_or_cafe(place):
+        return False
+    brands = BRAND_KEYWORDS.get(place_type)
+    if brands:
+        name = str(place.get("name") or "").casefold()
+        return any(brand in name for brand in brands)
+    return True
+
+
 def search_by_place_type(place_type: str, center: kakao.Coord, radius_m: int = 500, size: int = 5,
                          text: str = "") -> list[dict]:
     """장소 종류 하나로 주변 장소를 가까운 순으로 찾아요. 목록에 없는 종류면 ValueError."""
@@ -66,7 +104,14 @@ def search_by_place_type(place_type: str, center: kakao.Coord, radius_m: int = 5
     if s is None:
         raise ValueError(f"장소 종류 목록에 없어요: {place_type}")
     if place_type == "병원" and (spec := specialty_of(text)):
-        return kakao.search_places(center, keyword=spec, radius_m=radius_m, size=size)
+        found = kakao.search_places(center, keyword=spec, radius_m=radius_m, size=size)
+        return [p for p in found if is_valid_place(place_type, p)]
     if s.search_type == "category":
-        return kakao.search_places(center, category=s.search_value, radius_m=radius_m, size=size)
-    return kakao.search_places(center, keyword=s.search_value, radius_m=radius_m, size=size)
+        found = kakao.search_places(center, category=s.search_value, radius_m=radius_m, size=size)
+        # 카카오가 업종 코드를 줬는데 다른 업종이면 잘못 섞인 결과예요.
+        return [
+            p for p in found
+            if (not p.get("category") or p["category"] == s.search_value) and is_valid_place(place_type, p)
+        ]
+    found = kakao.search_places(center, keyword=s.search_value, radius_m=radius_m, size=size)
+    return [p for p in found if is_valid_place(place_type, p)]

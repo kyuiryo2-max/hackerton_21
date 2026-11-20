@@ -597,8 +597,6 @@ class DepartureOverview {
         final c = _candidate(place, '$id-0', detourFallback: mainDetour);
         if (c != null) candidates.add(c);
       }
-      if (candidates.isEmpty) continue;
-
       final todoTitle = '${todo['text'] ?? '할 일'}';
       final serverNeed = _int(todo['stay_min']);
       tasks.add(StayTask(

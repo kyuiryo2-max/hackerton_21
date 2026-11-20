@@ -209,6 +209,10 @@ def test_할_일_규칙_중요도():
     assert rules.parse_todo("과제 출력 꼭 해야 함")["importance"] == "필수"
 
 
+def test_이어폰은_마트가_아니라_편의점과_다이소():
+    assert rules.parse_todo("이어폰 사기")["place_types"] == ["편의점", "다이소"]
+
+
 def test_질문_규칙_늦어짐과_분():
     item = rules.classify_question("몇 분 늦을 것 같아, 10분")["intents"][0]
     assert (item["intent"], item["delay_minutes"]) == ("running_late", 10)
