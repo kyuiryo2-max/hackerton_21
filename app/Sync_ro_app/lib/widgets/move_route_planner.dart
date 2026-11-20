@@ -564,7 +564,8 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
         ? stop.leavePlace.add(Duration(minutes: stop.candidate.walkBack))
         : times.depart.add(Duration(minutes: firstWalk));
     // 계산한 탑승 시각이 정류장 도착보다 이르면(= 지금 오는 실시간 버스 시각) 정류장 도착 시각을 써요 (11/14)
-    final given = o?.boardAt;
+    // 들르느라 다음 차를 타는 판정이면 그 차 시각이에요 (11/20)
+    final given = stop?.laterBoardAt ?? o?.boardAt;
     final boardAt = given != null && !given.isBefore(reachStop) ? given : reachStop;
     final planNow = DateTime.tryParse('${widget.plan?.data['now'] ?? ''}') ?? widget.now;
     final raw = p?['next_vehicles_min'];
@@ -1351,7 +1352,8 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     // 갈아탈 때·내린 뒤 들르면 출발은 그대로, 도착이 늦어져요 (11/16)
     final seg = _segOf[e];
     if (seg != null) return _RouteTimes(base.depart, seg.arrive, base.derived, false);
-    return _RouteTimes(e.depart, base.arrive, base.derived, true);
+    // 들르느라 다음 차를 타면 그 차의 도착 시각 (11/20)
+    return _RouteTimes(e.depart, e.laterArriveAt ?? base.arrive, base.derived, true);
   }
 
   /// 카드 시간 띠에 쓸 경로. 할 일을 적용해 들를 수 있으면 처음 도보를
@@ -1986,7 +1988,7 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
               ? _stripRoute(route, applied, chosen: chosenEval).segments
               : route.segments,
           viaRide: _segOf[chosenEval] != null,
-          arriveOverride: _segOf[chosenEval]?.arrive,
+          arriveOverride: _segOf[chosenEval]?.arrive ?? chosenEval.laterArriveAt,
         ),
       ] else ...[
         if (applied != null)

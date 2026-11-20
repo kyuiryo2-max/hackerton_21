@@ -203,6 +203,26 @@ class StayTask {
 
 enum StayStatus { ok, tight, bad }
 
+/// 탈 차 뒤에 와도 도착 희망 시각 안인 차 하나 (서버 경로 카드 later_boards, 11/20)
+class LaterBoard {
+  const LaterBoard(this.boardAt, this.arriveAt);
+  final DateTime boardAt;
+  final DateTime arriveAt;
+
+  static List<LaterBoard> parseList(dynamic raw) {
+    if (raw is! List) return const [];
+    final out = <LaterBoard>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final board = DateTime.tryParse('${item['board_at'] ?? ''}');
+      final arrive = DateTime.tryParse('${item['arrive_at'] ?? ''}');
+      if (board != null && arrive != null) out.add(LaterBoard(board, arrive));
+    }
+    out.sort((a, b) => a.boardAt.compareTo(b.boardAt));
+    return out;
+  }
+}
+
 /// 출발 시각 하나 + 후보 하나에 대한 판정.
 class StayEval {
   const StayEval({
@@ -220,7 +240,13 @@ class StayEval {
     this.latestDepart,
     this.ample = false,
     int? maxDwell,
+    this.laterBoardAt,
+    this.laterArriveAt,
   }) : maxDwell = maxDwell ?? dwell;
+
+  /// 곧 오는 차로는 모자라서 다음 차를 타는 판정이면 그 차의 탑승·도착 시각 (11/20). 첫 차면 null.
+  final DateTime? laterBoardAt;
+  final DateTime? laterArriveAt;
 
   final StayCandidate candidate;
   final StayStatus status;
@@ -280,7 +306,12 @@ class DepartureOverview {
     this.nextVehiclesMin = const [],
     this.waitMinutes,
     this.planNow,
+    this.laterBoards = const [],
   });
+
+  /// 탈 차([boardAt]) 뒤에 와도 도착 희망 시각 안인 차들 (실제 모드 실시간 기준, 11/20).
+  /// 머물 시간을 늘려 곧 오는 차를 놓치면, 이 중 필요한 만큼 머물 수 있는 가장 빠른 차로 판정해요.
+  final List<LaterBoard> laterBoards;
 
   /// 탈 정류장에 곧 오는 차들이 계획 시각([planNow])부터 몇 분 뒤인지 (실시간, 11/14 홈 표시용)
   final List<int> nextVehiclesMin;
@@ -366,6 +397,13 @@ class DepartureOverview {
   StayEval evaluate(StayCandidate candidate, {required int delayMinutes, required int need}) {
     final (dep, _) = _stayBase;
     final first = _evaluateAt(candidate, dep.add(Duration(minutes: delayMinutes)), need);
+    if (first.status == StayStatus.bad && source == DepartureSource.serverPlan) {
+      // 곧 오는 차로는 모자라도, 다음 차를 타면 도착 희망 시각 안에 필요한 만큼 머물 수 있어요 (11/20)
+      for (final later in laterBoards) {
+        final e = _evaluateAt(candidate, first.depart, need, via: later);
+        if (e.status != StayStatus.bad) return e;
+      }
+    }
     final rec = StayEval.recommendFor(need);
     if (first.dwell <= rec) return first;
     // 경유지를 나와야 하는 시각에서 거꾸로: 추천 시간 + 가는 도보만큼 전에 출발
@@ -391,9 +429,9 @@ class DepartureOverview {
     );
   }
 
-  StayEval _evaluateAt(StayCandidate candidate, DateTime depart, int need) {
+  StayEval _evaluateAt(StayCandidate candidate, DateTime depart, int need, {LaterBoard? via}) {
     final (dep, spare) = _stayBase;
-    final board = boardAt!;
+    final board = via?.boardAt ?? boardAt!;
     final arrive = depart.add(Duration(minutes: candidate.walkTo));
 
     // 정류장으로 돌아가기 시작해야 하는 시각 (탈 차 − 여유 − 돌아가는 도보)
@@ -439,6 +477,8 @@ class DepartureOverview {
       missesVehicle: reach.isAfter(board),
       closeLimited: closeLimited,
       latestDepart: latest,
+      laterBoardAt: via?.boardAt,
+      laterArriveAt: via?.arriveAt,
     );
   }
 
@@ -613,6 +653,7 @@ class DepartureOverview {
       ],
       waitMinutes: _int(route['wait_min']),
       planNow: DateTime.tryParse('${plan.data['now'] ?? ''}'),
+      laterBoards: LaterBoard.parseList(route['later_boards']),
     );
   }
 }

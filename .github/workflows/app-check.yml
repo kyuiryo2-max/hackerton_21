@@ -1,0 +1,28 @@
+# PR에서 앱 코드가 바뀌면 분석·테스트를 돌려요 (11/20).
+# deploy-web.yml은 main에 머지된 뒤에만 빌드해서, 앱 오류를 머지 전에 알 수 없었어요.
+name: app-check
+
+on:
+  pull_request:
+    paths: ["app/**", ".github/workflows/app-check.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/Sync_ro_app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.35.7
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # 오류만 실패로 봐요 (기존 코드의 안내·경고 때문에 막히지 않게)
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test
