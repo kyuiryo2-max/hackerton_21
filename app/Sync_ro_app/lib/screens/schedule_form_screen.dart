@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 import '../models/schedule.dart';
 import '../models/place.dart';
+import '../data/demo_schedule.dart';
 import '../models/place_recommendation.dart';
 import 'place_search_screen.dart';
 import '../services/location_access.dart';
@@ -83,14 +84,19 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     _recommendations = const PlaceRecommendationService().recommend(
       _titleController.text,
     );
+    final existing = widget.existing;
     if (_recommendations.isEmpty &&
-        PlaceRecommendationService.looksLikePurchase(_titleController.text)) {
+        (PlaceRecommendationService.looksLikePurchase(_titleController.text) ||
+            // 시연 점심 일정은 열자마자 AI 장소 추천을 보여 줘요 (11/21)
+            (existing != null && DemoSchedule.isLunch(existing)))) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _loadAiRecommendations();
       });
     }
 
-    _locationController = TextEditingController(text: seed?.location ?? '');
+    _locationController = TextEditingController(
+        // 시연 점심 일정은 장소를 비워 두고 AI 추천 칩으로 고르게 해요
+        text: existing != null && DemoSchedule.isLunch(existing) ? '' : seed?.location ?? '');
 
     if (seed != null &&
         seed.destinationLatitude != null &&

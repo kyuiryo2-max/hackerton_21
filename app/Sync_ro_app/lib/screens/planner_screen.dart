@@ -331,15 +331,6 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
   }
 
   Future<void> _scheduleMenu(Schedule s, String action) async {
-    if (DemoSchedule.isDemo(s)) {
-      // 시연 일정은 고정 예시라 수정·삭제하지 않아요. 경로는 이동 탭의 시연 계획으로 봐요.
-      if (action == 'detail' || action == 'route') {
-        widget.onOpenScheduleRoutes?.call(s);
-      } else {
-        _snack('시연 일정은 수정·삭제할 수 없어요. 실제 모드에서 일정을 넣어 보세요.');
-      }
-      return;
-    }
     final controller = ScheduleScope.of(context);
     switch (action) {
       case 'detail':
@@ -560,8 +551,9 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
     final items = <(Schedule, Routine?)>[for (final s in serverWeek) (s, _routineOf(s))];
     // 시연 모드: 홈·이동 탭과 같은 발표 시연 일정을 목록과 시간표에 같이 보여 줘요 (11/21)
     if (RuntimeMode.instance.isDemo) {
-      final demo = DemoSchedule.schedule;
-      if (!demo.startTime.isBefore(_weekStart) && demo.startTime.isBefore(weekEnd)) items.add((demo, null));
+      for (final demo in DemoSchedule.all) {
+        if (!demo.startTime.isBefore(_weekStart) && demo.startTime.isBefore(weekEnd)) items.add((demo, null));
+      }
     }
     for (final r in store.routines) {
       if (r.isTodo) continue;
@@ -674,7 +666,10 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
                 schedule: s,
                 repeating: r != null,
                 onRoute: !s.isCompleted && s.startTime.isAfter(_now)
-                    ? () => s.id == 0 && r != null
+                    // 시연 점심 일정은 경로 대신 수정 화면에서 AI 장소 추천을 보여 줘요 (11/21)
+                    ? () => DemoSchedule.isLunch(s)
+                        ? _scheduleMenu(s, 'edit')
+                        : s.id == 0 && r != null
                         ? _routeRoutine(r, at: s.startTime)
                         : widget.onOpenScheduleRoutes?.call(s)
                     : null,

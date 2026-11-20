@@ -8,7 +8,7 @@ const List<TodoItem> mockTodos = [
     title: '이어폰 사기',
     estimatedMinutes: 4,
     requiresTravel: true,
-    placeTypes: ['편의점'],
+    placeTypes: ['편의점', '다이소', '마트'],
     important: true,
   ),
   TodoItem(
@@ -16,7 +16,7 @@ const List<TodoItem> mockTodos = [
     title: '커피 사기',
     estimatedMinutes: 5,
     requiresTravel: true,
-    placeTypes: ['카페'],
+    placeTypes: ['카페', '편의점'],
   ),
   TodoItem(
     id: 3,
