@@ -877,7 +877,8 @@ def _segment_world(monkeypatch, world, extra_by_start):
 def test_갈아탈_때_들르는_게_가장_덜_늦으면_환승역에서(client, world, monkeypatch):
     # 출발지에서는 10분 더 걷고, 회기역(환승)에서는 1분, 하차역에서는 5분 더 걸어요
     _segment_world(monkeypatch, world, {(127.0580, 37.5900): 60, (127.0469, 37.5803): 300})
-    setup_user(client, hours=3)
+    # 54분 뒤 도착: 출발까지 30분 안이라 실시간 차 기준이고, 일찍 나갈 여유로 채울 수 없어요
+    setup_user(client, hours=0.9)
     body = plan(client).json()
     stop = body["routes"][0]["todo_stops"][0]
     assert (stop["kind"], stop["leg"]) == ("transfer", 1)
@@ -890,10 +891,45 @@ def test_갈아탈_때_들르는_게_가장_덜_늦으면_환승역에서(client
 
 def test_내려서_들르는_게_가장_덜_늦으면_하차역에서(client, world, monkeypatch):
     _segment_world(monkeypatch, world, {(127.0580, 37.5900): 600, (127.0469, 37.5803): 30})
-    setup_user(client, hours=3)
+    setup_user(client, hours=0.9)
     stop = plan(client).json()["routes"][0]["todo_stops"][0]
     assert (stop["kind"], stop["leg"]) == ("after", 2)
     assert stop["label"] == "청량리역에서 내려서 목적지 가기 전"  # 이미 "역"으로 끝나면 안 붙여요
+
+
+def test_출발까지_여유가_많으면_일찍_나가서_타기_전에_들름(client, world, monkeypatch):
+    """11/20: 08시에 10시 도착(이동 1시간)인데 편의점 10분이 "갈아타기 전"으로 잡혀 3분밖에 안 되던 문제.
+    타기 전에 들르면 그만큼 일찍 나가면 돼서 도착이 늦어지지 않아요."""
+    _segment_world(monkeypatch, world, {(127.0580, 37.5900): 60, (127.0469, 37.5803): 300})
+    setup_user(client, hours=3)
+    body = plan(client).json()
+    assert body["basis"] == "arrive_by"
+    stop = body["routes"][0]["todo_stops"][0]
+    assert (stop["kind"], stop["extra_min"]) == ("before", 0)
+    assert {a["kind"] for a in stop["alternatives"]} == {"before", "transfer", "after"}
+    assert body["todos"][0]["status"] == "포함"
+
+
+def test_지금_출발이면_일찍_나갈_수_없어서_덜_늦는_구간(client, world, monkeypatch):
+    """도착 희망 시간 없이 지금 출발이면 예전처럼 도착이 가장 덜 늦어지는 곳(갈아타기 전)이에요."""
+    _segment_world(monkeypatch, world, {(127.0580, 37.5900): 60, (127.0469, 37.5803): 300})
+    setup_user(client, hours=3)
+    todo_id = client.get("/api/todos", params={"user_id": "u1"}).json()[0]["id"]
+    body = plan(client, todo_ids=[todo_id], destination={"name": "청량리역", "lat": 37.58029, "lng": 127.04691}).json()
+    assert body["basis"] == "now"
+    assert body["routes"][0]["todo_stops"][0]["kind"] == "transfer"
+
+
+def test_일찍_나갈_여유는_거꾸로_계산한_경로에서만():
+    now = datetime(2026, 11, 21, 8, 0, tzinfo=planner.KST)
+    option = planner.RouteOption(timing=None, card={}, places={}, leg={})
+    option.times = {"basis": "arrive_by", "depart_at": now + timedelta(minutes=55)}
+    assert planner._leave_early_seconds(option, now) == 55 * 60
+    for basis in ("realtime", "now", "scheduled"):
+        option.times = {"basis": basis, "depart_at": now + timedelta(minutes=55)}
+        assert planner._leave_early_seconds(option, now) == 0
+    option.times = {"basis": "arrive_by", "depart_at": now - timedelta(minutes=5)}  # 출발 시각이 지났으면 0
+    assert planner._leave_early_seconds(option, now) == 0
 
 
 def test_시간이_부족하면_고른_구간에서도_제외하거나_대기(client, world, monkeypatch):

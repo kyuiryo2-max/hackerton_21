@@ -234,6 +234,18 @@ def _set_times(option: RouteOption, now: datetime, arrive_by: datetime | None) -
                     "arrive_at": depart + timedelta(seconds=result.total_seconds)}
 
 
+def _leave_early_seconds(option: RouteOption, now: datetime) -> int:
+    """도착 희망 시각에서 거꾸로 계산한 경로에서, 지금부터 "늦어도 출발" 시각까지 남은 초.
+
+    실시간 차가 있으면(realtime) 탈 차까지의 여유가 이미 경유 계산에 들어가 있고,
+    지금 출발(now)·출발 시각 지정(scheduled)은 더 일찍 나갈 수 없어서 0이에요.
+    """
+    times = option.times or {}
+    if times.get("basis") != "arrive_by" or times.get("depart_at") is None:
+        return 0
+    return max(int((times["depart_at"] - now).total_seconds()), 0)
+
+
 def _stop_buffer(option: RouteOption) -> int:
     from app.services.stopover import buffer_seconds
     return buffer_seconds(option.timing)
@@ -648,11 +660,15 @@ def _first_ride_label(option: "RouteOption") -> str:
     return f"{name} 타기 전" if name else "출발해서 타기 전"
 
 
-def _choose_segments(option: "RouteOption", todos: list[dict], deadline: int) -> None:
+def _choose_segments(option: "RouteOption", todos: list[dict], deadline: int, leave_early_seconds: int = 0) -> None:
     """할 일마다 구간 후보를 비교해 도착이 가장 덜 늦어지는 곳을 option.stops에 넣어요.
 
     버스 타기 전이 아닌 곳을 고르면 포함·제외 판정을 그 구간 기준으로 바꿔요
     (앞 계산은 버스 타기 전만 알아서요). 판정: 바로 갈 때 총 시간 + 늘어나는 시간이 도착 희망까지 남은 시간 안이면 포함.
+
+    leave_early_seconds: 지금부터 "늦어도 출발" 시각까지 남은 여유. 타기 전에 들르면 이만큼은 일찍 나가서
+    채울 수 있어서 도착이 늦어지지 않아요 (11/20: 08시에 10시 도착·이동 1시간인데 편의점 10분이
+    "갈아타기 전"으로 잡혀 3분밖에 안 되던 문제). 갈아탈 때·내린 뒤 들르기는 일찍 나가도 도착이 그대로 늦어져서 빼지 않아요.
     """
     direct = decide_stops(option.timing, [], deadline)
     decisions = {d.todo_id: d for d in option.result.decisions}
@@ -662,8 +678,9 @@ def _choose_segments(option: "RouteOption", todos: list[dict], deadline: int) ->
         if before:
             alone = decide_stops(option.timing, [StopCandidate(todo["id"], "필수", before["round_trip_walk_seconds"],
                                                                 before["stay_seconds"])], NOW_TRIP_DEADLINE_SECONDS)
+            later_by = max(alone.total_seconds - direct.total_seconds, 0)
             segments.append({"kind": SEGMENT_BEFORE, "leg": 0, "label": _first_ride_label(option), "place": before,
-                             "extra_seconds": max(alone.total_seconds - direct.total_seconds, 0)})
+                             "extra_seconds": max(later_by - leave_early_seconds, 0)})
         segments += option.later.get(todo["id"], [])
         if not segments:
             continue
@@ -897,7 +914,7 @@ def plan_live(user_id: str, origin: kakao.Coord, schedule_id: int | None = None,
         if scheduled:
             option.times["basis"] = "scheduled"
         option.result = _without_stop_times(_decide(option, todos, deadline), direct)
-        _choose_segments(option, todos, deadline)
+        _choose_segments(option, todos, deadline, _leave_early_seconds(option, now))
     sort_options(options, todos)
     # 이동 중 질문(#59)이 이 경로로 답할 수 있게 1위 경로를 기억해요 (현재 좌표는 넣지 않아요)
     best = options[0]
