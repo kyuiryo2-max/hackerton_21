@@ -6,7 +6,8 @@ import '../models/todo_item.dart';
 
 class TodoStorageService {
   static String get _key => RuntimeMode.instance.isDemo
-      ? 'sync_ro_todos_v1' : 'sync_ro_todos_v2_${RuntimeMode.instance.storageNamespace}';
+      // 시연 할 일을 서울역 시나리오로 바꿔서(11/21) 예전 시연 할 일이 저장된 기기도 새 목록으로 시작해요
+      ? 'sync_ro_todos_demo_v2' :'sync_ro_todos_v2_${RuntimeMode.instance.storageNamespace}';
 
   Future<List<TodoItem>?> loadTodos() async {
     final prefs = await SharedPreferences.getInstance();

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:latlong2/latlong.dart';
 
+import 'demo_plan_fixture.dart';
 import 'demo_route_options.dart';
 
 /// 발표 시연 전용 경로: 서울역 → 고려대학교.
@@ -109,8 +110,8 @@ class PresentationRoutes {
 
 /// 시연 화면이 쓰는 고정 계획. 실제 조회 결과가 아니라 발표용 스냅샷입니다.
 class PresentationDemoData {
-  static const String nowIso = '2026-11-21T08:32:00+09:00';
-  static const String arriveByIso = '2026-11-21T09:20:00+09:00';
+  static const String nowIso = '2026-11-22T08:00:00+09:00';
+  static const String arriveByIso = '2026-11-22T09:20:00+09:00';
 
   static Map<String, dynamic> _copy(dynamic source) =>
       Map<String, dynamic>.from(jsonDecode(jsonEncode(source)) as Map);
@@ -119,17 +120,17 @@ class PresentationDemoData {
     'now': nowIso,
     'location': {
       'name': '서울역',
-      'lng': 126.9707,
-      'lat': 37.5547,
+      'lng': 126.9716234,
+      'lat': 37.55489578,
     },
     'schedule': {
       'destination': {
-        'name': '고려대학교',
-        'lng': 127.0320,
-        'lat': 37.5887,
+        'name': '고려대학교 서울캠퍼스',
+        'lng': 127.03231892661324,
+        'lat': 37.589526761187834,
       },
       'arrive_by': arriveByIso,
-      'prep_minutes': 30,
+      'prep_minutes': 15,
     },
     'stop': {
       'ars_id': '02006',
@@ -166,217 +167,7 @@ class PresentationDemoData {
     },
   };
 
-  static final Map<String, dynamic> _plan = {
-    'now': nowIso,
-    'origin': {
-      'name': '서울역',
-      'lng': 126.9707,
-      'lat': 37.5547,
-    },
-    'basis': 'realtime',
-    'schedule': {
-      'destination': {
-        'name': '고려대학교',
-        'lng': 127.0320,
-        'lat': 37.5887,
-      },
-      'arrive_by': arriveByIso,
-      'prep_minutes': 30,
-    },
-    'depart_at': '2026-11-21T08:32:00+09:00',
-    'board_at': '2026-11-21T08:41:00+09:00',
-    'arrive_at': '2026-11-21T09:12:00+09:00',
-    'routes': [
-      _route(
-        rank: 1,
-        type: 'SUBWAY',
-        name: '1호선·6호선',
-        guidance: '1호선 (서울역 > 동묘앞) → 6호선 (동묘앞 > 고려대(종암))',
-        totalMin: 40,
-        waitMin: 9,
-        movingMin: 28,
-        lastWalkMin: 3,
-        transfers: 1,
-        fare: 1550,
-        stops: ['서울역', '동묘앞', '고려대(종암)'],
-        maxStayMin: 4,
-        rideName: '1호선·6호선',
-        nextVehiclesMin: [9, 18],
-        boardInMin: 9,
-        departAt: '2026-11-21T08:32:00+09:00',
-        boardAt: '2026-11-21T08:41:00+09:00',
-        arriveAt: '2026-11-21T09:12:00+09:00',
-      ),
-      _route(
-        rank: 2,
-        type: 'SUBWAY',
-        name: '4호선·6호선',
-        guidance: '4호선 (서울역 > 삼각지) → 6호선 (삼각지 > 고려대(종암))',
-        totalMin: 43,
-        waitMin: 10,
-        movingMin: 30,
-        lastWalkMin: 3,
-        transfers: 1,
-        fare: 1550,
-        stops: ['서울역', '삼각지', '고려대(종암)'],
-        maxStayMin: 5,
-        rideName: '4호선·6호선',
-        nextVehiclesMin: [10, 19],
-        boardInMin: 10,
-        departAt: '2026-11-21T08:33:00+09:00',
-        boardAt: '2026-11-21T08:42:00+09:00',
-        arriveAt: '2026-11-21T09:15:00+09:00',
-      ),
-      _route(
-        rank: 3,
-        type: 'BUS',
-        name: '173',
-        guidance: '간선 173 (서울역버스환승센터 > 고려대학교앞)',
-        totalMin: 45,
-        waitMin: 5,
-        movingMin: 37,
-        lastWalkMin: 3,
-        transfers: 0,
-        fare: 1500,
-        stops: ['서울역버스환승센터', '종로2가', '동묘앞', '고려대학교앞'],
-        maxStayMin: 3,
-        rideName: '173번',
-        nextVehiclesMin: [5, 13],
-        boardInMin: 5,
-        departAt: '2026-11-21T08:35:00+09:00',
-        boardAt: '2026-11-21T08:37:00+09:00',
-        arriveAt: '2026-11-21T09:17:00+09:00',
-      ),
-    ],
-    'todos': [
-      {
-        'todo_id': 1,
-        'stay_min': 4,
-        'text': '이어폰 사기',
-        'importance': '필수',
-        'status': '포함',
-        'place': {
-          'place_type': '편의점',
-          'name': 'GS25 S서울역1호점',
-          'address': '서울 용산구 청파로 378 1층',
-          'lng': 126.96963409,
-          'lat': 37.55356136,
-        },
-        'detour_min': 2,
-        'reason': '',
-        'candidates': [
-          {
-            'place_type': '편의점',
-            'name': 'GS25 S서울역1호점',
-            'address': '서울 용산구 청파로 378 1층',
-            'lng': 126.96963409,
-            'lat': 37.55356136,
-            'detour_min': 2,
-          },
-        ],
-      },
-      {
-        'todo_id': 3,
-        'stay_min': 5,
-        'text': '다이소 들르기',
-        'importance': '필수',
-        'status': '대기',
-        'place': {
-          'place_type': '다이소',
-          'name': '다이소 서울역점',
-          'address': '서울 용산구 청파로 378 1층',
-          'lng': 126.9720059,
-          'lat': 37.55420345,
-        },
-        'detour_min': 6,
-        'reason': '시간이 부족해요',
-        'options': ['이번엔 빼기', '늦더라도 들르기'],
-        'candidates': [
-          {
-            'place_type': '다이소',
-            'name': '다이소 서울역점',
-            'address': '서울 용산구 청파로 378 1층',
-            'lng': 126.9720059,
-            'lat': 37.55420345,
-            'detour_min': 6,
-          },
-        ],
-      },
-      {
-        'todo_id': 2,
-        'stay_min': 5,
-        'text': '커피 사기',
-        'importance': '선택',
-        'status': '제외',
-        'place': {
-          'place_type': '카페',
-          'name': '스타벅스 서울역사점',
-          'address': '서울 용산구 청파로 378 2층 101호',
-          'lng': 126.97202401,
-          'lat': 37.55421427,
-        },
-        'detour_min': 4,
-        'reason': '시간이 부족해요',
-        'candidates': [
-          {
-            'place_type': '카페',
-            'name': '스타벅스 서울역사점',
-            'address': '서울 용산구 청파로 378 2층 101호',
-            'lng': 126.97202401,
-            'lat': 37.55421427,
-            'detour_min': 4,
-          },
-        ],
-      },
-    ],
-    'explanation': '1호선·6호선을 타면 이어폰 사기까지 하고 9시 12분에 도착해요.',
-  };
-
-  static Map<String, dynamic> _route({
-    required int rank,
-    required String type,
-    required String name,
-    required String guidance,
-    required int totalMin,
-    required int waitMin,
-    required int movingMin,
-    required int lastWalkMin,
-    required int transfers,
-    required int fare,
-    required List<String> stops,
-    required int maxStayMin,
-    required String rideName,
-    required List<int> nextVehiclesMin,
-    required int boardInMin,
-    required String departAt,
-    required String boardAt,
-    required String arriveAt,
-  }) {
-    return {
-      'rank': rank,
-      'type': type,
-      'name': name,
-      'guidance': guidance,
-      'basis': 'realtime',
-      'total_min': totalMin,
-      'first_walk_min': 0,
-      'wait_min': waitMin,
-      'moving_min': movingMin,
-      'last_walk_min': lastWalkMin,
-      'transfers': transfers,
-      'fare': fare,
-      'stops': stops,
-      'max_stay_min': maxStayMin,
-      'has_realtime': true,
-      'ride_name': rideName,
-      'next_vehicles_min': nextVehiclesMin,
-      'board_in_min': boardInMin,
-      'depart_at': departAt,
-      'board_at': boardAt,
-      'arrive_at': arriveAt,
-    };
-  }
-
   static Map<String, dynamic> get context => _copy(_context);
-  static Map<String, dynamic> get plan => _copy(_plan);
+  /// 경로·할 일 계획은 실제 모드에서 받은 응답을 그대로 써요 (11/21, [DemoPlanFixture]).
+  static Map<String, dynamic> get plan => DemoPlanFixture.plan;
 }

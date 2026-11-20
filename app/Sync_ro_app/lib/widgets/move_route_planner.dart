@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../config/app_theme.dart';
 import '../data/demo_route_style.dart';
+import '../data/demo_plan_fixture.dart';
 import '../models/departure_overview.dart';
 import '../models/route_candidate.dart';
 import '../providers/active_route_controller.dart';
@@ -935,7 +936,11 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
             // 질문하는 순간의 단계와 시각을 함께 보내요. 서버는 이 값으로 남은 시간·다음 차·늦어짐을 답해요
             final now = _tripClock;
             final step = trip.steps[_tripIndex(trip)];
-            final res = await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
+            // 시연 모드 "커피 사도 돼?"는 실제 모드에서 받은 답을 그대로 보여 줘요 (11/21, 발표 중 답이 바뀌지 않게)
+            final demoVehicle = widget.isDemo ? _demoVehicleAnswer(text, now) : null;
+            final res = widget.isDemo && text.contains('커피')
+                ? _demoCoffeeAnswer()
+                : demoVehicle ?? await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
             await _afterTodoChange(res);
             return _tripReply(res);
           },
@@ -946,6 +951,45 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
 
   // ---------- 이동 중 AI 답변 버튼 (11/14) ----------
   // AI 탭을 없애서, AI 탭에 있던 버튼(#48 할 일·일정 초안, #50 경유지 추가)을 이동 중 팝업으로 옮겼어요.
+
+  /// 시연 모드 "버스 얼마 남았어?"·"다음 지하철 언제 와?" (11/21).
+  /// 서버의 예전 시연 데이터 대신 시연 계획(1번 경로)의 탑승 시각으로 답해요. 시각은 이동 중 팝업의 시계 기준이에요.
+  static ServerAskResponse? _demoVehicleAnswer(String text, DateTime now) {
+    final t = text.replaceAll(' ', '');
+    const keys = ['버스', '지하철', '호선', '다음차', '언제와', '남았', '몇분', '도착'];
+    if (!keys.any(t.contains)) return null;
+    final first = DateTime.parse(DemoPlanFixture.firstBoardIso);
+    final transfer = DateTime.parse(DemoPlanFixture.transferBoardIso);
+    final arrive = DateTime.parse(DemoPlanFixture.arriveIso);
+    int left(DateTime at) => math.max(0, (at.difference(now).inSeconds / 60).ceil());
+    final busNote = t.contains('버스') ? '이 경로는 버스 대신 지하철로 가요. ' : '';
+    final String answer;
+    if (now.isBefore(first)) {
+      answer = '${busNote}1호선은 서울역에서 ${KstTime.hm(first)}에 타요. ${left(first)}분 남았어요. '
+          '동묘앞에서 ${KstTime.hm(transfer)}에 6호선으로 갈아타면 ${KstTime.hm(arrive)}에 도착해요.';
+    } else if (now.isBefore(transfer)) {
+      answer = '$busNote동묘앞에서 6호선을 ${KstTime.hm(transfer)}에 타요. ${left(transfer)}분 남았어요. '
+          '${KstTime.hm(arrive)}에 도착해요.';
+    } else {
+      answer = '$busNote${KstTime.hm(arrive)}에 도착해요. ${left(arrive)}분 남았어요.';
+    }
+    return ServerAskResponse(
+      answer: answer,
+      result: {'intent': 'next_vehicle'},
+      intents: const [{'intent': 'next_vehicle'}],
+      engine: 'demo',
+    );
+  }
+
+  static ServerAskResponse _demoCoffeeAnswer() {
+    final d = DemoPlanFixture.coffeeAsk;
+    return ServerAskResponse(
+      answer: '${d['answer']}',
+      result: d['result'] is Map ? Map<String, dynamic>.from(d['result'] as Map) : null,
+      intents: [for (final i in (d['intents'] as List? ?? const [])) if (i is Map) Map<String, dynamic>.from(i)],
+      engine: d['engine']?.toString(),
+    );
+  }
 
   TripAskReply _tripReply(ServerAskResponse res) {
     if (res.needsConfirm) return TripAskReply(res.question ?? res.answer);
@@ -1143,6 +1187,9 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
     // 순위(id)로 먼저 찾아요. 이름으로 먼저 찾으면 "2호선" 경로가 두 개일 때 2번 카드가 1번 경로 값을 써요 (11/13)
     for (final r in plan.routes) {
       if (route.id == 'server_${r['rank']}') return r;
+      // 시연 경로 카드 id는 offline_demo_N이고 이름("1호선 → 6호선")이 계획 이름("1호선·6호선")과 달라요 (11/21).
+      // 순위로 맞추지 않으면 1·2번 경로에 계획이 안 붙어서 할 일이 전부 "시간 부족"으로 숨겨졌어요.
+      if (route.id == 'offline_demo_${r['rank']}') return r;
     }
     for (final r in plan.routes) {
       final name = '${r['name'] ?? ''}'.trim();

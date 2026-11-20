@@ -1,5 +1,6 @@
 import '../config/app_theme.dart';
 import '../config/runtime_mode.dart';
+import '../data/demo_schedule.dart';
 import '../providers/active_route_controller.dart';
 import '../services/home_widget_bridge.dart';
 import 'package:flutter/material.dart';
@@ -237,6 +238,11 @@ class _MainScreenState extends State<MainScreen> {
       );
 
   void _openScheduleRoutes(Schedule schedule) {
+    // 시연 일정은 일정 목록에 없는 표시용이라, 이동 탭의 시연 계획(서울역 → 고려대학교)을 그대로 보여 줘요 (11/21)
+    if (DemoSchedule.isDemo(schedule)) {
+      _onDestinationSelected(1);
+      return;
+    }
     // Force a refresh even when the same schedule is selected twice.
     _requestedSchedule.value = null;
     _requestedSchedule.value = schedule;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/app_theme.dart';
 import '../config/runtime_mode.dart';
+import '../data/demo_schedule.dart';
 import '../models/schedule.dart';
 import '../models/todo_item.dart';
 import '../providers/schedule_controller.dart';
@@ -548,6 +549,12 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
 
     // 이번 주 목록 = 서버 일정 + 반복 일정의 이번 주 회차 (시간표와 같은 내용)
     final items = <(Schedule, Routine?)>[for (final s in serverWeek) (s, _routineOf(s))];
+    // 시연 모드: 홈·이동 탭과 같은 발표 시연 일정을 목록과 시간표에 같이 보여 줘요 (11/21)
+    if (RuntimeMode.instance.isDemo) {
+      for (final demo in DemoSchedule.all) {
+        if (!demo.startTime.isBefore(_weekStart) && demo.startTime.isBefore(weekEnd)) items.add((demo, null));
+      }
+    }
     for (final r in store.routines) {
       if (r.isTodo) continue;
       for (final wd in r.weekdays) {
@@ -659,7 +666,10 @@ class _PlannerScreenState extends State<PlannerScreen> with AutomaticKeepAliveCl
                 schedule: s,
                 repeating: r != null,
                 onRoute: !s.isCompleted && s.startTime.isAfter(_now)
-                    ? () => s.id == 0 && r != null
+                    // 시연 점심 일정은 경로 대신 수정 화면에서 AI 장소 추천을 보여 줘요 (11/21)
+                    ? () => DemoSchedule.isLunch(s)
+                        ? _scheduleMenu(s, 'edit')
+                        : s.id == 0 && r != null
                         ? _routeRoutine(r, at: s.startTime)
                         : widget.onOpenScheduleRoutes?.call(s)
                     : null,
@@ -1541,8 +1551,16 @@ class _TimetableView extends StatelessWidget {
                                 ? Border.all(color: b.colors.$2, width: 1.2)
                                 : Border(left: BorderSide(color: b.colors.$2, width: 2.5)),
                       ),
+                      // 칸이 짧고 제목이 길면 글자가 칸보다 커져요. ClipRect만으로는 넘침 오류가 나서,
+                      // OverflowBox로 칸 밖까지 그리게 한 뒤 잘라서 보여 줘요 (11/21).
                       child: ClipRect(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        child: OverflowBox(
+                          alignment: Alignment.topLeft,
+                          maxHeight: double.infinity,
+                          child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                           Text(b.routine?.isTodo == true ? '✓ ${b.title}' : b.title,
                               maxLines: 3,
                               overflow: TextOverflow.ellipsis,
@@ -1559,7 +1577,8 @@ class _TimetableView extends StatelessWidget {
                                     fontSize: 9,
                                     height: 1.1,
                                     color: b.schedule != null ? Colors.white70 : b.colors.$2.withValues(alpha: 0.8))),
-                        ]),
+                          ]),
+                        ),
                       ),
                     ),
                   ),

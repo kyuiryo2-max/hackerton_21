@@ -903,24 +903,19 @@ class _ModePill extends StatelessWidget {
 }
 
 /// 홈에서 보여 줄 경유지 하나.
-/// 실제 모드: 이동 탭에서 "이번 이동에 적용한" 할 일이 있을 때만, 고른 경유지로 보여 줘요 (11/13).
-/// 시연 모드: 무대 장면이라 예전처럼 첫 할 일의 가장 오래 머물 수 있는 곳을 바로 보여 줘요.
+/// 이동 탭에서 "이번 이동에 적용한" 할 일이 있을 때만, 고른 경유지로 보여 줘요 (11/13).
+/// 시연 모드도 실제 모드와 같아요 (11/21): 적용 전에는 "추천 출발", 적용하면 "들러서 출발".
 ({StayTask task, StayEval eval})? homeStop(DepartureOverview? o) {
   if (o == null || !o.canPlanStay || o.tasks.isEmpty) return null;
-  var task = o.tasks.first;
-  String? candidateId;
-  if (!o.isDemo) {
-    final id = activeRouteController.appliedTaskId;
-    // 이 일정(목적지 + 도착 시각)에 적용한 할 일일 때만
-    if (id == null || !activeRouteController.appliedFor(ActiveRouteController.tripKey(o.destination, o.arriveBy))) {
-      return null;
-    }
-    // 여러 곳을 고르면 '1+3' (11/14)
-    final match = o.taskFor(id);
-    if (match == null) return null;
-    task = match;
-    candidateId = activeRouteController.appliedCandidateId;
+  final id = activeRouteController.appliedTaskId;
+  // 이 일정(목적지 + 도착 시각)에 적용한 할 일일 때만
+  if (id == null || !activeRouteController.appliedFor(ActiveRouteController.tripKey(o.destination, o.arriveBy))) {
+    return null;
   }
+  // 여러 곳을 고르면 '1+3' (11/14)
+  final task = o.taskFor(id);
+  if (task == null) return null;
+  final candidateId = activeRouteController.appliedCandidateId;
   if (task.candidates.isEmpty) return null;
   final ranked = o.rank(task, delayMinutes: 0, need: task.needMinutes);
   if (ranked.isEmpty) return null;
