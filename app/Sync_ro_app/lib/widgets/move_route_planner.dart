@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../config/app_theme.dart';
 import '../data/demo_route_style.dart';
+import '../data/demo_plan_fixture.dart';
 import '../models/departure_overview.dart';
 import '../models/route_candidate.dart';
 import '../providers/active_route_controller.dart';
@@ -935,7 +936,10 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
             // 질문하는 순간의 단계와 시각을 함께 보내요. 서버는 이 값으로 남은 시간·다음 차·늦어짐을 답해요
             final now = _tripClock;
             final step = trip.steps[_tripIndex(trip)];
-            final res = await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
+            // 시연 모드 "커피 사도 돼?"는 실제 모드에서 받은 답을 그대로 보여 줘요 (11/21, 발표 중 답이 바뀌지 않게)
+            final res = widget.isDemo && text.contains('커피')
+                ? _demoCoffeeAnswer()
+                : await _askService.ask(text, trip: trip.toAskJson(step.phase, now, step.leg));
             await _afterTodoChange(res);
             return _tripReply(res);
           },
@@ -946,6 +950,16 @@ class _MoveRoutePlannerState extends State<MoveRoutePlanner> {
 
   // ---------- 이동 중 AI 답변 버튼 (11/14) ----------
   // AI 탭을 없애서, AI 탭에 있던 버튼(#48 할 일·일정 초안, #50 경유지 추가)을 이동 중 팝업으로 옮겼어요.
+
+  static ServerAskResponse _demoCoffeeAnswer() {
+    final d = DemoPlanFixture.coffeeAsk;
+    return ServerAskResponse(
+      answer: '${d['answer']}',
+      result: d['result'] is Map ? Map<String, dynamic>.from(d['result'] as Map) : null,
+      intents: [for (final i in (d['intents'] as List? ?? const [])) if (i is Map) Map<String, dynamic>.from(i)],
+      engine: d['engine']?.toString(),
+    );
+  }
 
   TripAskReply _tripReply(ServerAskResponse res) {
     if (res.needsConfirm) return TripAskReply(res.question ?? res.answer);

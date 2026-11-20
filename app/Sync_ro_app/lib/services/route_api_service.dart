@@ -1,8 +1,7 @@
 import '../config/api_config.dart';
 import '../models/route_candidate.dart';
 import '../models/route_request.dart';
-import '../data/presentation_demo_data.dart';
-import '../data/demo_route_style.dart';
+import '../data/offline_demo_data.dart';
 import 'server_plan_service.dart';
 import 'server_route_adapter.dart';
 import 'demo_service.dart';
@@ -48,35 +47,12 @@ class RouteApiService {
   /// 이동 탭 시연 비교용 (내장 카카오 샘플 경로)
   List<RouteCandidate> demoRoutes() => _bundledDemoRoutes();
 
+  /// 시연 경로 카드 (11/21): 실제 모드에서 받은 계획([DemoPlanFixture])을 실제 모드와 같은 변환으로 그려요.
+  /// 카드 id가 server_N이라 이동 탭이 계획의 경로·할 일과 순위로 바로 연결해요.
   List<RouteCandidate> _bundledDemoRoutes() {
+    final plan = ServerPlan(OfflineDemoData.plan);
     return [
-      for (var i = 0; i < PresentationRoutes.routes.length; i++)
-        RouteCandidate(
-          id: 'offline_demo_${i + 1}',
-          title: PresentationRoutes.routes[i].label,
-          transferCount: PresentationRoutes.routes[i].transfers,
-          isRecommended: i == 0,
-          totalDurationMinutes: (PresentationRoutes.routes[i].durationSeconds / 60).ceil(),
-          segments: [
-            for (final leg in PresentationRoutes.routes[i].legs)
-              RouteSegment(
-                type: switch (leg.mode) {
-                  'BUS' => RouteSegmentType.bus,
-                  'SUBWAY' => RouteSegmentType.subway,
-                  _ => RouteSegmentType.walking,
-                },
-                description: leg.label,
-                lineName: leg.mode == 'WALKING' ? '도보 환승' : leg.label.split(' (').first,
-                startName: DemoRouteStyle.endpoints(leg).$1,
-                endName: DemoRouteStyle.endpoints(leg).$2,
-                durationMinutes: (leg.seconds / 60).ceil(),
-                geometry: [
-                  for (final p in leg.path)
-                    RoutePoint(latitude: p.latitude, longitude: p.longitude),
-                ],
-              ),
-          ],
-        ),
+      for (var i = 0; i < plan.routes.length; i++) ServerRouteAdapter.fromPlan(plan.routes[i], i),
     ];
   }
 
